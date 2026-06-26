@@ -35,6 +35,32 @@ pub fn process_template(template: &str, context: &HashMap<String, String>) -> St
     result
 }
 
+/// Whether a (already-interpolated) string should be considered true.
+fn is_truthy(s: &str) -> bool {
+    matches!(
+        s.trim().to_ascii_lowercase().as_str(),
+        "true" | "1" | "yes" | "on" | "sim"
+    )
+}
+
+/// Evaluate an `<If>` condition against the context.
+/// With `equals`/`not_equals` it compares strings; otherwise it is a truthy check.
+fn eval_condition(
+    cond: &str,
+    equals: &Option<String>,
+    not_equals: &Option<String>,
+    context: &HashMap<String, String>,
+) -> bool {
+    let value = process_template(cond, context);
+    if let Some(eq) = equals {
+        return value == process_template(eq, context);
+    }
+    if let Some(ne) = not_equals {
+        return value != process_template(ne, context);
+    }
+    is_truthy(&value)
+}
+
 /// Recursively evaluate a UiNode tree, resolving templates and placeholders.
 pub fn evaluate_node(
     node: &UiNode,
@@ -99,7 +125,8 @@ pub fn evaluate_node(
                 clip_circle: *clip_circle,
             }
         }
-        NodeType::Include { .. } | NodeType::Component { .. } | NodeType::Import { .. } | NodeType::ForEach { .. } => {
+        NodeType::Include { .. } | NodeType::Component { .. } | NodeType::Import { .. }
+        | NodeType::ForEach { .. } | NodeType::If { .. } | NodeType::Else => {
             NodeType::Container
         }
     };
@@ -112,44 +139,68 @@ pub fn evaluate_node(
     let background_eval = node.background.as_ref().map(|s| process_template(s, context));
     let border_color_eval = node.border_color.as_ref().map(|s| process_template(s, context));
 
-    // Evaluate children recursively
+    // Evaluate children recursively. ForEach/If/Else/Import are structural:
+    // they are expanded or dropped rather than rendered directly.
     let mut children_eval = Vec::new();
+    // Tracks the result of the immediately preceding `<If>`, so an `<Else>`
+    // can bind to it. Reset by any other (non-Else) node.
+    let mut last_if: Option<bool> = None;
     for child in &node.children {
-        // `<import>` declarations are processed at registration time; drop them here.
-        if let NodeType::Import { .. } = &child.kind {
-            continue;
-        }
-        if let NodeType::ForEach { items, var } = &child.kind {
-            let items_evaluated = process_template(items, context);
-            if let Some(json_str) = context.get(&items_evaluated) {
-                if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    for item in arr {
-                        let mut local_context = context.clone();
-                        match item {
-                            serde_json::Value::Object(obj) => {
-                                for (key, val) in obj {
-                                    let str_val = match val {
-                                        serde_json::Value::String(s) => s,
-                                        other => other.to_string(),
-                                    };
-                                    local_context.insert(format!("{}.{}", var, key), str_val);
+        match &child.kind {
+            // `<import>` declarations are processed at registration time; drop them here.
+            NodeType::Import { .. } => {}
+            NodeType::ForEach { items, var } => {
+                let items_evaluated = process_template(items, context);
+                if let Some(json_str) = context.get(&items_evaluated) {
+                    if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(json_str) {
+                        for item in arr {
+                            let mut local_context = context.clone();
+                            match item {
+                                serde_json::Value::Object(obj) => {
+                                    for (key, val) in obj {
+                                        let str_val = match val {
+                                            serde_json::Value::String(s) => s,
+                                            other => other.to_string(),
+                                        };
+                                        local_context.insert(format!("{}.{}", var, key), str_val);
+                                    }
+                                }
+                                serde_json::Value::String(s) => {
+                                    local_context.insert(var.clone(), s);
+                                }
+                                other => {
+                                    local_context.insert(var.clone(), other.to_string());
                                 }
                             }
-                            serde_json::Value::String(s) => {
-                                local_context.insert(var.clone(), s);
+                            for sub_child in &child.children {
+                                children_eval.push(evaluate_node(sub_child, &local_context, templates)?);
                             }
-                            other => {
-                                local_context.insert(var.clone(), other.to_string());
-                            }
-                        }
-                        for sub_child in &child.children {
-                            children_eval.push(evaluate_node(sub_child, &local_context, templates)?);
                         }
                     }
                 }
+                last_if = None;
             }
-        } else {
-            children_eval.push(evaluate_node(child, context, templates)?);
+            NodeType::If { cond, equals, not_equals } => {
+                let truthy = eval_condition(cond, equals, not_equals, context);
+                if truthy {
+                    for sub_child in &child.children {
+                        children_eval.push(evaluate_node(sub_child, context, templates)?);
+                    }
+                }
+                last_if = Some(truthy);
+            }
+            NodeType::Else => {
+                if last_if == Some(false) {
+                    for sub_child in &child.children {
+                        children_eval.push(evaluate_node(sub_child, context, templates)?);
+                    }
+                }
+                last_if = None;
+            }
+            _ => {
+                children_eval.push(evaluate_node(child, context, templates)?);
+                last_if = None;
+            }
         }
     }
 

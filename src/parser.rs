@@ -51,6 +51,16 @@ pub enum NodeType {
         items: String,
         var: String,
     },
+    /// Conditionally renders its children, e.g.
+    /// `<If cond="{logado}">...</If>` (truthy) or
+    /// `<If cond="{status}" equals="active">...</If>` (comparison).
+    If {
+        cond: String,
+        equals: Option<String>,
+        not_equals: Option<String>,
+    },
+    /// Renders its children when the immediately preceding `<If>` was false.
+    Else,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -165,6 +175,13 @@ impl UiNode {
                 let var = Self::get_attr(&node, &["var", "variavel"]).unwrap_or_default();
                 NodeType::ForEach { items, var }
             }
+            "If" | "if" | "Se" | "se" => {
+                let cond = Self::get_attr(&node, &["cond", "condition", "when", "quando", "condicao"]).unwrap_or_default();
+                let equals = Self::get_attr(&node, &["equals", "eq", "igual_a"]);
+                let not_equals = Self::get_attr(&node, &["notEquals", "not_equals", "ne", "diferente_de"]);
+                NodeType::If { cond, equals, not_equals }
+            }
+            "Else" | "else" | "Senao" | "senao" => NodeType::Else,
             _ => {
                 // Any unknown tag is treated as a reference to another component
                 // by its own name (e.g. <PerfilCard nome="..." />).

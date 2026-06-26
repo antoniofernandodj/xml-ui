@@ -1,0 +1,40 @@
+<Container
+    padding="40"
+    width="fill"
+    height="fill"
+    background="#11111B"
+    alignX="Center"
+    alignY="Center"
+>
+    <Column spacing="20" align="Center">
+        <Text
+            content="Demonstração de If / Else"
+            size="26"
+            bold="true"
+            color="#F5E0DC"
+        />
+
+        <!-- Checagem truthy: renderiza só quando {logado} for verdadeiro -->
+        <If cond="{logado}">
+            <Column spacing="10" align="Center">
+                <Text content="Bem-vindo de volta, {usuario}!" size="18" color="#A6E3A1" />
+                <Button text="Sair" onClick="logout" color="#BF616A" width="200" padding="10" />
+            </Column>
+        </If>
+        <Else>
+            <Column spacing="10" align="Center">
+                <Text content="Você não está conectado." size="18" color="#A6ADC8" />
+                <Button text="Entrar" onClick="login" color="#A3BE8C" width="200" padding="10" />
+            </Column>
+        </Else>
+
+        <!-- Comparação explícita -->
+        <If cond="{logado}" equals="false">
+            <Text
+                content="(dica: clique em Entrar para ver o conteúdo)"
+                size="12"
+                color="#6C7086"
+            />
+        </If>
+    </Column>
+</Container>

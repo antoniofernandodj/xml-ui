@@ -120,6 +120,64 @@ fn test_includes() {
 }
 
 #[test]
+fn test_if_else() {
+    let mut motor = UiEngine::new();
+
+    std::fs::create_dir_all("templates").ok();
+    let path = "templates/test_if.xml";
+    std::fs::write(
+        path,
+        r##"
+        <Column>
+            <If cond="{logado}">
+                <Text content="Olá, {usuario}" />
+            </If>
+            <Else>
+                <Text content="Entre, por favor" />
+            </Else>
+            <If cond="{papel}" equals="admin">
+                <Text content="painel admin" />
+            </If>
+        </Column>
+        "##
+    ).unwrap();
+
+    motor.register_component("cond", path).unwrap();
+
+    // Estado inicial: deslogado, papel comum.
+    motor.define_data("logado", "false");
+    motor.define_data("usuario", "Ana");
+    motor.define_data("papel", "user");
+
+    let ev = motor.evaluated_templates.get("cond").unwrap();
+    assert_eq!(ev.children.len(), 1, "só o ramo Else deve aparecer");
+    if let NodeType::Text { content, .. } = &ev.children[0].kind {
+        assert_eq!(content, "Entre, por favor");
+    } else {
+        panic!("esperava o Text do Else");
+    }
+
+    // Loga como admin: ramo If + comparação equals=admin.
+    motor.define_data("logado", "true");
+    motor.define_data("papel", "admin");
+
+    let ev = motor.evaluated_templates.get("cond").unwrap();
+    assert_eq!(ev.children.len(), 2, "ramo If verdadeiro + bloco admin");
+    if let NodeType::Text { content, .. } = &ev.children[0].kind {
+        assert_eq!(content, "Olá, Ana");
+    } else {
+        panic!("esperava o Text do If");
+    }
+    if let NodeType::Text { content, .. } = &ev.children[1].kind {
+        assert_eq!(content, "painel admin");
+    } else {
+        panic!("esperava o Text do bloco admin");
+    }
+
+    std::fs::remove_file(path).ok();
+}
+
+#[test]
 fn test_import_recursivo() {
     let mut motor = UiEngine::new();
 

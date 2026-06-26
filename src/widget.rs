@@ -310,6 +310,10 @@ pub fn render_node<'a>(
             // Import declarations are stripped during evaluation; render nothing.
             column![].into()
         }
+        NodeType::If { .. } | NodeType::Else => {
+            // If/Else are expanded during evaluation; nothing to render directly.
+            column![].into()
+        }
     };
 
     // Wrap elements other than Container in a Container if background/borders are specified
