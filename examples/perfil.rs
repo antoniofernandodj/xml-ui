@@ -1,4 +1,4 @@
-use xml_ui::{UiEngine, EngineMessage, Component, Context, Template};
+use xml_ui::{UiEngine, EngineMessage, Component, Context, ContextVar, Template};
 use iced::{Element, Task, Color, widget::text};
 use std::time::Duration;
 
@@ -26,10 +26,19 @@ impl Component for Perfil {
     }
 
     fn init(&mut self, ctx: &mut Context) {
-        ctx.set("user_name", "Clara Silva");
-        ctx.set("user_role", "Engenheira de Software Senior");
-        ctx.set("texto_botao", "Seguir");
-        ctx.set("btn_color", "#313244"); // Sleek base button color
+        let user_name =
+            ContextVar::new("user_name", "Clara Silva");
+        let user_role =
+            ContextVar::new("user_role", "Engenheira de Software Senior");
+        let texto_botao =
+            ContextVar::new("texto_botao", "Seguir");
+        let btn_color =
+            ContextVar::new("btn_color", "#313244"); // Sleek base button color
+
+        ctx.set_var(&user_name);
+        ctx.set_var(&user_role);
+        ctx.set_var(&texto_botao);
+        ctx.set_var(&btn_color);
     }
 
     fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {

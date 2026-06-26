@@ -4,9 +4,13 @@ pub mod widget;
 pub mod component;
 
 pub use parser::{UiNode, NodeType};
-pub use eval::{evaluate_node, process_template};
+pub use eval::{evaluate_node, process_template, strip_script};
 pub use widget::{render_node, EngineMessage};
-pub use component::{Component, Context, Nav, Template};
+pub use component::{Component, Context, ContextVar, Nav, Template};
+
+/// Derives `impl Component` from a struct plus the `<script>` block of an XML
+/// template. See the `contador_macro` example.
+pub use xml_ui_macros::component;
 
 use std::collections::HashMap;
 use std::time::{SystemTime, Duration};
@@ -121,7 +125,9 @@ impl UiEngine {
             Template::Inline(s) => s,
         };
 
-        let ast = UiNode::parse_xml(&xml)
+        // Strip any `<script>` block (behavior is compiled in by `#[component]`).
+        let (markup, _script) = eval::strip_script(&xml);
+        let ast = UiNode::parse_xml(&markup)
             .map_err(|e| format!("Failed to parse XML for component '{}': {}", name, e))?;
         self.parsed_templates.insert(name.clone(), ast.clone());
         self.load_imports(&ast)?;
@@ -208,7 +214,8 @@ impl UiEngine {
         let xml_content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read XML file at '{}': {}", path, e))?;
 
-        let ast = UiNode::parse_xml(&xml_content)
+        let (markup, _script) = eval::strip_script(&xml_content);
+        let ast = UiNode::parse_xml(&markup)
             .map_err(|e| format!("Failed to parse XML for component '{}': {}", name, e))?;
 
         let mod_time = std::fs::metadata(path)
@@ -289,7 +296,8 @@ impl UiEngine {
                     if last_modified.map_or(true, |&last| modified > last) {
                         // File changed, reload it
                         if let Ok(xml_content) = std::fs::read_to_string(path) {
-                            if let Ok(new_ast) = UiNode::parse_xml(&xml_content) {
+                            let (markup, _script) = eval::strip_script(&xml_content);
+                            if let Ok(new_ast) = UiNode::parse_xml(&markup) {
                                 updates.push((name.clone(), new_ast, modified));
                                 reloaded.push(name.clone());
                             }

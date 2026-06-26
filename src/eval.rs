@@ -1,6 +1,33 @@
 use std::collections::HashMap;
 use crate::parser::{UiNode, NodeType};
 
+/// Splits a `<script>...</script>` block out of an XML document, returning the
+/// markup with the block removed and the script body (if any).
+///
+/// The script is stripped *before* XML parsing, so it may sit as a sibling of
+/// the root element (it would otherwise make the document multi-rooted). The
+/// engine ignores the script at runtime; it is consumed at compile time by the
+/// `#[component]` macro to generate behavior.
+pub fn strip_script(xml: &str) -> (String, Option<String>) {
+    let lower = xml.to_ascii_lowercase();
+    if let Some(open_start) = lower.find("<script") {
+        // Find the end of the opening tag (supports `<script>` and `<script ...>`).
+        if let Some(gt_rel) = lower[open_start..].find('>') {
+            let body_start = open_start + gt_rel + 1;
+            if let Some(close_rel) = lower[body_start..].find("</script>") {
+                let body_end = body_start + close_rel;
+                let close_end = body_end + "</script>".len();
+                let script = xml[body_start..body_end].to_string();
+                let mut markup = String::with_capacity(xml.len());
+                markup.push_str(&xml[..open_start]);
+                markup.push_str(&xml[close_end..]);
+                return (markup, Some(script));
+            }
+        }
+    }
+    (xml.to_string(), None)
+}
+
 /// Process string template by replacing `{key}` placeholders with values from context
 pub fn process_template(template: &str, context: &HashMap<String, String>) -> String {
     let mut result = String::new();

@@ -1,0 +1,43 @@
+<Container
+    padding="20"
+    alignX="Center"
+    alignY="Center"
+    width="fill"
+    height="fill"
+    background="#2E3440"
+>
+    <Column spacing="20" align="Center">
+        <Text
+            content="Valor do Contador: {contador}"
+            size="28"
+            bold="true"
+            color="#ECEFF4"
+        />
+        <Row spacing="15" align="Center">
+            <Button
+                text="Diminuir"
+                onClick="decrementar"
+                color="#BF616A"
+                padding="10 20"
+            />
+            <Button
+                text="Aumentar"
+                onClick="incrementar"
+                color="#A3BE8C"
+                padding="10 20"
+            />
+        </Row>
+    </Column>
+</Container>
+
+<script>
+
+fn incrementar(&mut self) {
+    self.contador += 1;
+}
+
+fn decrementar(&mut self) {
+    self.contador -= 1;
+}
+
+</script>

@@ -20,6 +20,31 @@ pub enum Nav {
     Back,
 }
 
+/// Uma variável de contexto nomeada: agrupa a chave e o valor num único valor,
+/// aplicado de uma vez com [`Context::set_var`]. Útil para declarar defaults de
+/// forma legível em vez de repetir a chave string solta.
+pub struct ContextVar {
+    key: String,
+    value: String,
+}
+
+impl ContextVar {
+    /// Cria uma variável com sua chave e valor.
+    pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self { key: key.into(), value: value.into() }
+    }
+
+    /// A chave (nome) da variável.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// O valor da variável.
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
 /// Acesso restrito ao estado do motor entregue ao componente durante
 /// `init`/`update`. Expõe só o necessário (ler/escrever dados e pedir
 /// navegação), evitando o conflito de borrow que existiria ao passar o
@@ -38,6 +63,11 @@ impl<'a> Context<'a> {
     /// Define/atualiza um valor do contexto de estado (visível aos templates).
     pub fn set(&mut self, key: &str, value: impl Into<String>) {
         self.data.insert(key.to_string(), value.into());
+    }
+
+    /// Aplica uma [`ContextVar`] (chave + valor) ao contexto.
+    pub fn set_var(&mut self, var: &ContextVar) {
+        self.data.insert(var.key.clone(), var.value.clone());
     }
 
     /// Pede ao motor para navegar para outra tela após o `update`.
