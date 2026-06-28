@@ -14,7 +14,7 @@
             height="100"
             clip="Circle"
         />
-        
+
         <Column spacing="5" align="Center">
             <Text
                 content="{user_name}"

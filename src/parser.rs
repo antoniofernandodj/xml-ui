@@ -17,7 +17,7 @@ pub enum NodeType {
         on_click: Option<String>,
         /// Destination screen on click (`navigateTo` attribute).
         navigate_to: Option<String>,
-        /// If `true`, goes back to the previous screen (`navigateBack` attribute).
+        /// if `true`, goes back to the previous screen (`navigateBack` attribute).
         navigate_back: bool,
         color: Option<String>,
     },
@@ -52,15 +52,34 @@ pub enum NodeType {
         var: String,
     },
     /// Conditionally renders its children, e.g.
-    /// `<If cond="{logado}">...</If>` (truthy) or
-    /// `<If cond="{status}" equals="active">...</If>` (comparison).
+    /// `<if cond="{logado}">...</if>` (truthy) or
+    /// `<if cond="{status}" equals="active">...</if>` (comparison).
     If {
         cond: String,
         equals: Option<String>,
         not_equals: Option<String>,
     },
-    /// Renders its children when the immediately preceding `<If>` was false.
+    /// Renders its children when the immediately preceding `<if>` was false.
     Else,
+    /// Declares an external resource to load, e.g.
+    /// `<link rel="stylesheet" href="styles/card.iss" />`. `rel` selects the
+    /// kind of resource:
+    /// - `stylesheet` (default): an `.iss` sheet, scoped to the declaring
+    ///   component's subtree (on top of any global sheets);
+    /// - `import`/`component`: another component template (declarative
+    ///   equivalent of `<import>`); `name`/`as` names it (defaults to the file
+    ///   stem);
+    /// - `data`: a JSON file merged into the context under the `name`/`as` key;
+    /// - `theme`: a JSON palette applied as the app's `iced::Theme`.
+    ///
+    /// Processed at registration time and stripped before rendering.
+    Link {
+        rel: String,
+        href: String,
+        /// The `name`/`as` attribute: context key for `data`, component name
+        /// for `import`/`component`.
+        name: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +96,9 @@ pub struct UiNode {
     pub border_radius: Option<f32>,
     pub border_width: Option<f32>,
     pub border_color: Option<String>,
+    /// Space-separated stylesheet classes (`class="card centered"`), resolved
+    /// against the loaded `.iss` stylesheets during evaluation.
+    pub class: Option<String>,
 }
 
 impl UiNode {
@@ -121,6 +143,7 @@ impl UiNode {
         let border_radius = Self::get_attr_f32(&node, &["borderRadius", "border_radius", "border-radius", "raio_borda"]);
         let border_width = Self::get_attr_f32(&node, &["borderWidth", "border_width", "border-width", "largura_borda"]);
         let border_color = Self::get_attr(&node, &["borderColor", "border_color", "border-color", "cor_borda"]);
+        let class = Self::get_attr(&node, &["class", "classe"]);
 
         let kind = match tag {
             "Container" | "container" => NodeType::Container,
@@ -182,6 +205,13 @@ impl UiNode {
                 NodeType::If { cond, equals, not_equals }
             }
             "Else" | "else" | "Senao" | "senao" => NodeType::Else,
+            "link" | "Link" => {
+                let rel = Self::get_attr(&node, &["rel", "tipo"])
+                    .unwrap_or_else(|| "stylesheet".to_string());
+                let href = Self::get_attr(&node, &["href", "src", "from", "caminho"]).unwrap_or_default();
+                let name = Self::get_attr(&node, &["as", "name", "nome"]);
+                NodeType::Link { rel, href, name }
+            }
             _ => {
                 // Any unknown tag is treated as a reference to another component
                 // by its own name (e.g. <PerfilCard nome="..." />).
@@ -218,27 +248,29 @@ impl UiNode {
             border_radius,
             border_width,
             border_color,
+            class,
         })
     }
 
     /// Parse a full XML string into UiNode.
     ///
-    /// A file may declare `<import name="..." from="..." />` at the top level,
-    /// before its actual root element. To allow these sibling declarations the
-    /// content is wrapped in a synthetic root before parsing; the imports are
-    /// then attached to the real root as children (they are stripped before
+    /// A file may declare `<import name="..." from="..." />` or
+    /// `<link rel="stylesheet" href="..." />` at the top level, before its
+    /// actual root element. To allow these sibling declarations the content is
+    /// wrapped in a synthetic root before parsing; the declarations are then
+    /// attached to the real root as children (they are stripped before
     /// rendering, so they have no visual effect but remain discoverable).
     pub fn parse_xml(xml: &str) -> Result<Self, String> {
         let wrapped = format!("<__xmlui_fragment__>{}</__xmlui_fragment__>", xml);
         let doc = roxmltree::Document::parse(&wrapped).map_err(|e| e.to_string())?;
         let fragment = doc.root_element();
 
-        let mut imports = Vec::new();
+        let mut decls = Vec::new();
         let mut root: Option<Self> = None;
         for child in fragment.children() {
             if let Some(node) = Self::from_node(child) {
-                if matches!(node.kind, NodeType::Import { .. }) {
-                    imports.push(node);
+                if matches!(node.kind, NodeType::Import { .. } | NodeType::Link { .. }) {
+                    decls.push(node);
                 } else if root.is_none() {
                     root = Some(node);
                 }
@@ -246,7 +278,7 @@ impl UiNode {
         }
 
         let mut root = root.ok_or_else(|| "No root element found".to_string())?;
-        root.children.extend(imports);
+        root.children.extend(decls);
         Ok(root)
     }
 }

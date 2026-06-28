@@ -17,7 +17,7 @@ Isso causa repetição, dificulta manutenção e mistura layout com aparência.
 Sintaxe CSS-like, simples de parsear e familiar:
 
 ```iss
-# styles/app.iss
+// styles/app.iss
 
 .card {
     background: #2E3440;
@@ -126,7 +126,7 @@ engine.load_stylesheet("styles/app.iss");
 
 ### Fase 1 — Parser `.iss`
 - Criar `src/stylesheet.rs` com `parse_iss()` e structs
-- Suporte a: seletores `.nome`, propriedades `chave: valor;`, comentários `#`
+- Suporte a: seletores `.nome`, propriedades `chave: valor;`, comentários `//`
 
 ### Fase 2 — Integração com `UiNode`
 - Adicionar `class` em `UiNode` e parsear no `parser.rs`

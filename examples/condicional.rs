@@ -2,7 +2,7 @@ use xml_ui::{UiEngine, EngineMessage, Component, Context, Template};
 use iced::{Element, Task};
 use std::time::Duration;
 
-/// Demonstra renderização condicional com `<If>` / `<Else>`.
+/// Demonstra renderização condicional com `<if>` / `<else>`.
 /// O componente encapsula UI + comportamento: o botão alterna `logado`.
 struct Condicional;
 

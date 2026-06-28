@@ -129,15 +129,15 @@ fn test_if_else() {
         path,
         r##"
         <Column>
-            <If cond="{logado}">
+            <if cond="{logado}">
                 <Text content="Olá, {usuario}" />
-            </If>
-            <Else>
+            </if>
+            <else>
                 <Text content="Entre, por favor" />
-            </Else>
-            <If cond="{papel}" equals="admin">
+            </else>
+            <if cond="{papel}" equals="admin">
                 <Text content="painel admin" />
-            </If>
+            </if>
         </Column>
         "##
     ).unwrap();
@@ -150,23 +150,23 @@ fn test_if_else() {
     motor.define_data("papel", "user");
 
     let ev = motor.evaluated_templates.get("cond").unwrap();
-    assert_eq!(ev.children.len(), 1, "só o ramo Else deve aparecer");
+    assert_eq!(ev.children.len(), 1, "só o ramo else deve aparecer");
     if let NodeType::Text { content, .. } = &ev.children[0].kind {
         assert_eq!(content, "Entre, por favor");
     } else {
-        panic!("esperava o Text do Else");
+        panic!("esperava o Text do else");
     }
 
-    // Loga como admin: ramo If + comparação equals=admin.
+    // Loga como admin: ramo if + comparação equals=admin.
     motor.define_data("logado", "true");
     motor.define_data("papel", "admin");
 
     let ev = motor.evaluated_templates.get("cond").unwrap();
-    assert_eq!(ev.children.len(), 2, "ramo If verdadeiro + bloco admin");
+    assert_eq!(ev.children.len(), 2, "ramo if verdadeiro + bloco admin");
     if let NodeType::Text { content, .. } = &ev.children[0].kind {
         assert_eq!(content, "Olá, Ana");
     } else {
-        panic!("esperava o Text do If");
+        panic!("esperava o Text do if");
     }
     if let NodeType::Text { content, .. } = &ev.children[1].kind {
         assert_eq!(content, "painel admin");
@@ -506,4 +506,196 @@ fn test_nested_component_action_routing() {
     // A plain action falls back to the active screen (the parent).
     motor.dispatch(&EngineMessage::XmlClick("parent_act".into())).unwrap();
     assert_eq!(motor.get_data("parent_acted").map(String::as_str), Some("true"));
+}
+
+/// Helper: extract the `color` of an evaluated Text node.
+fn text_color(node: &NodeType) -> Option<String> {
+    if let NodeType::Text { color, .. } = node {
+        color.clone()
+    } else {
+        None
+    }
+}
+
+#[test]
+fn test_link_scoped_stylesheet() {
+    let mut motor = UiEngine::new();
+    std::fs::create_dir_all("templates").ok();
+
+    // Global sheet: applies everywhere.
+    let global_iss = "templates/test_global.iss";
+    std::fs::write(global_iss, ".box { padding: 5; color: #111111; }").unwrap();
+
+    // Scoped sheet: only component A links it. It overrides `.box`'s padding
+    // and adds a `.scoped` class.
+    let scoped_iss = "templates/test_scoped.iss";
+    std::fs::write(scoped_iss, ".box { padding: 9; } .scoped { color: #abcabc; }").unwrap();
+
+    // A links the scoped sheet (as a top-level sibling, before its root, to
+    // exercise the <link> hoisting in parse_xml).
+    let a_path = "templates/test_scoped_a.xml";
+    std::fs::write(
+        a_path,
+        r##"
+        <link rel="stylesheet" href="templates/test_scoped.iss" />
+        <Text class="box scoped" content="A" />
+        "##,
+    ).unwrap();
+
+    // B does not link anything: it only sees the global sheet.
+    let b_path = "templates/test_scoped_b.xml";
+    std::fs::write(b_path, r##"<Text class="box scoped" content="B" />"##).unwrap();
+
+    motor.load_stylesheet(global_iss).unwrap();
+    motor.register_component("a", a_path).unwrap();
+    motor.register_component("b", b_path).unwrap();
+
+    let a = motor.evaluated_templates.get("a").unwrap();
+    let b = motor.evaluated_templates.get("b").unwrap();
+
+    // A: scoped `.box` overrides padding (9 vs global 5); `.scoped` provides color.
+    assert_eq!(a.padding.as_deref(), Some("9"), "scoped class should override global padding");
+    assert_eq!(text_color(&a.kind).as_deref(), Some("#abcabc"), "scoped class color applies in A");
+
+    // B: only the global `.box` applies; `.scoped` is invisible outside A's scope.
+    assert_eq!(b.padding.as_deref(), Some("5"), "B uses global padding");
+    assert_eq!(text_color(&b.kind).as_deref(), Some("#111111"), "B uses global color; scoped class has no effect");
+
+    std::fs::remove_file(global_iss).ok();
+    std::fs::remove_file(scoped_iss).ok();
+    std::fs::remove_file(a_path).ok();
+    std::fs::remove_file(b_path).ok();
+}
+
+#[test]
+fn test_inline_attribute_wins_over_class() {
+    let mut motor = UiEngine::new();
+    std::fs::create_dir_all("templates").ok();
+
+    let iss = "templates/test_inline.iss";
+    std::fs::write(iss, ".tag { color: #aaaaaa; padding: 3; }").unwrap();
+
+    let path = "templates/test_inline.xml";
+    // Inline color overrides the class; padding falls back to the class.
+    std::fs::write(path, r##"<Text class="tag" content="x" color="#ff0000" />"##).unwrap();
+
+    motor.load_stylesheet(iss).unwrap();
+    motor.register_component("inline", path).unwrap();
+
+    let n = motor.evaluated_templates.get("inline").unwrap();
+    assert_eq!(text_color(&n.kind).as_deref(), Some("#ff0000"), "inline color wins");
+    assert_eq!(n.padding.as_deref(), Some("3"), "padding comes from the class");
+
+    std::fs::remove_file(iss).ok();
+    std::fs::remove_file(path).ok();
+}
+
+#[test]
+fn test_link_rel_import() {
+    let mut motor = UiEngine::new();
+    std::fs::create_dir_all("templates").ok();
+
+    let child = "templates/test_li_child.xml";
+    std::fs::write(child, r##"<Text content="child:{x}" />"##).unwrap();
+
+    let parent = "templates/test_li_parent.xml";
+    // Declarative import via <link>; the component is then referenced by name.
+    std::fs::write(
+        parent,
+        r##"
+        <link rel="import" href="templates/test_li_child.xml" as="ChildLink" />
+        <Column>
+            <ChildLink x="42" />
+        </Column>
+        "##,
+    ).unwrap();
+
+    motor.register_component("parent", parent).unwrap();
+
+    // The imported component must be registered and inlined with its prop.
+    assert!(motor.parsed_templates.contains_key("ChildLink"), "import should register the component");
+    let ev = motor.evaluated_templates.get("parent").unwrap();
+    assert_eq!(ev.children.len(), 1);
+    if let NodeType::Text { content, .. } = &ev.children[0].kind {
+        assert_eq!(content, "child:42");
+    } else {
+        panic!("expected the imported Text");
+    }
+
+    std::fs::remove_file(child).ok();
+    std::fs::remove_file(parent).ok();
+}
+
+#[test]
+fn test_link_rel_data() {
+    let mut motor = UiEngine::new();
+    std::fs::create_dir_all("templates").ok();
+
+    let data = "templates/test_data.json";
+    std::fs::write(data, r##"{ "title": "Olá", "users": [ {"name": "Ana"}, {"name": "Bob"} ] }"##).unwrap();
+
+    let tpl = "templates/test_data.xml";
+    std::fs::write(
+        tpl,
+        r##"
+        <link rel="data" href="templates/test_data.json" as="app" />
+        <Column>
+            <Text content="{app.title}" />
+            <ForEach items="app.users" var="u">
+                <Text content="{u.name}" />
+            </ForEach>
+        </Column>
+        "##,
+    ).unwrap();
+
+    motor.register_component("datacomp", tpl).unwrap();
+
+    // Object field flattened to `app.title`.
+    assert_eq!(motor.get_data("app.title").map(String::as_str), Some("Olá"));
+
+    let ev = motor.evaluated_templates.get("datacomp").unwrap();
+    // 1 title + 2 ForEach-expanded users.
+    assert_eq!(ev.children.len(), 3, "title + two users");
+    let names: Vec<String> = ev.children.iter().filter_map(|c| {
+        if let NodeType::Text { content, .. } = &c.kind { Some(content.clone()) } else { None }
+    }).collect();
+    assert_eq!(names, vec!["Olá", "Ana", "Bob"]);
+
+    std::fs::remove_file(data).ok();
+    std::fs::remove_file(tpl).ok();
+}
+
+#[test]
+fn test_link_rel_theme() {
+    let mut motor = UiEngine::new();
+    std::fs::create_dir_all("templates").ok();
+
+    let theme = "templates/test_theme.json";
+    std::fs::write(
+        theme,
+        r##"{ "name": "test", "background": "#102030", "text": "#FFFFFF", "primary": "#A0B0C0", "success": "#00FF00", "danger": "#FF0000" }"##,
+    ).unwrap();
+
+    let tpl = "templates/test_theme.xml";
+    std::fs::write(
+        tpl,
+        r##"
+        <link rel="theme" href="templates/test_theme.json" />
+        <Text content="x" />
+        "##,
+    ).unwrap();
+
+    // Default theme before loading anything is Dark.
+    assert!(motor.custom_theme.is_none());
+
+    motor.register_component("themecomp", tpl).unwrap();
+
+    assert!(motor.custom_theme.is_some(), "theme link should set a custom theme");
+    let bg = motor.theme().palette().background;
+    assert!((bg.r - 16.0 / 255.0).abs() < 1e-6, "background red channel");
+    assert!((bg.g - 32.0 / 255.0).abs() < 1e-6, "background green channel");
+    assert!((bg.b - 48.0 / 255.0).abs() < 1e-6, "background blue channel");
+
+    std::fs::remove_file(theme).ok();
+    std::fs::remove_file(tpl).ok();
 }

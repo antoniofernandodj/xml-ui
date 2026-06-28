@@ -1,0 +1,27 @@
+<!-- Tema da janela (paleta do iced) — também elimina o fundo branco padrão. -->
+<link rel="theme" href="styles/theme.json" />
+
+<!-- Stylesheet COM ESCOPO: as classes .btn* só valem dentro deste componente. -->
+<link rel="stylesheet" href="styles/estilos.iss" />
+
+<Container class="card">
+    <Column class="stack">
+        <Text class="title" content="Estilos via .iss" />
+
+        <!-- A classe define size/color; nada inline aqui. -->
+        <Text class="subtitle" content="Contador: {valor}" />
+
+        <Row class="actions">
+            <!-- `btn` (escopada) dá padding + cor base; `btn-danger` sobrescreve a cor. -->
+            <Button class="btn btn-danger" text="-" onClick="decrementar" />
+            <Button class="btn btn-success" text="+" onClick="incrementar" />
+        </Row>
+
+        <!-- Atributo inline vence a classe: cor explícita ganha de `subtitle`. -->
+        <Text
+            class="subtitle"
+            content="(edite styles/app.iss e veja o hot-reload)"
+            color="#6C7086"
+        />
+    </Column>
+</Container>

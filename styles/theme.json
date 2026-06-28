@@ -1,0 +1,8 @@
+{
+    "name": "Mocha",
+    "background": "#181825",
+    "text": "#CDD6F4",
+    "primary": "#89B4FA",
+    "success": "#A6E3A1",
+    "danger": "#F38BA8"
+}

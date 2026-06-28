@@ -8,14 +8,14 @@
 >
     <Column spacing="20" align="Center">
         <Text
-            content="Demonstração de If / Else"
+            content="Demonstração de if / else"
             size="26"
             bold="true"
             color="#F5E0DC"
         />
 
         <!-- Checagem truthy: renderiza só quando {logado} for verdadeiro -->
-        <If cond="{logado}">
+        <if cond="{logado}">
             <Column spacing="10" align="Center">
                 <Text
                     content="Bem-vindo de volta, {usuario}!"
@@ -30,8 +30,8 @@
                     padding="10"
                 />
             </Column>
-        </If>
-        <Else>
+        </if>
+        <else>
             <Column spacing="10" align="Center">
                 <Text
                     content="Você não está conectado."
@@ -46,15 +46,15 @@
                     padding="10"
                 />
             </Column>
-        </Else>
+        </else>
 
         <!-- Comparação explícita -->
-        <If cond="{logado}" equals="false">
+        <if cond="{logado}" equals="false">
             <Text
                 content="(dica: clique em Entrar para ver o conteúdo)"
                 size="12"
                 color="#6C7086"
             />
-        </If>
+        </if>
     </Column>
 </Container>

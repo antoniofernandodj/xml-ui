@@ -21,22 +21,32 @@ Rust (ou embutido no próprio XML via `<script>`).
 
 ## Sumário
 
-- [Instalação](#instalação)
-- [Conceitos](#conceitos)
-- [Início rápido](#início-rápido)
-- [Referência de tags](#referência-de-tags)
-- [Atributos de layout e estilo](#atributos-de-layout-e-estilo)
-- [Data binding e templating](#data-binding-e-templating)
-- [Controle de fluxo: `If`/`Else` e `ForEach`](#controle-de-fluxo)
-- [Componentes e imports](#componentes-e-imports)
-- [O trait `Component`](#o-trait-component)
-- [Componentes aninhados](#componentes-aninhados)
-- [`<script>` + a macro `#[component]`](#script--a-macro-component)
-- [`ContextVar`](#contextvar)
-- [Navegação entre telas](#navegação-entre-telas)
-- [Hot-reload](#hot-reload)
-- [Referência da API do motor](#referência-da-api-do-motor)
-- [Exemplos](#exemplos)
+- [xml-ui](#xml-ui)
+  - [Sumário](#sumário)
+  - [Instalação](#instalação)
+  - [Conceitos](#conceitos)
+  - [Início rápido](#início-rápido)
+  - [Referência de tags](#referência-de-tags)
+    - [Layout](#layout)
+    - [Conteúdo e controles](#conteúdo-e-controles)
+    - [Estruturais (composição e fluxo)](#estruturais-composição-e-fluxo)
+  - [Atributos de layout e estilo](#atributos-de-layout-e-estilo)
+  - [Data binding e templating](#data-binding-e-templating)
+  - [Controle de fluxo](#controle-de-fluxo)
+    - [`if` / `else`](#if--else)
+    - [`ForEach`](#foreach)
+  - [Componentes e imports](#componentes-e-imports)
+  - [O trait `Component`](#o-trait-component)
+  - [Componentes aninhados](#componentes-aninhados)
+  - [`<script>` + a macro `#[component]`](#script--a-macro-component)
+  - [`ContextVar`](#contextvar)
+  - [Navegação entre telas](#navegação-entre-telas)
+  - [Hot-reload](#hot-reload)
+  - [Referência da API do motor](#referência-da-api-do-motor)
+    - [`UiEngine`](#uiengine)
+    - [`EngineMessage`](#enginemessage)
+    - [Tipos de apoio](#tipos-de-apoio)
+  - [Exemplos](#exemplos)
 
 ---
 
@@ -161,8 +171,8 @@ Todas as tags aceitam variações de caixa e nomes em inglês **ou** português.
 | `<Include>` | `Incluir` | inclui outro template inline; demais atributos viram props. |
 | `<NomeDoComponente .../>` | — | qualquer tag desconhecida referencia um componente por nome; atributos viram props. |
 | `<ForEach>` | `For` | repete os filhos por item: `items`/`itens`, `var`/`variavel`. |
-| `<If>` | `Se` | renderiza condicionalmente: `cond`, `equals`, `notEquals`. |
-| `<Else>` | `Senao` | renderiza quando o `<If>` imediatamente anterior foi falso. |
+| `<if>` | `Se` | renderiza condicionalmente: `cond`, `equals`, `notEquals`. |
+| `<else>` | `Senao` | renderiza quando o `<if>` imediatamente anterior foi falso. |
 
 ---
 
@@ -204,15 +214,15 @@ reflete o novo valor. Chaves ausentes viram string vazia.
 
 ## Controle de fluxo
 
-### `If` / `Else`
+### `if` / `else`
 
-`<If>` aceita três modos:
+`<if>` aceita três modos:
 
 ```xml
-<If cond="{logado}">...</If>                 <!-- truthy: true/1/yes/on/sim -->
-<If cond="{status}" equals="ativo">...</If>  <!-- comparação de igualdade -->
-<If cond="{papel}" notEquals="admin">...</If><!-- comparação de diferença -->
-<Else>...</Else>                             <!-- liga-se ao If anterior -->
+<if cond="{logado}">...</if>                 <!-- truthy: true/1/yes/on/sim -->
+<if cond="{status}" equals="ativo">...</if>  <!-- comparação de igualdade -->
+<if cond="{papel}" notEquals="admin">...</if><!-- comparação de diferença -->
+<else>...</else>                             <!-- liga-se ao if anterior -->
 ```
 
 ### `ForEach`
@@ -472,7 +482,7 @@ pub enum EngineMessage {
 | `contador_macro` | comportamento embutido no XML via `<script>` + `#[component]`. |
 | `perfil` | inputs, cliques, `<import>` de um cartão e `ContextVar`. |
 | `lista` | `<ForEach>` sobre JSON com um componente por item. |
-| `condicional` | `<If>` / `<Else>` (truthy e comparação). |
+| `condicional` | `<if>` / `<else>` (truthy e comparação). |
 | `navegacao` | múltiplas telas, histórico e `navigateTo`/`navigateBack`. |
 | `aninhado` | componente registrado dentro de outro, com roteamento por namespace. |
 

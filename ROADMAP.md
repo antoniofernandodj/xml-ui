@@ -54,7 +54,7 @@ Barato e de alto valor; viável em ~1 dia.
 - [ ] **Temas/estilo reutilizável** — tokens de tema / "classes" / herança de
       estilo em vez de hex inline repetido; integrar com o tema do `iced`.
 - [ ] **Linguagem de template mais rica** — expressões simples, negação no
-      `If`, `else if`, eventos com argumentos.
+      `if`, `else if`, eventos com argumentos.
 - [ ] **Estado por instância em `ForEach`** — IDs de instância para componentes
       com estado dentro de listas (hoje N instâncias compartilham um `update`).
 - [ ] **Contexto tipado (opcional)** — avaliar valores tipados/serializáveis

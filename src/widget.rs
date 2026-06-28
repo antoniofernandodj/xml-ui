@@ -69,7 +69,7 @@ fn parse_alignment(s: &Option<String>) -> Option<Alignment> {
 }
 
 /// Helper to parse hex colors like #RRGGBB or #RRGGBBAA
-fn parse_hex_color(s: &str) -> Option<Color> {
+pub fn parse_hex_color(s: &str) -> Option<Color> {
     let s = s.trim().trim_start_matches('#');
     if s.len() == 6 {
         let r = u8::from_str_radix(&s[0..2], 16).ok()? as f32 / 255.0;
@@ -310,8 +310,12 @@ pub fn render_node<'a>(
             // Import declarations are stripped during evaluation; render nothing.
             column![].into()
         }
+        NodeType::Link { .. } => {
+            // <link> declarations are stripped during evaluation; render nothing.
+            column![].into()
+        }
         NodeType::If { .. } | NodeType::Else => {
-            // If/Else are expanded during evaluation; nothing to render directly.
+            // if/else are expanded during evaluation; nothing to render directly.
             column![].into()
         }
     };
