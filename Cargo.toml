@@ -2,6 +2,12 @@
 name = "glacier-ui"
 version = "0.1.0"
 edition = "2024"
+description = "Declarative XML UI engine for Rust: render UI from XML to iced, with hot-reload, data binding, components and .iss stylesheets."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/antoniofernandodj/xml-ui"
+readme = "README.md"
+keywords = ["gui", "ui", "iced", "xml", "declarative"]
+categories = ["gui"]
 
 [workspace]
 members = ["glacier-ui-macros"]
@@ -11,4 +17,4 @@ iced = { version = "0.13", features = ["image", "tokio"] }
 roxmltree = "0.21"
 image = "0.25"
 serde_json = "1.0"
-glacier-ui-macros = { path = "glacier-ui-macros" }
+glacier-ui-macros = { path = "glacier-ui-macros", version = "0.1.0" }

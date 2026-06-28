@@ -2,6 +2,9 @@
 name = "glacier-ui-macros"
 version = "0.1.0"
 edition = "2021"
+description = "Proc-macro for glacier-ui: derives Component from a struct plus an XML <script> block (#[component])."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/antoniofernandodj/xml-ui"
 
 [lib]
 proc-macro = true
