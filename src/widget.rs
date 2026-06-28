@@ -193,6 +193,15 @@ pub fn render_node<'a>(
             if let Some(f) = font_for(&node.font) {
                 t = t.font(f);
             }
+            // `textAlign` aligns the label inside the button. For a full-width
+            // button the label must fill the button's width to actually move,
+            // so `center`/`end` get `width: fill` on the text.
+            if let Some(align) = parse_text_align(&node.text_align) {
+                t = t.align_x(align);
+                if !matches!(align, iced::alignment::Horizontal::Left) {
+                    t = t.width(Length::Fill);
+                }
+            }
             let mut btn = button(t);
             // Navigation takes priority over the generic on_click.
             if *navigate_back {
