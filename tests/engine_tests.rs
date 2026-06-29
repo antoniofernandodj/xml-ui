@@ -1029,7 +1029,7 @@ fn test_kdl_declarations_hoisted() {
     // theme/style/import/data viram nós Link/Import anexados como filhos da raiz.
     let kdl = r#"
     theme "styles/theme.json"
-    style "styles/estilos.iss"
+    style "styles/estilos.gss"
     import "PerfilCard" from="templates/perfil_card.xml"
     data "styles/dados.json" as="perfil"
 
@@ -1054,7 +1054,7 @@ fn test_kdl_declarations_hoisted() {
             }
             NodeType::Link { rel, href, .. } if rel == "stylesheet" => {
                 found_style = true;
-                assert_eq!(href, "styles/estilos.iss");
+                assert_eq!(href, "styles/estilos.gss");
             }
             NodeType::Link { rel, href, name } if rel == "data" => {
                 found_data = true;

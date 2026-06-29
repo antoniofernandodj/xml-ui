@@ -7,7 +7,7 @@
 //!
 //! ```kdl
 //! theme "styles/theme.json"
-//! style "styles/estilos.iss"
+//! style "styles/estilos.gss"
 //!
 //! Container class="card" {
 //!     Column class="stack" {
