@@ -580,6 +580,9 @@ fn eval_owned(
     let font_eval = resolve(&node.font, &style.font);
     let gradient_eval = resolve(&node.gradient, &style.gradient);
     let text_align_eval = resolve(&node.text_align, &style.text_align);
+    // `on_press` is behavior, not a style field; interpolate it directly so
+    // actions like `onPress="window:{cmd}"` can bind context values.
+    let on_press_eval = node.on_press.as_ref().map(|s| process_template(s, context));
 
     // Evaluate children recursively. ForEach/if/else/Import are structural:
     // they are expanded or dropped rather than rendered directly.
@@ -604,6 +607,7 @@ fn eval_owned(
         font: font_eval,
         gradient: gradient_eval,
         text_align: text_align_eval,
+        on_press: on_press_eval,
         if_cond: None,
         if_equals: None,
         if_not_equals: None,

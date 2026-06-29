@@ -161,6 +161,11 @@ pub struct UiNode {
     pub gradient: Option<String>,
     /// Horizontal text alignment for `Text`: `start`/`center`/`end`.
     pub text_align: Option<String>,
+    /// Action dispatched on mouse press (button-down) over this element, which
+    /// wraps it in a `mouse_area`. Unlike a `Button`'s click (which fires on
+    /// release), press semantics are required for window dragging
+    /// (`onPress="window:drag"`). Emitted as an [`crate::EngineMessage::XmlClick`].
+    pub on_press: Option<String>,
     // Structural directives as attributes (Vue/Angular style)
     pub if_cond: Option<String>,
     pub if_equals: Option<String>,
@@ -216,6 +221,7 @@ impl UiNode {
         let font = Self::get_attr(&node, &["font", "fonte", "fontFamily", "font-family"]);
         let gradient = Self::get_attr(&node, &["gradient", "gradiente"]);
         let text_align = Self::get_attr(&node, &["textAlign", "text_align", "text-align", "alinhamento_texto"]);
+        let on_press = Self::get_attr(&node, &["onPress", "on_press", "on-press", "aoPressionar", "ao_pressionar"]);
 
         // Structural directives as attributes (Vue/Angular style)
         let if_cond = Self::get_attr(&node, &["if", "se"]);
@@ -378,6 +384,7 @@ impl UiNode {
             font,
             gradient,
             text_align,
+            on_press,
             if_cond,
             if_equals,
             if_not_equals,

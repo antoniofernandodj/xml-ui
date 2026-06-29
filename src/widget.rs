@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use iced::widget::{
     button, column, row, text, container, text_input, text_editor, image, svg, scrollable,
-    checkbox, toggler, horizontal_rule, vertical_rule, pick_list,
+    checkbox, toggler, horizontal_rule, vertical_rule, pick_list, mouse_area,
 };
 
 /// One option of a `<Select>`: `label` is shown, `value` is dispatched. Equality
@@ -658,6 +658,16 @@ pub fn render_node<'a>(
             });
             element = c.into();
         }
+    }
+
+    // Any node with `on_press` becomes a press surface: the action fires on
+    // mouse-button-down (not release like a `Button`), which the engine needs
+    // for window dragging (`onPress="window:drag"`). Applied last so the whole
+    // styled element — including its background wrap — is draggable.
+    if let Some(action) = &node.on_press {
+        element = mouse_area(element)
+            .on_press(EngineMessage::XmlClick(action.clone()))
+            .into();
     }
 
     element

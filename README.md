@@ -265,9 +265,39 @@ Disponíveis em **qualquer** tag:
 | `font` | `fonte`, `font-family` | `mono`/`monospace`/`code` (fonte monoespaçada) ou `bold` — em `Text`/`Button` |
 | `gradient` | `gradiente` | gradiente linear de fundo: `"#a #b"` (cima→baixo) ou `"<ângulo> #a #b [#c …]"` (graus); vence `background` |
 | `textAlign` | `text_align`, `text-align` | alinhamento horizontal de `Text`: `start`/`center`/`end` |
+| `onPress` | `on_press`, `on-press`, `aoPressionar` | ação disparada no **pressionar** (botão do mouse para baixo) sobre o elemento — envolve-o em um `mouse_area`. Diferente do clique de `<Button>` (que dispara ao soltar); a semântica de pressionar é o que viabiliza arrastar a janela (`onPress="window:drag"`). |
 
 - **Eixos:** o alinhamento do eixo cruzado de uma `Column` é o `alignX`; o de uma `Row` é o `alignY`.
 - **Cores:** hex `#RRGGBB` ou `#RRGGBBAA`.
+
+---
+
+## Ações built-in
+
+Algumas ações de `onClick`/`onPress` são tratadas pelo próprio motor, sem
+precisar de código no componente — basta referenciá-las no markup:
+
+| Ação | Efeito |
+|---|---|
+| `clipboard:<chave>` | copia o valor de contexto `<chave>` para a área de transferência |
+| `window:minimize` | minimiza a janela |
+| `window:maximize` | alterna maximizar/restaurar (alias `window:toggle_maximize`) |
+| `window:close` | fecha a janela |
+| `window:drag` | inicia o arraste da janela — use em `onPress` de uma região da barra de título |
+
+As ações `window:*` permitem montar uma barra de título customizada para uma
+janela sem decorações (`decorations: false` nas `window::Settings` do iced):
+
+```kdl
+Row class="titlebar" width="fill" {
+    Row width="fill" on_press="window:drag" {       // região de arraste
+        Text "Meu App"
+    }
+    Button "—" onClick="window:minimize"
+    Button "▢" onClick="window:maximize"
+    Button "✕" onClick="window:close"
+}
+```
 
 ---
 

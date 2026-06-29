@@ -237,6 +237,24 @@ impl GlacierUI {
                 let value = self.context_data.get(key).cloned().unwrap_or_default();
                 return iced::clipboard::write(value);
             }
+            // Built-in window controls: drive the host window without any
+            // component code, so a borderless app can wire its custom titlebar
+            // straight from markup — `onClick="window:close"` for the buttons
+            // and `onPress="window:drag"` for the draggable region. The window
+            // `Id` is resolved lazily via `get_latest`, keeping this independent
+            // of how the app opened its window.
+            if let Some(action) = a.strip_prefix("window:") {
+                use iced::window;
+                return match action {
+                    "minimize" => window::get_latest().and_then(|id| window::minimize(id, true)),
+                    "maximize" | "toggle_maximize" => {
+                        window::get_latest().and_then(|id| window::toggle_maximize(id))
+                    }
+                    "close" => window::get_latest().and_then(|id| window::close(id)),
+                    "drag" => window::get_latest().and_then(|id| window::drag(id)),
+                    _ => iced::Task::none(),
+                };
+            }
         }
         let (action, value) = match msg {
             EngineMessage::XmlClick(a) => (a.as_str(), None),
