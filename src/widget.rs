@@ -491,6 +491,7 @@ pub fn render_node<'a>(
             container(text(format!("Unresolved component <{}>", name)).color(Color::from_rgb(1.0, 0.0, 0.0))).into()
         }
         NodeType::ForEach { .. } => {
+            // TODO(diretivas): forma legada por tag; preferir atributos if/else/for-each. Remover quando templates forem migrados.
             // ForEach is expanded during evaluation; nothing to render directly.
             column![].into()
         }
@@ -503,6 +504,7 @@ pub fn render_node<'a>(
             column![].into()
         }
         NodeType::If { .. } | NodeType::Else => {
+            // TODO(diretivas): forma legada por tag; preferir atributos if/else/for-each. Remover quando templates forem migrados.
             // if/else are expanded during evaluation; nothing to render directly.
             column![].into()
         }

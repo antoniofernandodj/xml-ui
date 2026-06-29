@@ -29,6 +29,117 @@ pub fn strip_script(xml: &str) -> (String, Option<String>) {
     (xml.to_string(), None)
 }
 
+/// Normalizes bare directives like `else` or `senao` (without value) inside XML tags
+/// by rewriting them to `else=""` or `senao=""` before XML parsing.
+pub fn normalize_bare_directives(xml: &str) -> String {
+    let mut result = String::with_capacity(xml.len());
+    let mut in_tag = false;
+    let mut in_comment = false;
+    let mut quote_char = None;
+    let chars: Vec<char> = xml.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if in_comment {
+            // Check for end of comment "-->"
+            if i + 2 < chars.len() && chars[i] == '-' && chars[i+1] == '-' && chars[i+2] == '>' {
+                result.push('-');
+                result.push('-');
+                result.push('>');
+                in_comment = false;
+                i += 3;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+            continue;
+        }
+
+        // Check for start of comment "<!--"
+        if i + 3 < chars.len() && chars[i] == '<' && chars[i+1] == '!' && chars[i+2] == '-' && chars[i+3] == '-' {
+            result.push_str("<!--");
+            in_comment = true;
+            i += 4;
+            continue;
+        }
+
+        let c = chars[i];
+        if !in_tag {
+            if c == '<' {
+                in_tag = true;
+                quote_char = None;
+            }
+            result.push(c);
+            i += 1;
+        } else {
+            // We are inside a tag
+            if c == '>' {
+                in_tag = false;
+                result.push(c);
+                i += 1;
+            } else if let Some(q) = quote_char {
+                if c == q {
+                    quote_char = None;
+                }
+                result.push(c);
+                i += 1;
+            } else {
+                // Not in quotes
+                if c == '"' || c == '\'' {
+                    quote_char = Some(c);
+                    result.push(c);
+                    i += 1;
+                } else {
+                    // Check for else or senao
+                    let mut matched_len = None;
+                    let mut replaced_with = None;
+
+                    // Match "else" or "senao" (case-insensitive)
+                    let remaining_len = chars.len() - i;
+                    if remaining_len >= 4 {
+                        let word: String = chars[i..i+4].iter().collect();
+                        if word.eq_ignore_ascii_case("else") {
+                            matched_len = Some(4);
+                            replaced_with = Some("else=\"\"");
+                        }
+                    }
+                    if matched_len.is_none() && remaining_len >= 5 {
+                        let word: String = chars[i..i+5].iter().collect();
+                        if word.eq_ignore_ascii_case("senao") {
+                            matched_len = Some(5);
+                            replaced_with = Some("senao=\"\"");
+                        }
+                    }
+
+                    if let (Some(len), Some(replacement)) = (matched_len, replaced_with) {
+                        // Check preceding character (must be whitespace for an attribute)
+                        let preceded_ok = i > 0 && chars[i - 1].is_ascii_whitespace();
+
+                        if preceded_ok {
+                            // Check succeeding characters to see if it's followed by '='
+                            let mut next_idx = i + len;
+                            while next_idx < chars.len() && chars[next_idx].is_ascii_whitespace() {
+                                next_idx += 1;
+                            }
+                            let is_followed_by_equals = next_idx < chars.len() && chars[next_idx] == '=';
+
+                            if !is_followed_by_equals {
+                                // It is a bare attribute! Replace it.
+                                result.push_str(replacement);
+                                i += len;
+                                continue;
+                            }
+                        }
+                    }
+
+                    result.push(c);
+                    i += 1;
+                }
+            }
+        }
+    }
+    result
+}
+
 /// Process string template by replacing `{key}` placeholders with values from context
 pub fn process_template(template: &str, context: &HashMap<String, String>) -> String {
     let mut result = String::new();
@@ -135,9 +246,89 @@ fn expand_children(
     // can bind to it. Reset by any other (non-else) node.
     let mut last_if: Option<bool> = None;
     for child in children {
+        if matches!(child.kind, NodeType::Import { .. } | NodeType::Link { .. }) {
+            continue;
+        }
+
+        // 1. Process for-each attribute directive (outer precedence)
+        if let Some(items) = &child.for_each {
+            let var = child.for_each_var.as_deref().unwrap_or("item");
+            let items_evaluated = process_template(items, context);
+            if let Some(json_str) = context.get(&items_evaluated) {
+                if let Ok(serde_json::Value::Array(arr)) =
+                    serde_json::from_str::<serde_json::Value>(json_str)
+                {
+                    for item in arr {
+                        let mut local_context = context.clone();
+                        match item {
+                            serde_json::Value::Object(obj) => {
+                                for (key, val) in obj {
+                                    let str_val = match val {
+                                        serde_json::Value::String(s) => s,
+                                        other => other.to_string(),
+                                    };
+                                    local_context.insert(format!("{}.{}", var, key), str_val);
+                                }
+                            }
+                            serde_json::Value::String(s) => {
+                                local_context.insert(var.to_string(), s);
+                            }
+                            other => {
+                                local_context.insert(var.to_string(), other.to_string());
+                            }
+                        }
+                        // Clone the child without the for_each directive
+                        let mut clone = child.clone();
+                        clone.for_each = None;
+                        clone.for_each_var = None;
+
+                        // Expand the single child in the new context (which will evaluate its if condition if present)
+                        expand_children(
+                            std::slice::from_ref(&clone),
+                            &local_context,
+                            templates,
+                            styles,
+                            scope,
+                            owner,
+                            out,
+                        )?;
+                    }
+                }
+            }
+            last_if = None;
+            continue;
+        }
+
+        // 2. Process else attribute directive
+        if child.is_else {
+            if last_if == Some(false) {
+                // Clone child and clear else directive
+                let mut clone = child.clone();
+                clone.is_else = false;
+                out.push(eval_owned(&clone, context, templates, styles, scope, owner)?);
+            }
+            last_if = None;
+            continue;
+        }
+
+        // 3. Process if attribute directive
+        if let Some(cond) = &child.if_cond {
+            let truthy = eval_condition(cond, &child.if_equals, &child.if_not_equals, context);
+            if truthy {
+                // Clone child and clear if directives
+                let mut clone = child.clone();
+                clone.if_cond = None;
+                clone.if_equals = None;
+                clone.if_not_equals = None;
+                out.push(eval_owned(&clone, context, templates, styles, scope, owner)?);
+            }
+            last_if = Some(truthy);
+            continue;
+        }
+
+        // 4. Fallback to legacy tag-based conditionals/loops
         match &child.kind {
-            // `<import>`/`<link>` declarations are processed at registration
-            // time; drop them here.
+            // `<import>`/`<link>` declarations are skipped above.
             NodeType::Import { .. } | NodeType::Link { .. } => {}
             NodeType::ForEach { items, var } => {
                 let items_evaluated = process_template(items, context);
@@ -399,5 +590,11 @@ fn eval_owned(
         font: font_eval,
         gradient: gradient_eval,
         text_align: text_align_eval,
+        if_cond: None,
+        if_equals: None,
+        if_not_equals: None,
+        is_else: false,
+        for_each: None,
+        for_each_var: None,
     })
 }

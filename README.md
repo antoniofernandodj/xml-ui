@@ -275,27 +275,42 @@ viram string vazia.**
 
 ## Controle de fluxo
 
-### `if` / `else`
+A forma recomendada de controlar o fluxo (condicionais e loops) é através de **atributos diretivas** aplicados diretamente em qualquer elemento (estilo Vue/Angular). Também é suportada a sintaxe antiga de tags-invólucro `<if>`, `<else>` e `<ForEach>` por retrocompatibilidade.
 
-`<if>` tem três modos; `<else>` liga-se ao `<if>` imediatamente anterior:
+### Atributos Diretivas (Recomendado)
+
+#### `if` / `else` / `equals` / `notEquals`
+
+Você pode usar o atributo `if` em qualquer elemento para renderizá-lo condicionalmente. O atributo `else` (pelado) se conecta ao `if` anterior.
 
 ```xml
-<if cond="{logado}">...</if>                  <!-- truthy: true / 1 / yes / on / sim -->
-<if cond="{status}" equals="ativo">...</if>   <!-- comparação de igualdade -->
-<if cond="{papel}" notEquals="admin">...</if> <!-- comparação de diferença -->
-<else>...</else>
+<!-- Checagem truthy simples (true / 1 / yes / on / sim) -->
+<Column if="{logado}">
+    <Text content="Bem-vindo!" />
+</Column>
+<Column else>
+    <Text content="Por favor, conecte-se." />
+</Column>
+
+<!-- Comparação explícita de igualdade ou diferença -->
+<Text content="Painel Admin" if="{papel}" equals="admin" />
+<Text content="Acesso Comum" if="{papel}" notEquals="admin" />
 ```
 
-### `ForEach`
+*Nota sobre XML estrito:* Atributos pelados como `else` não são aceitos pelo padrão XML. O Glacier UI faz um pré-processamento transparente convertendo `else` para `else=""` antes do parseamento. Ambos `else` e `senao` são suportados.
 
-Itera sobre um **array JSON** publicado no contexto. Cada item vira variáveis
-prefixadas pelo nome declarado em `var` (`u.nome`, `u.cargo`, …); strings
-simples ficam disponíveis como `{u}`:
+#### `for-each` e `var`
+
+O atributo `for-each` itera sobre um **array JSON** publicado no contexto. Use o atributo `var` para definir a variável do loop (padrão é `item` se omitido). Cada item vira variáveis prefixadas pelo nome declarado em `var` (`u.nome`, `u.cargo`, etc.); strings/números simples ficam disponíveis diretamente como `{u}`:
 
 ```xml
-<ForEach items="usuarios" var="u">
-    <CartaoUsuario nome="{u.nome}" cargo="{u.cargo}" cor="{u.cor}" />
-</ForEach>
+<CartaoUsuario
+    for-each="usuarios"
+    var="u"
+    nome="{u.nome}"
+    cargo="{u.cargo}"
+    cor="{u.cor}"
+/>
 ```
 
 ```rust
@@ -304,6 +319,31 @@ let json = serde_json::json!([
     { "nome": "Sophia", "cargo": "Designer",   "cor": "#F5C2E7" },
 ]).to_string();
 ctx.set("usuarios", json);
+```
+
+#### Precedência: `for-each` + `if` no mesmo elemento
+
+Quando combinados no mesmo elemento, o `for-each` tem precedência maior. Ele desenrola o loop primeiro e depois o `if` filtra individualmente cada item gerado usando o contexto local do loop.
+
+---
+
+### Tags-Invólucro (Legado)
+
+Abaixo está a sintaxe legada baseada em tags, mantida para retrocompatibilidade:
+
+```xml
+<!-- Condicional legada -->
+<if cond="{logado}">
+    <Text content="Olá, {usuario}" />
+</if>
+<else>
+    <Text content="Entre" />
+</else>
+
+<!-- Loop legado -->
+<ForEach items="usuarios" var="u">
+    <CartaoUsuario nome="{u.nome}" cargo="{u.cargo}" />
+</ForEach>
 ```
 
 Veja `examples/condicional.rs` e `examples/lista.rs`.

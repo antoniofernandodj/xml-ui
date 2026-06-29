@@ -842,3 +842,106 @@ fn iss_supports_font_and_text_align() {
     assert_eq!(rule.font.as_deref(), Some("mono"));
     assert_eq!(rule.text_align.as_deref(), Some("center"));
 }
+
+#[test]
+fn test_directives_as_attributes() {
+    let mut motor = GlacierUI::new();
+
+    std::fs::create_dir_all("templates").ok();
+    let path = "templates/test_directives_attr.xml";
+    std::fs::write(
+        path,
+        r##"
+        <Column>
+            <Text content="Olá, {usuario}" if="{logado}" />
+            <Text content="Entre, por favor" senao />
+            <Text content="painel admin" if="{papel}" equals="admin" />
+            <Text content="painel comum" if="{papel}" notEquals="admin" />
+        </Column>
+        "##
+    ).unwrap();
+
+    motor.register_component("cond_attr", path).unwrap();
+
+    // Estado inicial: deslogado, papel comum
+    motor.define_data("logado", "false");
+    motor.define_data("usuario", "Ana");
+    motor.define_data("papel", "user");
+
+    let ev = motor.evaluated_templates.get("cond_attr").unwrap();
+    // O primeiro Text (if) é ocultado. O segundo Text (senao) é exibido.
+    // O terceiro (if papel equals admin) é ocultado. O quarto (if papel notEquals admin) é exibido.
+    assert_eq!(ev.children.len(), 2);
+    if let NodeType::Text { content, .. } = &ev.children[0].kind {
+        assert_eq!(content, "Entre, por favor");
+    } else {
+        panic!("esperava o Text do senao");
+    }
+    if let NodeType::Text { content, .. } = &ev.children[1].kind {
+        assert_eq!(content, "painel comum");
+    } else {
+        panic!("esperava o Text de papel comum");
+    }
+
+    // Logado como admin
+    motor.define_data("logado", "true");
+    motor.define_data("papel", "admin");
+
+    let ev = motor.evaluated_templates.get("cond_attr").unwrap();
+    // O primeiro Text (if) é exibido. O segundo (senao) é ocultado.
+    // O terceiro (if papel equals admin) é exibido. O quarto (if papel notEquals admin) é ocultado.
+    assert_eq!(ev.children.len(), 2);
+    if let NodeType::Text { content, .. } = &ev.children[0].kind {
+        assert_eq!(content, "Olá, Ana");
+    } else {
+        panic!("esperava o Text do if");
+    }
+    if let NodeType::Text { content, .. } = &ev.children[1].kind {
+        assert_eq!(content, "painel admin");
+    } else {
+        panic!("esperava o Text do admin");
+    }
+
+    std::fs::remove_file(path).ok();
+}
+
+#[test]
+fn test_precedence_foreach_if_attributes() {
+    let mut motor = GlacierUI::new();
+
+    std::fs::create_dir_all("templates").ok();
+    let path = "templates/test_precedence.xml";
+    std::fs::write(
+        path,
+        r##"
+        <Column>
+            <Text content="Item: {u.nome}" for-each="usuarios" var="u" if="{u.ativo}" />
+        </Column>
+        "##
+    ).unwrap();
+
+    motor.register_component("precedence", path).unwrap();
+
+    let json = serde_json::json!([
+        { "nome": "Clara", "ativo": "true" },
+        { "nome": "Sophia", "ativo": "false" },
+        { "nome": "Mateus", "ativo": "true" }
+    ]).to_string();
+    motor.define_data("usuarios", &json);
+
+    let ev = motor.evaluated_templates.get("precedence").unwrap();
+    // Deve renderizar apenas "Clara" e "Mateus", pois "Sophia" tem ativo="false".
+    assert_eq!(ev.children.len(), 2);
+    if let NodeType::Text { content, .. } = &ev.children[0].kind {
+        assert_eq!(content, "Item: Clara");
+    } else {
+        panic!("esperava o primeiro item");
+    }
+    if let NodeType::Text { content, .. } = &ev.children[1].kind {
+        assert_eq!(content, "Item: Mateus");
+    } else {
+        panic!("esperava o segundo item");
+    }
+
+    std::fs::remove_file(path).ok();
+}

@@ -5,7 +5,7 @@ pub mod component;
 pub mod stylesheet;
 
 pub use parser::{UiNode, NodeType};
-pub use eval::{evaluate_node, process_template, strip_script, StyleContext};
+pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_directives, StyleContext};
 pub use widget::{render_node, EngineMessage};
 pub use component::{Component, Context, ContextVar, Effect, Nav, Template};
 pub use stylesheet::{StyleSheet, StyleRule};
@@ -198,6 +198,7 @@ impl GlacierUI {
 
         // Strip any `<script>` block (behavior is compiled in by `#[component]`).
         let (markup, _script) = eval::strip_script(&xml);
+        let markup = eval::normalize_bare_directives(&markup);
         let ast = UiNode::parse_xml(&markup)
             .map_err(|e| format!("Failed to parse XML for component '{}': {}", name, e))?;
         self.parsed_templates.insert(name.clone(), ast.clone());
@@ -346,6 +347,7 @@ impl GlacierUI {
             .map_err(|e| format!("Failed to read XML file at '{}': {}", path, e))?;
 
         let (markup, _script) = eval::strip_script(&xml_content);
+        let markup = eval::normalize_bare_directives(&markup);
         let ast = UiNode::parse_xml(&markup)
             .map_err(|e| format!("Failed to parse XML for component '{}': {}", name, e))?;
 
@@ -561,6 +563,7 @@ impl GlacierUI {
                         // File changed, reload it
                         if let Ok(xml_content) = std::fs::read_to_string(path) {
                             let (markup, _script) = eval::strip_script(&xml_content);
+                            let markup = eval::normalize_bare_directives(&markup);
                             if let Ok(new_ast) = UiNode::parse_xml(&markup) {
                                 updates.push((name.clone(), new_ast, modified));
                                 reloaded.push(name.clone());

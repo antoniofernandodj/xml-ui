@@ -145,6 +145,13 @@ pub struct UiNode {
     pub gradient: Option<String>,
     /// Horizontal text alignment for `Text`: `start`/`center`/`end`.
     pub text_align: Option<String>,
+    // Structural directives as attributes (Vue/Angular style)
+    pub if_cond: Option<String>,
+    pub if_equals: Option<String>,
+    pub if_not_equals: Option<String>,
+    pub is_else: bool,
+    pub for_each: Option<String>,
+    pub for_each_var: Option<String>,
 }
 
 impl UiNode {
@@ -193,6 +200,14 @@ impl UiNode {
         let font = Self::get_attr(&node, &["font", "fonte", "fontFamily", "font-family"]);
         let gradient = Self::get_attr(&node, &["gradient", "gradiente"]);
         let text_align = Self::get_attr(&node, &["textAlign", "text_align", "text-align", "alinhamento_texto"]);
+
+        // Structural directives as attributes (Vue/Angular style)
+        let if_cond = Self::get_attr(&node, &["if", "se"]);
+        let if_equals = Self::get_attr(&node, &["equals", "eq", "igual_a"]);
+        let if_not_equals = Self::get_attr(&node, &["notEquals", "not_equals", "ne", "diferente_de"]);
+        let is_else = node.has_attribute("else") || node.has_attribute("senao");
+        let for_each = Self::get_attr(&node, &["for-each", "forEach", "foreach", "each", "repeat"]);
+        let for_each_var = Self::get_attr(&node, &["var", "variavel"]);
 
         let kind = match tag {
             "Container" | "container" => NodeType::Container,
@@ -335,6 +350,12 @@ impl UiNode {
             font,
             gradient,
             text_align,
+            if_cond,
+            if_equals,
+            if_not_equals,
+            is_else,
+            for_each,
+            for_each_var,
         })
     }
 
