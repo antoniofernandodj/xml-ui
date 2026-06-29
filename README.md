@@ -266,6 +266,7 @@ Disponíveis em **qualquer** tag:
 | `gradient` | `gradiente` | gradiente linear de fundo: `"#a #b"` (cima→baixo) ou `"<ângulo> #a #b [#c …]"` (graus); vence `background` |
 | `textAlign` | `text_align`, `text-align` | alinhamento horizontal de `Text`: `start`/`center`/`end` |
 | `onPress` | `on_press`, `on-press`, `aoPressionar` | ação disparada no **pressionar** (botão do mouse para baixo) sobre o elemento — envolve-o em um `mouse_area`. Diferente do clique de `<Button>` (que dispara ao soltar); a semântica de pressionar é o que viabiliza arrastar a janela (`onPress="window:drag"`). |
+| `onDoubleClick` | `on_double_click`, `on-double-click`, `aoClicarDuplo` | ação disparada no **duplo-clique** sobre o elemento (envolve em `mouse_area`). Ex.: duplo-clique na barra de título para maximizar (`onDoubleClick="window:maximize"`). |
 | `cursor` | `cursorIcon`, `cursor-icon` | ícone do cursor ao pairar sobre o elemento: `pointer`, `text`, `grab`, `grabbing`, `move`, `crosshair`, `wait`, `progress`, `help`, `not-allowed`, `none`, e os de redimensionar janela `resize-h`/`resize-v`/`resize-ne`/`resize-nw` (envolve em `mouse_area` com a `mouse::Interaction`). |
 
 - **Eixos:** o alinhamento do eixo cruzado de uma `Column` é o `alignX`; o de uma `Row` é o `alignY`.

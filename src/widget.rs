@@ -662,15 +662,19 @@ pub fn render_node<'a>(
         }
     }
 
-    // A node with `on_press` and/or `cursor` is wrapped in a `mouse_area`:
-    // `on_press` fires the action on mouse-button-down (not release like a
-    // `Button`) — needed for window drag/resize (`onPress="window:drag"`) — and
-    // `cursor` sets the hover pointer (e.g. resize arrows on edge handles).
-    // Applied last so the whole styled element is the interactive surface.
-    if node.on_press.is_some() || node.cursor.is_some() {
+    // A node with `on_press`, `on_double_click` and/or `cursor` is wrapped in a
+    // `mouse_area`: `on_press` fires on mouse-button-down (not release like a
+    // `Button`) — needed for window drag/resize (`onPress="window:drag"`);
+    // `on_double_click` covers e.g. titlebar double-click to maximize; and
+    // `cursor` sets the hover pointer (resize arrows on edge handles). Applied
+    // last so the whole styled element is the interactive surface.
+    if node.on_press.is_some() || node.on_double_click.is_some() || node.cursor.is_some() {
         let mut ma = mouse_area(element);
         if let Some(action) = &node.on_press {
             ma = ma.on_press(EngineMessage::XmlClick(action.clone()));
+        }
+        if let Some(action) = &node.on_double_click {
+            ma = ma.on_double_click(EngineMessage::XmlClick(action.clone()));
         }
         if let Some(interaction) = node.cursor.as_deref().and_then(cursor_interaction) {
             ma = ma.interaction(interaction);
