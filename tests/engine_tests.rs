@@ -655,6 +655,40 @@ fn test_textarea_parses_and_syncs() {
 }
 
 #[test]
+fn test_select_parses_and_renders() {
+    // A `<Select>` parses to its own node and renders from a context JSON array,
+    // marking the bound value as selected.
+    let xml = r##"<Select options="repos" value="chosen" onChange="pick" placeholder="escolha" labelField="full_name" valueField="clone_url" />"##;
+    let ast = UiNode::parse_xml(xml).unwrap();
+    match &ast.kind {
+        NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, .. } => {
+            assert_eq!(options, "repos");
+            assert_eq!(value_var, "chosen");
+            assert_eq!(on_change, "pick");
+            assert_eq!(placeholder, "escolha");
+            assert_eq!(label_field, "full_name");
+            assert_eq!(value_field, "clone_url");
+        }
+        other => panic!("expected Select, got {other:?}"),
+    }
+
+    let mut motor = GlacierUI::new();
+    std::fs::create_dir_all("templates").ok();
+    let tpl = "templates/test_select.xml";
+    std::fs::write(tpl, xml).unwrap();
+    motor.register_component("selcomp", tpl).unwrap();
+    motor.define_data(
+        "repos",
+        r##"[{"full_name":"org/a","clone_url":"https://x/a.git"},{"full_name":"org/b","clone_url":"https://x/b.git"}]"##,
+    );
+    motor.define_data("chosen", "https://x/b.git");
+    motor.reevaluate_all().unwrap();
+    assert!(motor.render("selcomp").is_ok());
+
+    std::fs::remove_file(tpl).ok();
+}
+
+#[test]
 fn test_if_else_inside_foreach() {
     // Regression: `<if>`/`<else>` nested directly under a `<ForEach>` must be
     // resolved per item (only the matching branch renders), not emitted as

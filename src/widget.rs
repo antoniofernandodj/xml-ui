@@ -1,8 +1,51 @@
 use std::collections::HashMap;
 use iced::widget::{
     button, column, row, text, container, text_input, text_editor, image, svg, scrollable,
-    checkbox, toggler, horizontal_rule, vertical_rule,
+    checkbox, toggler, horizontal_rule, vertical_rule, pick_list,
 };
+
+/// One option of a `<Select>`: `label` is shown, `value` is dispatched. Equality
+/// (used by `pick_list` to mark the current selection) is by `value` only.
+#[derive(Debug, Clone)]
+pub struct SelectOption {
+    pub label: String,
+    pub value: String,
+}
+
+impl SelectOption {
+    /// Builds an option from a JSON array element: an object reads `label_field`/
+    /// `value_field` (value falls back to label); a bare string is both.
+    fn from_json(item: &serde_json::Value, label_field: &str, value_field: &str) -> Self {
+        match item {
+            serde_json::Value::Object(o) => {
+                let get = |k: &str| o.get(k).map(|v| match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                });
+                let label = get(label_field).unwrap_or_default();
+                let value = get(value_field).unwrap_or_else(|| label.clone());
+                Self { label, value }
+            }
+            serde_json::Value::String(s) => Self { label: s.clone(), value: s.clone() },
+            other => {
+                let s = other.to_string();
+                Self { label: s.clone(), value: s }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for SelectOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+impl PartialEq for SelectOption {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
 
 /// Stateful `text_editor` buffers, keyed by a `<TextArea>`'s `value` binding.
 /// Owned by [`crate::GlacierUI`] and borrowed during render so the editors keep
@@ -391,6 +434,77 @@ pub fn render_node<'a>(
                 t = t.label(label.as_str());
             }
             t.into()
+        }
+        NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, color } => {
+            // Options come from a context JSON array (same shape as ForEach).
+            let opts: Vec<SelectOption> = context
+                .get(options)
+                .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+                .and_then(|v| match v {
+                    serde_json::Value::Array(a) => Some(a),
+                    _ => None,
+                })
+                .map(|arr| {
+                    arr.iter()
+                        .map(|item| SelectOption::from_json(item, label_field, value_field))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let current = context.get(value_var).map(|s| s.as_str()).unwrap_or("");
+            let selected = opts.iter().find(|o| o.value == current).cloned();
+            let action = on_change.clone();
+
+            // Style fields resolved from inline attrs / `.iss` class; anything
+            // unset falls back to the active theme palette so it stays consistent.
+            let bg = background_for(node);
+            let br_radius = node.border_radius;
+            let br_width = node.border_width;
+            let br_color = node.border_color.as_ref().and_then(|c| parse_hex_color(c));
+            let txt_color = color.as_ref().and_then(|c| parse_hex_color(c));
+
+            let style_fn = move |theme: &iced::Theme, status: pick_list::Status| {
+                let pal = theme.extended_palette();
+                let text_color = txt_color.unwrap_or(pal.background.base.text);
+                let mut border = Border {
+                    radius: iced::border::Radius::new(br_radius.unwrap_or(4.0)),
+                    width: br_width.unwrap_or(1.0),
+                    color: br_color.unwrap_or(pal.background.strong.color),
+                };
+                if matches!(status, pick_list::Status::Hovered | pick_list::Status::Opened) {
+                    border.color = txt_color.unwrap_or(pal.primary.base.color);
+                }
+                pick_list::Style {
+                    text_color,
+                    placeholder_color: pal.background.strong.color,
+                    handle_color: text_color,
+                    background: bg.clone().unwrap_or(Background::Color(pal.background.weak.color)),
+                    border,
+                }
+            };
+
+            let mut pl = pick_list(opts, selected, move |chosen: SelectOption| {
+                EngineMessage::XmlInputChanged { action: action.clone(), value: chosen.value }
+            })
+            .style(style_fn)
+            .width(parse_length(&node.width))
+            .padding(parse_padding(&node.padding));
+
+            if !placeholder.is_empty() {
+                pl = pl.placeholder(placeholder.clone());
+            }
+            if let Some(f) = font_for(&node.font) {
+                pl = pl.font(f);
+            }
+
+            let mut elem: Element<'a, EngineMessage> = pl.into();
+            if node.height.is_some() {
+                elem = container(elem)
+                    .height(parse_length(&node.height))
+                    .align_y(Alignment::Center)
+                    .into();
+            }
+            elem
         }
         NodeType::Rule { horizontal } => {
             // Thickness comes from the cross dimension; default 1px.

@@ -67,6 +67,20 @@ pub enum NodeType {
     Rule {
         horizontal: bool,
     },
+    /// A dropdown (`pick_list`) bound to context. `options` is a context key
+    /// holding a JSON array (objects with `label_field`/`value_field`, or plain
+    /// strings); `value_var` holds the selected value; selecting an option emits
+    /// `on_change` as an `XmlInputChanged` carrying the chosen option's value.
+    Select {
+        options: String,
+        value_var: String,
+        on_change: String,
+        placeholder: String,
+        label_field: String,
+        value_field: String,
+        /// Text color (inline `color`/`cor` or resolved from a `.iss` class).
+        color: Option<String>,
+    },
     Include {
         src: String,
         props: HashMap<String, String>,
@@ -273,6 +287,17 @@ impl UiNode {
                     .map(|s| !s.eq_ignore_ascii_case("vertical") && !s.eq_ignore_ascii_case("v"))
                     .unwrap_or(true);
                 NodeType::Rule { horizontal }
+            }
+            "Select" | "select" | "Dropdown" | "dropdown" | "PickList" | "picklist"
+            | "ComboBox" | "combobox" | "Combo" | "combo" | "Seletor" | "seletor" => {
+                let options = Self::get_attr(&node, &["options", "items", "itens", "source", "origem", "opcoes"]).unwrap_or_default();
+                let value_var = Self::get_attr(&node, &["value", "valor", "selected", "selecionado"]).unwrap_or_default();
+                let on_change = Self::get_attr(&node, &["onChange", "on_change", "on-change", "onSelect", "aoMudar", "ao_mudar"]).unwrap_or_default();
+                let placeholder = Self::get_attr(&node, &["placeholder", "dica"]).unwrap_or_default();
+                let label_field = Self::get_attr(&node, &["labelField", "label_field", "label-field", "labelKey", "campo_rotulo"]).unwrap_or_else(|| "label".to_string());
+                let value_field = Self::get_attr(&node, &["valueField", "value_field", "value-field", "valueKey", "campo_valor"]).unwrap_or_else(|| "value".to_string());
+                let color = Self::get_attr(&node, &["color", "cor"]);
+                NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, color }
             }
             "Include" | "include" | "Incluir" | "incluir" => {
                 let src = Self::get_attr(&node, &["src", "fonte"]).unwrap_or_default();

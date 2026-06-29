@@ -209,6 +209,7 @@ Todas as tags aceitam variações de caixa e nomes em inglês **ou** português.
 | `<Text>` | `text` | `content`/`texto`, `size`/`tamanho`, `bold`/`negrito`, `color`/`cor` |
 | `<Button>` | `button`, `Botao` | `text`/`texto`, `onClick`/`aoClicar`, `navigateTo`/`irPara`, `navigateBack`/`voltar`, `color`/`cor` |
 | `<TextInput>` | `Input`, `EntradaTexto` | `placeholder`/`dica`, `value`/`valor`, `onChange`/`aoMudar` |
+| `<Select>` | `Dropdown`, `PickList`, `ComboBox`, `Seletor` | `options`/`items` (chave de contexto com array JSON), `value`/`valor` (chave com o valor selecionado), `onChange`/`onSelect`, `placeholder`, `labelField` (padrão `label`), `valueField` (padrão `value`), `color`/`cor`. Estilizável via `.iss` (`background`, `border*`, `color`). |
 | `<Image>` | `Imagem` | `source`/`src`/`caminho`, `clip="Circle"` (corte circular) |
 | `<Svg>` | `Icon`, `Icone` | `source`/`src`, `color`/`cor` (tinge o ícone vetorial) |
 | `<Checkbox>` | `Check` | `label`, `checked`/`value` (chave de contexto), `onToggle`/`onChange` |

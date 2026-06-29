@@ -537,6 +537,19 @@ fn eval_owned(
             }
         }
         NodeType::Rule { horizontal } => NodeType::Rule { horizontal: *horizontal },
+        NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, color } => {
+            NodeType::Select {
+                options: process_template(options, context),
+                value_var: process_template(value_var, context),
+                on_change: namespace_action(process_template(on_change, context), owner),
+                placeholder: process_template(placeholder, context),
+                label_field: label_field.clone(),
+                value_field: value_field.clone(),
+                color: color.as_ref()
+                    .map(|c| process_template(c, context))
+                    .or_else(|| style.color.clone()),
+            }
+        }
         NodeType::Include { .. } | NodeType::Component { .. } | NodeType::Import { .. }
         | NodeType::ForEach { .. } | NodeType::If { .. } | NodeType::Else
         | NodeType::Link { .. } => {
