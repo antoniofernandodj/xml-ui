@@ -1598,6 +1598,77 @@ fn test_kdl_block_else_not_treated_as_flag() {
     assert!(textos.contains(&"web".to_string()));
 }
 
+#[test]
+fn test_kdl_rustploy_remote_ui_templates_parse() {
+    // Cobertura de regressão com os templates REAIS da remote-ui do rustploy
+    // (snapshots em tests/fixtures/rustploy_remote_ui/). São o motivo original
+    // do fix de flags bare em linha de continuação (`secure`, `else`): cada um
+    // deve parsear sem que um flag vire um nó irmão espúrio que engole as
+    // propriedades seguintes. NB: cópias — se os originais mudarem muito,
+    // re-sincronize estes arquivos.
+    //
+    // `else` é um flag de aplicação, então registramos como a remote-ui faz no
+    // boot (`secure`/`password` já são built-in de widget).
+    glacier_ui::register_bare_flags(["else", "senao"]);
+
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rustploy_remote_ui");
+    // Nomes de flag que NUNCA podem aparecer como um nó/componente: indicariam
+    // que um flag bare foi lido como início de um novo nó.
+    let flag_names = [
+        "secure", "password", "seguro", "senha",
+        "bold", "negrito", "else", "senao",
+        "navigateBack", "navigate_back", "navigate-back", "voltar",
+    ];
+
+    for name in ["app", "home", "login", "service", "shell"] {
+        let path = format!("{dir}/{name}.kdl");
+        let src = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("lendo fixture {name}.kdl: {e}"));
+        let ast = glacier_ui::parse_kdl(&src)
+            .unwrap_or_else(|e| panic!("parse de {name}.kdl falhou: {e}"));
+
+        let mut spurious = Vec::new();
+        let mut secure_inputs = 0usize;
+        collect_flag_nodes(&ast, &flag_names, &mut spurious, &mut secure_inputs);
+        assert!(
+            spurious.is_empty(),
+            "{name}.kdl: flag bare lido como nó espúrio: {spurious:?}"
+        );
+
+        // home.kdl tem dois campos mascarados (CLIENT SECRET e PAT): o flag
+        // `secure` em linha própria precisa ter sido dobrado no TextInput.
+        if name == "home" {
+            assert_eq!(
+                secure_inputs, 2,
+                "home.kdl deveria ter 2 TextInput secure=true (CLIENT SECRET e PAT)"
+            );
+        }
+    }
+}
+
+/// Anda a árvore coletando (1) nós `Component` cujo nome é um keyword de flag
+/// bare — sinal de que um flag virou nó por engano — e (2) a contagem de
+/// `TextInput` com `secure=true`.
+fn collect_flag_nodes(
+    node: &UiNode,
+    flag_names: &[&str],
+    spurious: &mut Vec<String>,
+    secure_inputs: &mut usize,
+) {
+    match &node.kind {
+        NodeType::Component { name, .. }
+            if flag_names.iter().any(|f| name.eq_ignore_ascii_case(f)) =>
+        {
+            spurious.push(name.clone());
+        }
+        NodeType::TextInput { secure: true, .. } => *secure_inputs += 1,
+        _ => {}
+    }
+    for child in &node.children {
+        collect_flag_nodes(child, flag_names, spurious, secure_inputs);
+    }
+}
+
 /// Helper: props de um nó referência de componente (`<NomeComp .../>`).
 fn component_props(node: &UiNode) -> std::collections::HashMap<String, String> {
     if let NodeType::Component { props, .. } = &node.kind {
