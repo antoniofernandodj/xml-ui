@@ -87,7 +87,18 @@ Column class="content" {
         if="{tab}"
         equals="general"
         direction=vertical class="scroll_fill" {
-          Column class="form_panel" {
+
+          // Enquanto o fetch do detalhe (spec + listas conta/repo/branch do
+          // Gitea) não completa, mostramos um loading — os Selects só aparecem
+          // depois, já populados, em vez de piscarem vazios.
+          Column class="form_panel" if="{svc_loading}" equals="true" {
+            Row class="loading_row" {
+              Text "⟳" class="loading_spin"
+              Text "Carregando dados do serviço…" class="loading_note"
+            }
+          }
+
+          Column class="form_panel" if="{svc_loading}" not_equals="true" {
 
             Text "PROVIDER" class="label_cap"
             Row class="tabs" {
