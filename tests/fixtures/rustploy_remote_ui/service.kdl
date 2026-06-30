@@ -10,9 +10,22 @@ Column class="content" {
           Text "●" class="state_dot" color="{svc_status_color}"
           Text "{svc_status_label}" class="badge_lbl" color="{svc_status_color}"
         }
+        // Live "1s, 2s, 3s…" deploy timer: shown only while a deploy started
+        // from this panel (Deploy/Rebuild) is in flight. Ticked once a second
+        // by the poll subscription (see `net::poll_stream`'s `sec_tick`), and
+        // hidden once the deploy finishes — the outcome (success/failure) and
+        // its total elapsed time then show in `svc_action_msg` below instead.
+        Row class="badge" if="{svc_deploy_running}" equals="true" {
+          Text "⏱" class="state_dot" color="#58A6FF"
+          Text "{svc_deploy_elapsed}" class="badge_lbl" color="#58A6FF"
+        }
       }
       Text "{svc_project}  ·  {svc_source_kind}" class="subtitle"
-      Text "{svc_action_msg}" if="{svc_action_msg}" not_equals="" class="muted"
+      Text "{svc_action_msg}"
+        if="{svc_action_msg}"
+        not_equals=""
+        class="muted"
+        color="{svc_action_color}"
     }
     Row class="svc_actions" {
       Button "Deploy" class="btn_primary" onClick="svc_deploy"
