@@ -23,6 +23,7 @@
 //! See `PLANO_KDL.md` for the full syntax and the XML equivalences.
 
 use std::collections::HashMap;
+use std::sync::RwLock;
 use kdl::{KdlDocument, KdlNode, KdlValue};
 use crate::parser::{UiNode, NodeType};
 
@@ -315,7 +316,10 @@ fn join_kdl_continuations(input: &str) -> String {
         }
 
         let is_cont = open.is_some()
-            && (forced || starts_with_property(trimmed) || trimmed.starts_with('{'));
+            && (forced
+                || starts_with_property(trimmed)
+                || starts_with_bare_flag(trimmed)
+                || trimmed.starts_with('{'));
 
         if is_cont {
             let idx = open.unwrap();
@@ -385,6 +389,81 @@ fn starts_with_property(s: &str) -> bool {
         i += 1;
     }
     bytes.get(i) == Some(&b'=')
+}
+
+/// The built-in bare boolean-flag keywords that may lead a continuation line —
+/// positional arguments rather than `key=value` properties. These are intrinsic
+/// **framework** flags (`bold` on a `Text`, `navigateBack` on a `Button`), so
+/// they fold correctly with no client setup.
+///
+/// Application-level flags (e.g. `secure`, `else`) are intentionally *not* here:
+/// an app registers the ones its templates place on their own line via
+/// [`register_bare_flags`]. Folding only needs to know a flag when it leads a
+/// continuation line; a flag written inline (`Text "x" bold`) parses natively
+/// regardless, so the built-in set stays minimal.
+const BARE_FLAGS: &[&str] = &[
+    "bold", "negrito",
+    "navigateBack", "navigate_back", "navigate-back", "voltar",
+];
+
+/// Extra bare flags registered by client code, on top of [`BARE_FLAGS`].
+static EXTRA_BARE_FLAGS: RwLock<Vec<String>> = RwLock::new(Vec::new());
+
+/// Registers additional bare boolean-flag keywords recognised by the KDL
+/// continuation folder, on top of the built-in [`BARE_FLAGS`].
+///
+/// A bare flag is a positional argument written without a value (e.g. `secure`,
+/// `else`). When such a flag sits on its own continuation line, the folder needs
+/// to know it is a flag — otherwise it is misread as the start of a new sibling
+/// node and swallows the node's remaining properties. Built-in widgets are
+/// covered out of the box; call this once at startup if your custom components
+/// accept their own bare flags. Matching is case-insensitive; empty strings and
+/// duplicates (including built-ins) are ignored, so it is safe to re-register.
+///
+/// ```
+/// glacier_ui::register_bare_flags(["readonly", "required"]);
+/// ```
+pub fn register_bare_flags<I, S>(flags: I)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut extra = EXTRA_BARE_FLAGS.write().unwrap();
+    for f in flags {
+        let f = f.as_ref().trim();
+        if f.is_empty()
+            || BARE_FLAGS.iter().any(|b| b.eq_ignore_ascii_case(f))
+            || extra.iter().any(|e| e.eq_ignore_ascii_case(f))
+        {
+            continue;
+        }
+        extra.push(f.to_string());
+    }
+}
+
+/// Whether `s` begins with a known bare flag (built-in [`BARE_FLAGS`] or one
+/// registered via [`register_bare_flags`]) as its first token (delimited by
+/// whitespace or end-of-line). This lets a continuation line such as `secure` or
+/// `else class="tab_on"` fold onto the node above it instead of being misread as
+/// the start of a new sibling node (which would swallow the node's remaining
+/// properties). A line that opens a children block (`else {`) is excluded — that
+/// is a real block node, not a flag continuation.
+fn starts_with_bare_flag(s: &str) -> bool {
+    if s.trim_end().ends_with('{') {
+        return false;
+    }
+    let first = s.split(|c: char| c.is_whitespace()).next().unwrap_or("");
+    if first.is_empty() {
+        return false;
+    }
+    if BARE_FLAGS.iter().any(|f| first.eq_ignore_ascii_case(f)) {
+        return true;
+    }
+    EXTRA_BARE_FLAGS
+        .read()
+        .unwrap()
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(first))
 }
 
 /// The entries of a KDL node split into positional arguments and named

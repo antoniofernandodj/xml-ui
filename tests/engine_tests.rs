@@ -1490,6 +1490,116 @@ fn test_kdl_close_brace_inside_strings_not_split() {
     assert!(style.contains(".a { color: #fff; } .b { color: #000; }"));
 }
 
+#[test]
+fn test_kdl_builtin_bare_flag_on_own_continuation_line() {
+    // Um flag bare *do framework* (`bold`) numa linha de continuação própria
+    // deve ser dobrado de volta no nó acima — sem registro do cliente, e sem
+    // virar um novo nó irmão que engole as propriedades seguintes.
+    let kdl = r##"
+    Column {
+        Text "Título"
+            bold
+            size=24
+            color="#fff"
+        Text "depois"
+    }
+    "##;
+    let ast = glacier_ui::parse_kdl(kdl).unwrap();
+    assert_eq!(ast.children.len(), 2, "o flag `bold` não pode virar um nó extra");
+    if let NodeType::Text { content, size, bold, color } = &ast.children[0].kind {
+        assert_eq!(content, "Título");
+        assert!(bold, "o flag bare `bold` deve virar bold=true");
+        assert_eq!(*size, Some(24.0), "o size sobrevive ao fold");
+        assert_eq!(color.as_deref(), Some("#fff"), "a cor sobrevive ao fold");
+    } else {
+        panic!("o primeiro filho deveria ser um Text, veio {:?}", ast.children[0].kind);
+    }
+}
+
+#[test]
+fn test_kdl_registered_bare_flag_on_own_continuation_line() {
+    // Regressão: flags bare *de aplicação* (`secure`) são registrados pelo
+    // cliente. Uma vez registrados, um flag numa linha de continuação própria
+    // dobra no nó acima em vez de virar um nó irmão que engole value/onChange.
+    // Era o bug do TextInput `secure` nos templates do rustploy.
+    glacier_ui::register_bare_flags(["secure"]);
+
+    let kdl = r#"
+    Column {
+        Text "CLIENT SECRET" class="label_cap"
+        TextInput ""
+            secure
+            class="field_input"
+            value="gp_client_secret"
+            onChange="field:gp_client_secret"
+        Text "depois" class="muted"
+    }
+    "#;
+    let ast = glacier_ui::parse_kdl(kdl).unwrap();
+    assert_eq!(ast.kind, NodeType::Column);
+    // Três filhos: o label, o input e o Text seguinte — sem nó espúrio `secure`.
+    assert_eq!(ast.children.len(), 3, "o flag `secure` não pode virar um nó extra");
+
+    let input = &ast.children[1];
+    assert_eq!(input.class.as_deref(), Some("field_input"), "a classe deve ficar no input");
+    if let NodeType::TextInput { placeholder, value_var, on_change, secure } = &input.kind {
+        assert_eq!(placeholder, "", "o placeholder vazio é preservado");
+        assert!(*secure, "o flag bare `secure` deve virar secure=true");
+        assert_eq!(value_var, "gp_client_secret", "o binding value sobrevive ao fold");
+        assert_eq!(on_change, "field:gp_client_secret", "o onChange sobrevive ao fold");
+    } else {
+        panic!("o segundo filho deveria ser um TextInput, veio {:?}", input.kind);
+    }
+}
+
+#[test]
+fn test_kdl_registered_bare_flag_leading_continuation_with_property() {
+    // Um flag bare registrado seguido de propriedades na mesma linha de
+    // continuação (`else class="tab_on"`) também deve ser dobrado no nó acima.
+    // Re-registrar é idempotente.
+    glacier_ui::register_bare_flags(["else"]);
+    glacier_ui::register_bare_flags(["else", "secure"]);
+
+    let kdl = r#"
+    Row {
+        Button "OAuth2"
+            else
+            class="tab_on"
+            onClick="gp_mode:oauth"
+    }
+    "#;
+    let ast = glacier_ui::parse_kdl(kdl).unwrap();
+    assert_eq!(ast.children.len(), 1, "o `else` não pode virar um nó irmão");
+    let btn = &ast.children[0];
+    assert!(btn.is_else, "o flag bare `else` deve marcar is_else");
+    assert_eq!(btn.class.as_deref(), Some("tab_on"));
+    if let NodeType::Button { text, on_click, .. } = &btn.kind {
+        assert_eq!(text, "OAuth2");
+        assert_eq!(on_click.as_deref(), Some("gp_mode:oauth"));
+    } else {
+        panic!("esperava um Button, veio {:?}", btn.kind);
+    }
+}
+
+#[test]
+fn test_kdl_block_else_not_treated_as_flag() {
+    // A forma de bloco `} else { ... }` continua sendo um nó-bloco (não um flag
+    // de continuação): o flag `else` só dobra quando não abre um bloco.
+    let kdl = r#"
+    Column {
+        if cond="{tab}" equals="git" {
+            Text "git"
+        } else {
+            Text "web"
+        }
+    }
+    "#;
+    let ast = glacier_ui::parse_kdl(kdl).unwrap();
+    let textos = collect_texts(&ast);
+    assert!(textos.contains(&"git".to_string()));
+    assert!(textos.contains(&"web".to_string()));
+}
+
 /// Helper: props de um nó referência de componente (`<NomeComp .../>`).
 fn component_props(node: &UiNode) -> std::collections::HashMap<String, String> {
     if let NodeType::Component { props, .. } = &node.kind {

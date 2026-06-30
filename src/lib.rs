@@ -6,7 +6,7 @@ pub mod component;
 pub mod stylesheet;
 
 pub use parser::{UiNode, NodeType};
-pub use kdl_parser::parse_kdl;
+pub use kdl_parser::{parse_kdl, register_bare_flags};
 pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_directives, StyleContext};
 pub use widget::{render_node, EngineMessage};
 pub use component::{Component, Context, ContextVar, Effect, Nav, Template};
