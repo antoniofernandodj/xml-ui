@@ -508,6 +508,86 @@ fn test_nested_component_action_routing() {
     assert_eq!(motor.get_data("parent_acted").map(String::as_str), Some("true"));
 }
 
+// --- Drag-and-drop list reordering ------------------------------------------
+
+/// A reorderable list (`ForEach ... onReorder="reordered" reorderKey="key"`)
+/// with a `dragHandle` on each item's `Text`. Records the final order it's
+/// asked to persist.
+struct EnvComp;
+impl Component for EnvComp {
+    fn name(&self) -> &str { "envcomp" }
+    fn template(&self) -> Template {
+        Template::Inline(r#"
+            <Column>
+                <ForEach items="rows" var="e" onReorder="reordered" reorderKey="key">
+                    <Row>
+                        <Text content="{e.key}" dragHandle="true" />
+                    </Row>
+                </ForEach>
+            </Column>
+        "#.into())
+    }
+    fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {
+        if action == "reordered" {
+            ctx.set("last_order", value.unwrap_or_default());
+        }
+    }
+}
+
+#[test]
+fn test_drag_reorder_end_to_end() {
+    let mut motor = GlacierUI::new();
+    motor.register(Box::new(EnvComp)).unwrap();
+    motor.set_initial_screen("envcomp");
+    motor.define_data("rows", r#"[{"key":"a"},{"key":"b"},{"key":"c"}]"#);
+
+    // Grab "a", drag it over "c" — order live-reflows to [b, c, a].
+    let _ = motor.dispatch(&EngineMessage::DragStart {
+        list: "rows".into(),
+        reorder_key: "key".into(),
+        on_reorder: "reordered".into(),
+        order: vec!["a".into(), "b".into(), "c".into()],
+        key: "a".into(),
+    });
+    let _ = motor.dispatch(&EngineMessage::DragHover { list: "rows".into(), key: "c".into() });
+    assert_eq!(
+        motor.get_data("rows").map(String::as_str),
+        Some(r#"[{"key":"b"},{"key":"c"},{"key":"a"}]"#),
+        "context should reflect the live reflow while still dragging",
+    );
+    assert_eq!(motor.get_data("last_order"), None, "onReorder only fires on drop");
+
+    // Drop: the component's `update` receives the final order.
+    let _ = motor.dispatch(&EngineMessage::DragEnd);
+    assert_eq!(motor.get_data("last_order").map(String::as_str), Some(r#"["b","c","a"]"#));
+
+    // A stray release with nothing in progress is a harmless no-op.
+    let _ = motor.dispatch(&EngineMessage::DragEnd);
+}
+
+#[test]
+fn test_drag_hover_ignores_other_lists_and_self() {
+    let mut motor = GlacierUI::new();
+    motor.register(Box::new(EnvComp)).unwrap();
+    motor.set_initial_screen("envcomp");
+    motor.define_data("rows", r#"[{"key":"a"},{"key":"b"}]"#);
+
+    let _ = motor.dispatch(&EngineMessage::DragStart {
+        list: "rows".into(),
+        reorder_key: "key".into(),
+        on_reorder: "reordered".into(),
+        order: vec!["a".into(), "b".into()],
+        key: "a".into(),
+    });
+    // Hovering a different list, or the dragged item itself, changes nothing.
+    let _ = motor.dispatch(&EngineMessage::DragHover { list: "other".into(), key: "b".into() });
+    let _ = motor.dispatch(&EngineMessage::DragHover { list: "rows".into(), key: "a".into() });
+    assert_eq!(motor.get_data("rows").map(String::as_str), Some(r#"[{"key":"a"},{"key":"b"}]"#));
+
+    let _ = motor.dispatch(&EngineMessage::DragEnd);
+    assert_eq!(motor.get_data("last_order").map(String::as_str), Some(r#"["a","b"]"#));
+}
+
 /// Helper: extract the `color` of an evaluated Text node.
 fn text_color(node: &NodeType) -> Option<String> {
     if let NodeType::Text { color, .. } = node {

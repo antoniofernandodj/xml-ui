@@ -189,6 +189,28 @@ pub struct UiNode {
     pub is_else: bool,
     pub for_each: Option<String>,
     pub for_each_var: Option<String>,
+    /// Action dispatched (with the new order as a JSON array of `reorderKey`
+    /// identities) when a reorderable `for-each`/`ForEach` item is dropped in a
+    /// new position. Set on the same node that carries `for_each`/`for_each_var`.
+    pub on_reorder: Option<String>,
+    /// Field name (within each item's JSON object) used as its stable identity
+    /// for reordering — the array itself has no positional index of its own.
+    pub reorder_key: Option<String>,
+    /// Marks a descendant of a reorderable item as the "grab handle": only it
+    /// starts a drag on mouse-press. Doesn't interpolate; a plain marker.
+    pub drag_handle: bool,
+    /// Internal, evaluation-only fields hydrated by the for-each expansion of a
+    /// reorderable list (never set from raw markup): which list (`items` key)
+    /// and which item (`reorder_key` value) a node belongs to, used to attach
+    /// the hover target (`drag_list`+`drag_item_key`) every item gets, and the
+    /// full drag payload (`drag_order`+`drag_on_reorder`) the handle gets.
+    pub drag_list: Option<String>,
+    pub drag_item_key: Option<String>,
+    pub drag_order: Option<Vec<String>>,
+    pub drag_on_reorder: Option<String>,
+    /// Same, for the `reorderKey` field name — needed by [`crate::GlacierUI`]
+    /// to reorder the context's JSON array by identity as the drag moves.
+    pub drag_reorder_key: Option<String>,
 }
 
 impl UiNode {
@@ -248,6 +270,9 @@ impl UiNode {
         let is_else = node.has_attribute("else") || node.has_attribute("senao");
         let for_each = Self::get_attr(&node, &["for-each", "forEach", "foreach", "each", "repeat"]);
         let for_each_var = Self::get_attr(&node, &["var", "variavel"]);
+        let on_reorder = Self::get_attr(&node, &["onReorder", "on_reorder", "on-reorder", "aoReordenar"]);
+        let reorder_key = Self::get_attr(&node, &["reorderKey", "reorder_key", "reorder-key", "chaveReordenar"]);
+        let drag_handle = Self::get_attr_bool(&node, &["dragHandle", "drag_handle", "drag-handle", "alcaArraste"]);
 
         let kind = match tag {
             "Container" | "container" => NodeType::Container,
@@ -426,6 +451,14 @@ impl UiNode {
             is_else,
             for_each,
             for_each_var,
+            on_reorder,
+            reorder_key,
+            drag_handle,
+            drag_list: None,
+            drag_item_key: None,
+            drag_order: None,
+            drag_on_reorder: None,
+            drag_reorder_key: None,
         })
     }
 

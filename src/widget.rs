@@ -135,6 +135,16 @@ pub enum EngineMessage {
     /// async effects ([`crate::component::Effect`]) completing and by component
     /// subscriptions; the host app just forwards it to [`crate::GlacierUI::dispatch`].
     ContextPatch(Vec<(String, String)>),
+    /// Mouse-press on a reorderable item's `dragHandle`. `order` is the full
+    /// identity snapshot (every item's `reorderKey` value, in current order) at
+    /// the moment the drag started; `key` is this item's own identity.
+    DragStart { list: String, reorder_key: String, on_reorder: String, order: Vec<String>, key: String },
+    /// Cursor entered another item of the same reorderable list while a drag is
+    /// in progress — moves `key` to that item's position in the live order.
+    DragHover { list: String, key: String },
+    /// Left mouse button released anywhere (global subscription): ends the
+    /// drag in progress, if any, dispatching `on_reorder` with the final order.
+    DragEnd,
 }
 
 /// Helper to parse iced::Length from optional string
@@ -681,7 +691,9 @@ pub fn render_node<'a>(
     // `on_double_click` covers e.g. titlebar double-click to maximize; and
     // `cursor` sets the hover pointer (resize arrows on edge handles). Applied
     // last so the whole styled element is the interactive surface.
-    if node.on_press.is_some() || node.on_double_click.is_some() || node.cursor.is_some() {
+    if node.on_press.is_some() || node.on_double_click.is_some() || node.cursor.is_some()
+        || node.drag_item_key.is_some()
+    {
         let mut ma = mouse_area(element);
         if let Some(action) = &node.on_press {
             ma = ma.on_press(EngineMessage::UiClick(action.clone()));
@@ -691,6 +703,30 @@ pub fn render_node<'a>(
         }
         if let Some(interaction) = node.cursor.as_deref().and_then(cursor_interaction) {
             ma = ma.interaction(interaction);
+        }
+        // Drag-and-drop reordering (see `UiNode::drag_*`, hydrated by the
+        // for-each expansion of a reorderable list in `eval.rs`): every item of
+        // such a list is a valid drop/hover target; only its `dragHandle`
+        // descendant also starts the drag on press.
+        if let (Some(list), Some(key)) = (&node.drag_list, &node.drag_item_key) {
+            ma = ma.on_enter(EngineMessage::DragHover { list: list.clone(), key: key.clone() });
+        }
+        if node.drag_handle {
+            if let (Some(list), Some(key), Some(order), Some(on_reorder), Some(reorder_key)) = (
+                &node.drag_list,
+                &node.drag_item_key,
+                &node.drag_order,
+                &node.drag_on_reorder,
+                &node.drag_reorder_key,
+            ) {
+                ma = ma.on_press(EngineMessage::DragStart {
+                    list: list.clone(),
+                    reorder_key: reorder_key.clone(),
+                    on_reorder: on_reorder.clone(),
+                    order: order.clone(),
+                    key: key.clone(),
+                });
+            }
         }
         element = ma.into();
     }

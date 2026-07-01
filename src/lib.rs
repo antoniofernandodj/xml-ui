@@ -65,6 +65,22 @@ pub struct GlacierUI {
     /// Last text each editor pushed into the context, to tell an external context
     /// change (reload editor) from the editor's own edit (leave it alone).
     editor_synced: HashMap<String, String>,
+    /// The reorderable list drag in progress, if any — outside the Context
+    /// (like `editors` above) because it's transient render/interaction state,
+    /// not something a host app's `Component::update` should see or persist.
+    drag: Option<DragState>,
+}
+
+/// State of an in-progress drag-and-drop reorder (see `UiNode::drag_*` /
+/// `EngineMessage::DragStart|DragHover|DragEnd`). `order` is mutated live as
+/// the cursor moves over other items, so the list visually reflows as you
+/// drag; `dragging` (the grabbed item's identity) stays fixed throughout.
+struct DragState {
+    list: String,
+    reorder_key: String,
+    on_reorder: String,
+    order: Vec<String>,
+    dragging: String,
 }
 
 impl GlacierUI {
@@ -88,6 +104,7 @@ impl GlacierUI {
             data_sources: Vec::new(),
             editors: HashMap::new(),
             editor_synced: HashMap::new(),
+            drag: None,
         }
     }
 
@@ -289,6 +306,56 @@ impl GlacierUI {
                 let _ = self.reevaluate_all();
                 return iced::Task::none();
             }
+            // Drag-and-drop reordering of a `for-each`/`ForEach` list (see
+            // `UiNode::drag_*`). `DragStart`/`DragHover` are purely internal —
+            // no component ever sees them, same as `window:*` above; only
+            // `DragEnd` reaches the owning `Component`, via a synthetic
+            // `UiInputChanged` carrying the final order as JSON.
+            EngineMessage::DragStart { list, reorder_key, on_reorder, order, key } => {
+                self.drag = Some(DragState {
+                    list: list.clone(),
+                    reorder_key: reorder_key.clone(),
+                    on_reorder: on_reorder.clone(),
+                    order: order.clone(),
+                    dragging: key.clone(),
+                });
+                return iced::Task::none();
+            }
+            EngineMessage::DragHover { list, key } => {
+                let moved = if let Some(drag) = &mut self.drag {
+                    if &drag.list == list && &drag.dragging != key {
+                        let from = drag.order.iter().position(|k| k == &drag.dragging);
+                        let to = drag.order.iter().position(|k| k == key);
+                        if let (Some(from), Some(to)) = (from, to) {
+                            let item = drag.order.remove(from);
+                            drag.order.insert(to, item);
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if moved {
+                    let drag = self.drag.as_ref().expect("checked above");
+                    reorder_context_json(&mut self.context_data, &drag.list, &drag.reorder_key, &drag.order);
+                    let _ = self.reevaluate_all();
+                }
+                return iced::Task::none();
+            }
+            EngineMessage::DragEnd => {
+                if let Some(drag) = self.drag.take() {
+                    let value = serde_json::to_string(&drag.order).unwrap_or_else(|_| "[]".to_string());
+                    return self.dispatch(&EngineMessage::UiInputChanged {
+                        action: drag.on_reorder,
+                        value,
+                    });
+                }
+                return iced::Task::none();
+            }
             EngineMessage::UiEditorAction { binding, on_change, action } => {
                 // Apply the edit to the kept editor buffer, then mirror its full
                 // text into the context (and `editor_synced`, so the sync step
@@ -366,7 +433,12 @@ impl GlacierUI {
     /// stay live; their emitted [`EngineMessage::ContextPatch`] values are just
     /// forwarded to [`GlacierUI::dispatch`].
     pub fn subscription(&self) -> iced::Subscription<EngineMessage> {
-        let subs: Vec<_> = self.components.values().map(|c| c.subscription()).collect();
+        let mut subs: Vec<_> = self.components.values().map(|c| c.subscription()).collect();
+        // Global mouse-release listener: ends a reorder drag no matter where
+        // the button comes up (even outside any `mouse_area`, or over a widget
+        // that "captured" the event) — `dispatch` just no-ops if `self.drag` is
+        // `None`, so this is always safe to keep active.
+        subs.push(iced::event::listen_with(drag_end_from_event));
         iced::Subscription::batch(subs)
     }
 
@@ -815,6 +887,56 @@ fn collect_links(node: &UiNode, out: &mut Vec<(String, String, Option<String>)>)
     }
     for child in &node.children {
         collect_links(child, out);
+    }
+}
+
+/// Maps a raw left-mouse-button release to `EngineMessage::DragEnd`, ignoring
+/// every other event. Used by [`GlacierUI::subscription`]'s global listener —
+/// a plain `fn` (not a closure) because `iced::event::listen_with` requires one.
+fn drag_end_from_event(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<EngineMessage> {
+    match event {
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+            Some(EngineMessage::DragEnd)
+        }
+        _ => None,
+    }
+}
+
+/// Reorders the JSON array stored at `context[list]` to match `order` (a
+/// sequence of `reorder_key` identities), so the list renders the live reflow
+/// while a drag is in progress. Elements whose identity isn't in `order`
+/// (shouldn't happen — `order` is a snapshot of the same array) are kept, in
+/// their original relative order, after the ones that are.
+fn reorder_context_json(
+    context: &mut HashMap<String, String>,
+    list: &str,
+    reorder_key: &str,
+    order: &[String],
+) {
+    let Some(json_str) = context.get(list) else { return };
+    let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(json_str) else { return };
+
+    let mut by_key: HashMap<String, serde_json::Value> = HashMap::new();
+    let mut leftovers: Vec<serde_json::Value> = Vec::new();
+    for item in arr {
+        match item.get(reorder_key).and_then(|v| v.as_str()).map(String::from) {
+            Some(k) => { by_key.insert(k, item); }
+            None => leftovers.push(item),
+        }
+    }
+    let mut reordered: Vec<serde_json::Value> = order
+        .iter()
+        .filter_map(|k| by_key.remove(k))
+        .collect();
+    reordered.extend(by_key.into_values());
+    reordered.extend(leftovers);
+
+    if let Ok(new_json) = serde_json::to_string(&serde_json::Value::Array(reordered)) {
+        context.insert(list.to_string(), new_json);
     }
 }
 

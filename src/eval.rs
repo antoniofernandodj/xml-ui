@@ -254,24 +254,39 @@ fn expand_children(
         if let Some(items) = &child.for_each {
             let var = child.for_each_var.as_deref().unwrap_or("item");
             let items_evaluated = process_template(items, context);
+            // Drag-and-drop: resolved once per for-each, reused by every item.
+            let reorder_key = child.reorder_key.as_ref().map(|s| process_template(s, context));
+            let on_reorder = child.on_reorder.as_ref()
+                .map(|s| namespace_action(process_template(s, context), owner));
             if let Some(json_str) = context.get(&items_evaluated) {
                 if let Ok(serde_json::Value::Array(arr)) =
                     serde_json::from_str::<serde_json::Value>(json_str)
                 {
+                    // Full identity snapshot, needed by the handle's `DragStart`.
+                    let full_order: Vec<String> = match &reorder_key {
+                        Some(rk) => arr.iter()
+                            .filter_map(|item| item.get(rk).and_then(|v| v.as_str()).map(String::from))
+                            .collect(),
+                        None => Vec::new(),
+                    };
                     for item in arr {
                         let mut local_context = context.clone();
-                        match item {
+                        let mut this_key: Option<String> = None;
+                        match &item {
                             serde_json::Value::Object(obj) => {
                                 for (key, val) in obj {
                                     let str_val = match val {
-                                        serde_json::Value::String(s) => s,
+                                        serde_json::Value::String(s) => s.clone(),
                                         other => other.to_string(),
                                     };
+                                    if reorder_key.as_deref() == Some(key.as_str()) {
+                                        this_key = Some(str_val.clone());
+                                    }
                                     local_context.insert(format!("{}.{}", var, key), str_val);
                                 }
                             }
                             serde_json::Value::String(s) => {
-                                local_context.insert(var.to_string(), s);
+                                local_context.insert(var.to_string(), s.clone());
                             }
                             other => {
                                 local_context.insert(var.to_string(), other.to_string());
@@ -281,6 +296,19 @@ fn expand_children(
                         let mut clone = child.clone();
                         clone.for_each = None;
                         clone.for_each_var = None;
+                        clone.on_reorder = None;
+                        clone.reorder_key = None;
+
+                        if let (Some(on_reorder), Some(key), Some(rk)) = (&on_reorder, &this_key, &reorder_key) {
+                            hydrate_drag_item(
+                                std::slice::from_mut(&mut clone),
+                                &items_evaluated,
+                                key,
+                                &full_order,
+                                on_reorder,
+                                rk,
+                            );
+                        }
 
                         // Expand the single child in the new context (which will evaluate its if condition if present)
                         expand_children(
@@ -332,33 +360,55 @@ fn expand_children(
             NodeType::Import { .. } | NodeType::Link { .. } | NodeType::Style { .. } => {}
             NodeType::ForEach { items, var } => {
                 let items_evaluated = process_template(items, context);
+                // Drag-and-drop: `onReorder`/`reorderKey` on the `<ForEach>` tag
+                // itself (a plain node attribute, same as `onPress`/`cursor`).
+                let reorder_key = child.reorder_key.as_ref().map(|s| process_template(s, context));
+                let on_reorder = child.on_reorder.as_ref()
+                    .map(|s| namespace_action(process_template(s, context), owner));
                 if let Some(json_str) = context.get(&items_evaluated) {
                     if let Ok(serde_json::Value::Array(arr)) =
                         serde_json::from_str::<serde_json::Value>(json_str)
                     {
+                        let full_order: Vec<String> = match &reorder_key {
+                            Some(rk) => arr.iter()
+                                .filter_map(|item| item.get(rk).and_then(|v| v.as_str()).map(String::from))
+                                .collect(),
+                            None => Vec::new(),
+                        };
                         for item in arr {
                             let mut local_context = context.clone();
-                            match item {
+                            let mut this_key: Option<String> = None;
+                            match &item {
                                 serde_json::Value::Object(obj) => {
                                     for (key, val) in obj {
                                         let str_val = match val {
-                                            serde_json::Value::String(s) => s,
+                                            serde_json::Value::String(s) => s.clone(),
                                             other => other.to_string(),
                                         };
+                                        if reorder_key.as_deref() == Some(key.as_str()) {
+                                            this_key = Some(str_val.clone());
+                                        }
                                         local_context.insert(format!("{}.{}", var, key), str_val);
                                     }
                                 }
                                 serde_json::Value::String(s) => {
-                                    local_context.insert(var.clone(), s);
+                                    local_context.insert(var.clone(), s.clone());
                                 }
                                 other => {
                                     local_context.insert(var.clone(), other.to_string());
                                 }
                             }
+                            // The `<ForEach>` tag's body isn't a single node like
+                            // the attribute form's — clone its children so the
+                            // hydration below has somewhere of its own to live.
+                            let mut body: Vec<UiNode> = child.children.clone();
+                            if let (Some(on_reorder), Some(key), Some(rk)) = (&on_reorder, &this_key, &reorder_key) {
+                                hydrate_drag_item(&mut body, &items_evaluated, key, &full_order, on_reorder, rk);
+                            }
                             // Re-run the structural expansion on the body so that
                             // nested `if`/`else`/`ForEach` are honoured per item.
                             expand_children(
-                                &child.children,
+                                &body,
                                 &local_context,
                                 templates,
                                 styles,
@@ -618,5 +668,57 @@ fn eval_owned(
         is_else: false,
         for_each: None,
         for_each_var: None,
+        // `on_reorder`/`reorder_key` are only meaningful on a for-each node,
+        // consumed (and interpolated) directly by `expand_children`'s for-each
+        // handling below — nothing to carry on past evaluation.
+        on_reorder: None,
+        reorder_key: None,
+        // `drag_handle` is a static marker (no template to resolve); carried
+        // through unevaluated so a reorderable item's handle survives eval.
+        drag_handle: node.drag_handle,
+        // Hydrated (if at all) by the *parent* for-each's expansion, onto this
+        // very node, before it reached this call — carried through as-is
+        // (nothing here to interpolate; identities are already resolved).
+        drag_list: node.drag_list.clone(),
+        drag_item_key: node.drag_item_key.clone(),
+        drag_order: node.drag_order.clone(),
+        drag_on_reorder: node.drag_on_reorder.clone(),
+        drag_reorder_key: node.drag_reorder_key.clone(),
     })
+}
+
+/// Finds the first `drag_handle=true` descendant across `nodes` (a repeated
+/// for-each item, possibly several sibling roots) and hydrates it with the
+/// full payload needed to start a drag from that handle. Every top-level node
+/// in `nodes` also gets the lighter hover-target identity
+/// (`drag_list`/`drag_item_key`), since any of them dropping-over should be a
+/// valid target. Stops at the first handle found (one handle per item).
+fn hydrate_drag_item(
+    nodes: &mut [UiNode],
+    list: &str,
+    key: &str,
+    order: &[String],
+    on_reorder: &str,
+    reorder_key: &str,
+) {
+    for node in nodes.iter_mut() {
+        node.drag_list = Some(list.to_string());
+        node.drag_item_key = Some(key.to_string());
+    }
+    fn find_handle(node: &mut UiNode, list: &str, key: &str, order: &[String], on_reorder: &str, reorder_key: &str) -> bool {
+        if node.drag_handle {
+            node.drag_list = Some(list.to_string());
+            node.drag_item_key = Some(key.to_string());
+            node.drag_reorder_key = Some(reorder_key.to_string());
+            node.drag_order = Some(order.to_vec());
+            node.drag_on_reorder = Some(on_reorder.to_string());
+            return true;
+        }
+        node.children.iter_mut().any(|c| find_handle(c, list, key, order, on_reorder, reorder_key))
+    }
+    for node in nodes.iter_mut() {
+        if find_handle(node, list, key, order, on_reorder, reorder_key) {
+            break;
+        }
+    }
 }

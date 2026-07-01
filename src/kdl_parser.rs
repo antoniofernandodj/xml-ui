@@ -564,6 +564,14 @@ fn blank(kind: NodeType) -> UiNode {
         is_else: false,
         for_each: None,
         for_each_var: None,
+        on_reorder: None,
+        reorder_key: None,
+        drag_handle: false,
+        drag_list: None,
+        drag_item_key: None,
+        drag_order: None,
+        drag_on_reorder: None,
+        drag_reorder_key: None,
     }
 }
 
@@ -643,6 +651,9 @@ fn node_from_kdl(node: &KdlNode) -> Option<UiNode> {
     let is_else = attrs.get_bool(&["else", "senao"]);
     let for_each = attrs.get(&["for-each", "forEach", "foreach", "each", "repeat"]);
     let for_each_var = attrs.get(&["var", "variavel"]);
+    let on_reorder = attrs.get(&["onReorder", "on_reorder", "on-reorder", "aoReordenar"]);
+    let reorder_key = attrs.get(&["reorderKey", "reorder_key", "reorder-key", "chaveReordenar"]);
+    let drag_handle = attrs.get_bool(&["dragHandle", "drag_handle", "drag-handle", "alcaArraste"]);
 
     let kind = match tag {
         "Container" | "container" => NodeType::Container,
@@ -819,6 +830,14 @@ fn node_from_kdl(node: &KdlNode) -> Option<UiNode> {
         is_else,
         for_each,
         for_each_var,
+        on_reorder,
+        reorder_key,
+        drag_handle,
+        drag_list: None,
+        drag_item_key: None,
+        drag_order: None,
+        drag_on_reorder: None,
+        drag_reorder_key: None,
     })
 }
 
