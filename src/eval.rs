@@ -601,6 +601,12 @@ fn eval_owned(
                     .or_else(|| style.color.clone()),
             }
         }
+        NodeType::Form { on_submit, name } => {
+            NodeType::Form {
+                on_submit: on_submit.as_ref().map(|s| namespace_action(process_template(s, context), owner)),
+                name: name.as_ref().map(|n| process_template(n, context)),
+            }
+        }
         NodeType::Include { .. } | NodeType::Component { .. } | NodeType::Import { .. }
         | NodeType::ForEach { .. } | NodeType::If { .. } | NodeType::Else
         | NodeType::Link { .. } | NodeType::Style { .. } => {
@@ -640,6 +646,19 @@ fn eval_owned(
     // they are expanded or dropped rather than rendered directly.
     let mut children_eval = Vec::new();
     expand_children(&node.children, context, templates, styles, scope, owner, &mut children_eval)?;
+
+    // A `<Form>` hydrates every `formControl`-bound descendant (at any depth,
+    // through nested Rows/Columns) with the shared scope, its evaluated
+    // `onSubmit` action, and — per control, in document order — the name of
+    // the next one, mirroring how a reorderable for-each hydrates its
+    // `dragHandle` (see `hydrate_drag_item` below).
+    if let NodeType::Form { on_submit, name } = &kind_eval {
+        let form_scope = format!("{}::{}", owner.unwrap_or(""), name.as_deref().unwrap_or(""));
+        let submit_action = on_submit.clone().unwrap_or_default();
+        let mut order = Vec::new();
+        collect_form_control_names(&children_eval, &mut order);
+        hydrate_form_controls(&mut children_eval, &order, &form_scope, &submit_action);
+    }
 
     Ok(UiNode {
         kind: kind_eval,
@@ -684,7 +703,45 @@ fn eval_owned(
         drag_order: node.drag_order.clone(),
         drag_on_reorder: node.drag_on_reorder.clone(),
         drag_reorder_key: node.drag_reorder_key.clone(),
+        form_control: node.form_control.as_ref().map(|s| process_template(s, context)),
+        // Hydrated (if at all) by the enclosing `<Form>`'s post-pass above, on
+        // this very (already evaluated) node — carried through as a default of
+        // `None` here, same as the drag_* fields are for a plain for-each item.
+        form_scope: node.form_scope.clone(),
+        form_submit_action: node.form_submit_action.clone(),
+        form_next_focus: node.form_next_focus.clone(),
     })
+}
+
+/// Collects the `form_control` name of every node across `nodes` (a `<Form>`'s
+/// already-evaluated subtree) in document order — the tab/Enter order used to
+/// find each control's "next" one.
+fn collect_form_control_names(nodes: &[UiNode], out: &mut Vec<String>) {
+    for node in nodes {
+        if let Some(name) = &node.form_control {
+            out.push(name.clone());
+        }
+        collect_form_control_names(&node.children, out);
+    }
+}
+
+/// Hydrates every `form_control`-bound node across `nodes` with the enclosing
+/// `<Form>`'s `scope` (used to build a stable focus id) and evaluated
+/// `on_submit` action, plus the name of the next control in `order` (`None` on
+/// the last one).
+fn hydrate_form_controls(nodes: &mut [UiNode], order: &[String], scope: &str, on_submit: &str) {
+    for node in nodes.iter_mut() {
+        if let Some(name) = &node.form_control {
+            let next = order.iter()
+                .position(|n| n == name)
+                .and_then(|i| order.get(i + 1))
+                .cloned();
+            node.form_scope = Some(scope.to_string());
+            node.form_submit_action = Some(on_submit.to_string());
+            node.form_next_focus = next;
+        }
+        hydrate_form_controls(&mut node.children, order, scope, on_submit);
+    }
 }
 
 /// Finds the first `drag_handle=true` descendant across `nodes` (a repeated

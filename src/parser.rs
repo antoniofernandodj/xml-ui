@@ -83,6 +83,16 @@ pub enum NodeType {
         /// Text color (inline `color`/`cor` or resolved from a `.gss` class).
         color: Option<String>,
     },
+    /// A form container, e.g. `<Form onSubmit="entrar">...</Form>`. Its
+    /// descendant inputs bind to [`crate::forms::Form`]/`FormControl`s by name
+    /// via the generic `formControl` attribute (see [`UiNode::form_control`]);
+    /// renders like a [`NodeType::Column`]. `name` disambiguates two `<Form>`s
+    /// in the same component that happen to share a control name (rare —
+    /// optional).
+    Form {
+        on_submit: Option<String>,
+        name: Option<String>,
+    },
     Include {
         src: String,
         props: HashMap<String, String>,
@@ -211,6 +221,23 @@ pub struct UiNode {
     /// Same, for the `reorderKey` field name — needed by [`crate::GlacierUI`]
     /// to reorder the context's JSON array by identity as the drag moves.
     pub drag_reorder_key: Option<String>,
+    /// Binds this input to a [`crate::forms::Form`]'s `FormControl` by name
+    /// (Angular's `formControlName`, e.g. `TextInput formControl="email"`). A
+    /// `TextInput` with no explicit `value`/`onChange` uses this name for
+    /// both, so the input reads/writes the control without repeating the name.
+    pub form_control: Option<String>,
+    /// Internal, evaluation-only: hydrated by the enclosing `<Form>` (never set
+    /// from raw markup) onto every `form_control`-bound descendant — the shared
+    /// `"{owner}::{form name}"` prefix used to build this input's stable focus
+    /// id and the enclosing form's evaluated `onSubmit` action, so Enter always
+    /// fires it (see [`crate::widget::EngineMessage::UiSubmit`]).
+    pub form_scope: Option<String>,
+    pub form_submit_action: Option<String>,
+    /// Internal, evaluation-only: the *name* of the next `form_control` in
+    /// document order within the same `<Form>` (`None` on the last one) — Enter
+    /// also focuses it, Tab-like, so the user can fill the whole form with the
+    /// keyboard alone.
+    pub form_next_focus: Option<String>,
 }
 
 impl UiNode {
@@ -262,6 +289,7 @@ impl UiNode {
         let on_press = Self::get_attr(&node, &["onPress", "on_press", "on-press", "aoPressionar", "ao_pressionar"]);
         let on_double_click = Self::get_attr(&node, &["onDoubleClick", "on_double_click", "on-double-click", "aoClicarDuplo"]);
         let cursor = Self::get_attr(&node, &["cursor", "cursor_", "cursorIcon"]);
+        let form_control = Self::get_attr(&node, &["formControl", "form_control", "form-control", "controleForm", "controle_form"]);
 
         // Structural directives as attributes (Vue/Angular style)
         let if_cond = Self::get_attr(&node, &["if", "se"]);
@@ -295,8 +323,19 @@ impl UiNode {
             }
             "TextInput" | "textinput" | "Input" | "input" | "EntradaTexto" | "entrada_texto" => {
                 let placeholder = Self::get_attr(&node, &["placeholder", "dica"]).unwrap_or_default();
-                let value_var = Self::get_attr(&node, &["value", "valor"]).unwrap_or_default();
-                let on_change = Self::get_attr(&node, &["onChange", "on_change", "on-change", "aoMudar", "ao_mudar"]).unwrap_or_default();
+                let mut value_var = Self::get_attr(&node, &["value", "valor"]).unwrap_or_default();
+                let mut on_change = Self::get_attr(&node, &["onChange", "on_change", "on-change", "aoMudar", "ao_mudar"]).unwrap_or_default();
+                // `formControl="username"` without an explicit `value`/`onChange`
+                // binds both to the control name, so `Form::sync_to_context`'s
+                // `ctx.set(name, ...)` round-trips straight back into this input.
+                if let Some(control) = &form_control {
+                    if value_var.is_empty() {
+                        value_var = control.clone();
+                    }
+                    if on_change.is_empty() {
+                        on_change = control.clone();
+                    }
+                }
                 let secure = Self::get_attr_bool(&node, &["secure", "password", "seguro", "senha"]);
                 NodeType::TextInput { placeholder, value_var, on_change, secure }
             }
@@ -350,6 +389,11 @@ impl UiNode {
                 let value_field = Self::get_attr(&node, &["valueField", "value_field", "value-field", "valueKey", "campo_valor"]).unwrap_or_else(|| "value".to_string());
                 let color = Self::get_attr(&node, &["color", "cor"]);
                 NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, color }
+            }
+            "Form" | "form" | "Formulario" | "formulario" => {
+                let on_submit = Self::get_attr(&node, &["onSubmit", "on_submit", "on-submit", "aoSubmeter", "ao_submeter"]);
+                let name = Self::get_attr(&node, &["name", "nome"]);
+                NodeType::Form { on_submit, name }
             }
             "Include" | "include" | "Incluir" | "incluir" => {
                 let src = Self::get_attr(&node, &["src", "fonte"]).unwrap_or_default();
@@ -459,6 +503,10 @@ impl UiNode {
             drag_order: None,
             drag_on_reorder: None,
             drag_reorder_key: None,
+            form_control,
+            form_scope: None,
+            form_submit_action: None,
+            form_next_focus: None,
         })
     }
 

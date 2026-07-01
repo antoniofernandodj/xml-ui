@@ -59,6 +59,7 @@ impl Component for Contador {
       - [Precedência: `for-each` + `if` no mesmo elemento](#precedência-for-each--if-no-mesmo-elemento)
     - [Tags-Invólucro (Legado)](#tags-invólucro-legado)
   - [Inputs de texto](#inputs-de-texto)
+  - [Formulários (Reactive Forms)](#formulários-reactive-forms)
   - [Imagens](#imagens)
   - [Componentes e composição](#componentes-e-composição)
     - [`<import>` e referência por nome](#import-e-referência-por-nome)
@@ -223,7 +224,8 @@ Todas as tags aceitam variações de caixa e nomes em inglês **ou** português.
 |---|---|---|
 | `<Text>` | `text` | `content`/`texto`, `size`/`tamanho`, `bold`/`negrito`, `color`/`cor` |
 | `<Button>` | `button`, `Botao` | `text`/`texto`, `onClick`/`aoClicar`, `navigateTo`/`irPara`, `navigateBack`/`voltar`, `color`/`cor` |
-| `<TextInput>` | `Input`, `EntradaTexto` | `placeholder`/`dica`, `value`/`valor`, `onChange`/`aoMudar`, `secure`/`password` (mascara o texto) |
+| `<TextInput>` | `Input`, `EntradaTexto` | `placeholder`/`dica`, `value`/`valor`, `onChange`/`aoMudar`, `secure`/`password` (mascara o texto), `formControl` (liga a um `FormControl` pelo nome — veja [Formulários](#formulários-reactive-forms)) |
+| `<Form>` | `Formulario` | `onSubmit`/`aoSubmeter`, `name`/`nome` (opcional, só necessário com dois `<Form>`s de controles homônimos no mesmo componente) — renderiza como `<Column>` |
 | `<Select>` | `Dropdown`, `PickList`, `ComboBox`, `Seletor` | `options`/`items` (chave de contexto com array JSON), `value`/`valor` (chave com o valor selecionado), `onChange`/`onSelect`, `placeholder`, `labelField` (padrão `label`), `valueField` (padrão `value`), `color`/`cor`. Estilizável via `.gss` (`background`, `border*`, `color`). |
 | `<Image>` | `Imagem` | `source`/`src`/`caminho`, `clip="Circle"` (corte circular) |
 | `<Svg>` | `Icon`, `Icone` | `source`/`src`, `color`/`cor` (tinge o ícone vetorial) |
@@ -419,6 +421,83 @@ fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {
 ```
 
 Veja `examples/perfil.rs` e `examples/navegacao.rs`.
+
+---
+
+## Formulários (Reactive Forms)
+
+Inspirado no Angular Reactive Forms: `FormBuilder` declara os `FormControl`s
+(nome, valor inicial, validadores) do lado Rust; o componente guarda o `Form`
+construído no seu próprio estado; e o template liga cada input a um controle
+pelo atributo `formControl` — o motor cuida do resto (o texto digitado vai
+para o controle certo, Enter sempre submete e avança para o próximo campo).
+
+```rust
+use glacier_ui::{Form, FormBuilder, FormControl};
+
+struct Login {
+    form: Form,
+}
+
+impl Login {
+    fn novo() -> Self {
+        Self {
+            form: FormBuilder::new("login")
+                .control(FormControl::new("username", "").required().min_length(3))
+                .control(FormControl::new("password", "").required().min_length(6))
+                .build(),
+        }
+    }
+}
+```
+
+```kdl
+Form onSubmit="entrar" name="login" {
+    TextInput formControl="username" placeholder="usuário"
+    TextInput formControl="password" placeholder="senha" secure=true
+    Button text="Entrar" onClick="entrar"
+}
+```
+
+`TextInput formControl="username"` sem `value`/`onChange` explícitos usa o
+nome do controle para os dois — ele lê `username` do contexto e dispara a
+ação `"username"` a cada tecla. No `update`, `Form::has_control` reconhece
+essa ação sem precisar de um `match` por campo:
+
+```rust
+fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {
+    if self.form.has_control(action) {
+        self.form.set_value(action, value.unwrap_or_default());
+        self.form.sync_to_context(ctx); // republica valores/estado no contexto
+        return;
+    }
+    if action == "entrar" {
+        if self.form.is_valid() {
+            // ... prossegue com self.form.value("username") etc.
+        } else {
+            self.form.validate(); // mostra erros também nos campos não tocados
+            self.form.sync_to_context(ctx);
+        }
+    }
+}
+```
+
+Validadores disponíveis em `FormControl`: `.required()`, `.min_length(n)`,
+`.max_length(n)`, `.pattern(regex)` e `.validator(|valor| Ok(()) | Err(msg))`
+para qualquer regra própria. `Form::is_valid()` é sempre recalculado na hora
+(seguro chamar antes de qualquer edição, ex. num botão desabilitado);
+`Form::validate()` força a checagem e marca todo campo como tocado, útil num
+handler de submit para exibir erros em campos que o usuário nunca editou.
+`Form::errors(nome)` devolve as mensagens do último `validate`/`set_value`.
+
+Pressionar Enter num campo ligado a um `formControl` **sempre** dispara o
+`onSubmit` do `<Form>` (quem decide o que fazer é o `update()`, via
+`Form::is_valid()` — o motor não bloqueia a submissão de um form inválido); se
+houver um próximo campo no mesmo `<Form>`, o foco também avança para ele, como
+um Tab automático — dá para preencher e enviar o formulário inteiro sem tocar
+no mouse.
+
+Veja `examples/formulario_login.rs` e `templates/formulario_login.kdl`.
 
 ---
 
@@ -890,6 +969,8 @@ pub enum EngineMessage {
     NavigateBack,                                      // navigateBack
     FileChanged(String),                               // tick do hot-reload
     ContextPatch(Vec<(String, String)>),               // efeitos/subscriptions -> contexto
+    UiSubmit { action: String, next_focus: Option<String> }, // Enter num formControl
+    // ... DragStart/DragHover/DragEnd (drag-and-drop) e UiEditorAction (TextArea)
 }
 ```
 
@@ -899,6 +980,9 @@ pub enum EngineMessage {
 - `Context` — `get`, `set`, `set_var`, `navigate_to`, `navigate_back`
 - `ContextVar::new(key, value)`
 - `Nav::To(String)` | `Nav::Back`
+- `FormBuilder::new(nome).control(FormControl::new(nome, valor_inicial)...)build()`
+- `Form` — `get`/`get_mut`, `has_control`, `value`/`set_value`, `errors`, `is_valid`, `validate`, `reset`, `control_names`, `values`, `sync_to_context`
+- `FormControl` — `.required()`, `.min_length(n)`, `.max_length(n)`, `.pattern(regex)`, `.validator(f)`
 
 ---
 
@@ -916,6 +1000,7 @@ pub enum EngineMessage {
 | `estilos` | stylesheets `.gss` (globais e com escopo via `<link>`), classes e tema. | `cargo run --example estilos` |
 | `estilos_inline` | classes `.gss` inline e com escopo via bloco `<style>` (XML). | `cargo run --example estilos_inline` |
 | `estilos_inline_kdl` | o mesmo em KDL, com o corpo GSS numa string multilinha de `style`. | `cargo run --example estilos_inline_kdl` |
+| `formulario_login` | `Form`/`FormBuilder`/`FormControl`: validação, Enter para submeter/avançar campo. | `cargo run --example formulario_login` |
 
 ---
 

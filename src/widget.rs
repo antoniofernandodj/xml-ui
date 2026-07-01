@@ -145,6 +145,23 @@ pub enum EngineMessage {
     /// Left mouse button released anywhere (global subscription): ends the
     /// drag in progress, if any, dispatching `on_reorder` with the final order.
     DragEnd,
+    /// Enter pressed inside a `formControl`-bound `TextInput` (see
+    /// `UiNode::form_*`, hydrated by a `<Form>`'s evaluation in `eval.rs`).
+    /// Always dispatches the enclosing `Form`'s `onSubmit` action — the
+    /// component's `update()` decides what to do based on its own
+    /// `glacier_ui::Form::is_valid()` — and, if there is a next control in the
+    /// same form, also requests focus there (Tab-like), so the whole form can
+    /// be filled with Enter alone. `next_focus` is the next input's stable id
+    /// string (built by `form_input_id`), resolved into a real
+    /// `iced::widget::text_input` focus by `GlacierUI::dispatch`.
+    UiSubmit { action: String, next_focus: Option<String> },
+}
+
+/// The stable focus id of a form-bound `TextInput`: `scope` is the enclosing
+/// `<Form>`'s `"{owner}::{form name}"` prefix (shared by every control in that
+/// form), `control` its own `formControl` name.
+pub fn form_input_id(scope: &str, control: &str) -> String {
+    format!("glacier_form::{scope}::{control}")
 }
 
 /// Helper to parse iced::Length from optional string
@@ -328,6 +345,21 @@ pub fn render_node<'a>(
                     value: val,
                 })
                 .secure(*secure);
+
+            // Wired only once hydrated by an enclosing `<Form>` (`form_scope`
+            // set) — a stray `formControl` outside any `<Form>` renders as a
+            // plain input, same as before this feature existed.
+            if let (Some(control), Some(scope), Some(submit_action)) =
+                (&node.form_control, &node.form_scope, &node.form_submit_action)
+            {
+                input = input.id(form_input_id(scope, control));
+                let next_focus = node.form_next_focus.as_ref()
+                    .map(|next| form_input_id(scope, next));
+                input = input.on_submit(EngineMessage::UiSubmit {
+                    action: submit_action.clone(),
+                    next_focus,
+                });
+            }
 
             input = input.width(parse_length(&node.width))
                          .padding(parse_padding(&node.padding));
@@ -579,6 +611,29 @@ pub fn render_node<'a>(
             r.width(parse_length(&node.width))
              .height(parse_length(&node.height))
              .into()
+        }
+        NodeType::Form { .. } => {
+            // A `<Form>` is a layout container like `<Column>` — its
+            // `onSubmit`/`formControl` wiring lives entirely in the hydrated
+            // `form_*` fields of its descendants (see `eval.rs`), nothing to
+            // render here beyond stacking its children.
+            let mut col = column![];
+
+            if let Some(align_val) = parse_alignment(&node.align_x) {
+                col = col.align_x(align_val);
+            }
+            if let Some(sp) = node.spacing {
+                col = col.spacing(sp);
+            }
+            col = col.padding(parse_padding(&node.padding));
+
+            for child in &node.children {
+                col = col.push(render_node(child, context, editors));
+            }
+
+            col.width(parse_length(&node.width))
+               .height(parse_length(&node.height))
+               .into()
         }
         NodeType::Container => {
             let child: Element<'a, EngineMessage> = if let Some(first_child) = node.children.first() {

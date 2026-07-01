@@ -1811,3 +1811,149 @@ fn test_unknown_extension_falls_back_to_xml() {
 
     std::fs::remove_file(path).ok();
 }
+
+// --- Formulários (`<Form>` / `formControl`) ---------------------------------
+
+/// Coleta, em ordem de documento, cada nó com `formControl` definido: o nome
+/// do controle e o próprio nó (já avaliado/hidratado), clonado para escapar do
+/// empréstimo da árvore.
+fn collect_form_inputs(node: &UiNode, out: &mut Vec<(String, UiNode)>) {
+    if let Some(name) = &node.form_control {
+        out.push((name.clone(), node.clone()));
+    }
+    for child in &node.children {
+        collect_form_inputs(child, out);
+    }
+}
+
+/// Componente com um `<Form>` de dois campos, usado pelos testes de
+/// hidratação e de dispatch abaixo.
+struct FormTestComp;
+impl Component for FormTestComp {
+    fn name(&self) -> &str { "formtest" }
+    fn template(&self) -> Template {
+        Template::Inline(r#"
+            <Form onSubmit="enviar">
+                <TextInput formControl="usuario" />
+                <TextInput formControl="senha" secure="true" />
+            </Form>
+        "#.into())
+    }
+    fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {
+        match action {
+            "enviar" => { ctx.set("enviado", "true"); }
+            "usuario" => { ctx.set("usuario", value.unwrap_or_default()); }
+            "senha" => { ctx.set("senha", value.unwrap_or_default()); }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn test_form_hydrates_scope_submit_and_next_focus() {
+    let mut motor = GlacierUI::new();
+    motor.register(Box::new(FormTestComp)).unwrap();
+    motor.set_initial_screen("formtest");
+
+    let evaluated = motor.evaluated_templates.get("formtest").unwrap();
+    let mut inputs = Vec::new();
+    collect_form_inputs(evaluated, &mut inputs);
+    assert_eq!(inputs.len(), 2, "esperava 2 inputs ligados a formControl, veio {:?}",
+        inputs.iter().map(|(n, _)| n).collect::<Vec<_>>());
+
+    let (usuario_name, usuario) = &inputs[0];
+    let (senha_name, senha) = &inputs[1];
+    assert_eq!(usuario_name, "usuario");
+    assert_eq!(senha_name, "senha");
+
+    // O `onSubmit` do `<Form>` chega em todo controle, para o Enter sempre
+    // disparar a submissão — independente de qual campo está com foco.
+    assert_eq!(usuario.form_submit_action.as_deref(), Some("enviar"));
+    assert_eq!(senha.form_submit_action.as_deref(), Some("enviar"));
+
+    // Mesmo `scope` (prefixo do id de foco) em ambos, por pertencerem ao
+    // mesmo `<Form>`.
+    assert!(usuario.form_scope.is_some());
+    assert_eq!(usuario.form_scope, senha.form_scope);
+
+    // Enter em "usuario" também avança o foco para "senha"; em "senha" (o
+    // último campo) não há próximo.
+    assert_eq!(usuario.form_next_focus.as_deref(), Some("senha"));
+    assert_eq!(senha.form_next_focus, None);
+}
+
+#[test]
+fn test_form_control_input_dispatches_like_on_change() {
+    let mut motor = GlacierUI::new();
+    motor.register(Box::new(FormTestComp)).unwrap();
+    motor.set_initial_screen("formtest");
+
+    // `TextInput formControl="usuario"` sem `onChange` explícito usa o nome
+    // do controle como ação — o mesmo canal que um `onChange` manual usaria.
+    let _ = motor.dispatch(&EngineMessage::UiInputChanged { action: "usuario".into(), value: "ana".into() });
+    assert_eq!(motor.get_data("usuario").map(String::as_str), Some("ana"));
+}
+
+#[test]
+fn test_ui_submit_always_dispatches_regardless_of_next_focus() {
+    // Enter num campo com próximo: dispara `onSubmit` e pede foco adiante.
+    let mut motor = GlacierUI::new();
+    motor.register(Box::new(FormTestComp)).unwrap();
+    motor.set_initial_screen("formtest");
+    let _ = motor.dispatch(&EngineMessage::UiSubmit {
+        action: "enviar".into(),
+        next_focus: Some("glacier_form::formtest::senha".into()),
+    });
+    assert_eq!(motor.get_data("enviado").map(String::as_str), Some("true"));
+
+    // Enter no último campo (sem próximo): ainda assim dispara `onSubmit` — a
+    // decisão de aceitar ou não fica com o `update()` do componente (via
+    // `Form::is_valid()`), não com o motor.
+    let mut motor2 = GlacierUI::new();
+    motor2.register(Box::new(FormTestComp)).unwrap();
+    motor2.set_initial_screen("formtest");
+    let _ = motor2.dispatch(&EngineMessage::UiSubmit { action: "enviar".into(), next_focus: None });
+    assert_eq!(motor2.get_data("enviado").map(String::as_str), Some("true"));
+}
+
+#[test]
+fn test_kdl_form_control_defaults_value_and_on_change() {
+    let kdl = r#"
+        Form onSubmit="entrar" {
+            TextInput formControl="usuario"
+        }
+    "#;
+    let ast = glacier_ui::parse_kdl(kdl).unwrap();
+    match &ast.kind {
+        NodeType::Form { on_submit, .. } => assert_eq!(on_submit.as_deref(), Some("entrar")),
+        other => panic!("esperava NodeType::Form, veio {:?}", other),
+    }
+
+    let input = &ast.children[0];
+    assert_eq!(input.form_control.as_deref(), Some("usuario"));
+    match &input.kind {
+        NodeType::TextInput { value_var, on_change, .. } => {
+            assert_eq!(value_var, "usuario");
+            assert_eq!(on_change, "usuario");
+        }
+        other => panic!("esperava NodeType::TextInput, veio {:?}", other),
+    }
+}
+
+#[test]
+fn test_kdl_form_control_respects_explicit_value_and_on_change() {
+    let kdl = r#"
+        Form {
+            TextInput formControl="usuario" value="outro_valor" onChange="outraAcao"
+        }
+    "#;
+    let ast = glacier_ui::parse_kdl(kdl).unwrap();
+    let input = &ast.children[0];
+    match &input.kind {
+        NodeType::TextInput { value_var, on_change, .. } => {
+            assert_eq!(value_var, "outro_valor");
+            assert_eq!(on_change, "outraAcao");
+        }
+        other => panic!("esperava NodeType::TextInput, veio {:?}", other),
+    }
+}

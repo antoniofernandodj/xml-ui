@@ -4,6 +4,7 @@ pub mod eval;
 pub mod widget;
 pub mod component;
 pub mod stylesheet;
+pub mod forms;
 
 pub use parser::{UiNode, NodeType};
 pub use kdl_parser::{parse_kdl, register_bare_flags};
@@ -11,6 +12,7 @@ pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_dir
 pub use widget::{render_node, EngineMessage};
 pub use component::{Component, Context, ContextVar, Effect, Nav, Template};
 pub use stylesheet::{StyleSheet, StyleRule};
+pub use forms::{Form, FormBuilder, FormControl, Validator};
 
 /// Derives `impl Component` from a struct plus the `<script>` block of an XML
 /// template. See the `contador_macro` example.
@@ -355,6 +357,19 @@ impl GlacierUI {
                     });
                 }
                 return iced::Task::none();
+            }
+            EngineMessage::UiSubmit { action, next_focus } => {
+                // Always dispatch the form's `onSubmit` (the component decides
+                // what to do based on its own `Form::is_valid()`), then — if
+                // there is a next control — also move focus there.
+                let submit_task = self.dispatch(&EngineMessage::UiClick(action.clone()));
+                return match next_focus {
+                    Some(id) => iced::Task::batch([
+                        submit_task,
+                        iced::widget::operation::focus::<EngineMessage>(id.clone()),
+                    ]),
+                    None => submit_task,
+                };
             }
             EngineMessage::UiEditorAction { binding, on_change, action } => {
                 // Apply the edit to the kept editor buffer, then mirror its full

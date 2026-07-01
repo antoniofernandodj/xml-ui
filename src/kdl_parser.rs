@@ -572,6 +572,10 @@ fn blank(kind: NodeType) -> UiNode {
         drag_order: None,
         drag_on_reorder: None,
         drag_reorder_key: None,
+        form_control: None,
+        form_scope: None,
+        form_submit_action: None,
+        form_next_focus: None,
     }
 }
 
@@ -643,6 +647,7 @@ fn node_from_kdl(node: &KdlNode) -> Option<UiNode> {
     let on_press = attrs.get(&["onPress", "on_press", "on-press", "aoPressionar", "ao_pressionar"]);
     let on_double_click = attrs.get(&["onDoubleClick", "on_double_click", "on-double-click", "aoClicarDuplo"]);
     let cursor = attrs.get(&["cursor", "cursorIcon", "cursor-icon"]);
+    let form_control = attrs.get(&["formControl", "form_control", "form-control", "controleForm", "controle_form"]);
 
     // Structural directives expressed as attributes (Vue/Angular style).
     let if_cond = attrs.get(&["if", "se"]);
@@ -685,8 +690,18 @@ fn node_from_kdl(node: &KdlNode) -> Option<UiNode> {
                 .content_arg(&["secure", "password", "seguro", "senha"])
                 .or_else(|| attrs.get(&["placeholder", "dica"]))
                 .unwrap_or_default();
-            let value_var = attrs.get(&["value", "valor"]).unwrap_or_default();
-            let on_change = attrs.get(&["onChange", "on_change", "on-change", "aoMudar", "ao_mudar"]).unwrap_or_default();
+            let mut value_var = attrs.get(&["value", "valor"]).unwrap_or_default();
+            let mut on_change = attrs.get(&["onChange", "on_change", "on-change", "aoMudar", "ao_mudar"]).unwrap_or_default();
+            // See the XML parser's `TextInput` arm: `formControl` without an
+            // explicit `value`/`onChange` binds both to the control name.
+            if let Some(control) = &form_control {
+                if value_var.is_empty() {
+                    value_var = control.clone();
+                }
+                if on_change.is_empty() {
+                    on_change = control.clone();
+                }
+            }
             let secure = attrs.get_bool(&["secure", "password", "seguro", "senha"]);
             NodeType::TextInput { placeholder, value_var, on_change, secure }
         }
@@ -755,6 +770,11 @@ fn node_from_kdl(node: &KdlNode) -> Option<UiNode> {
             let value_field = attrs.get(&["valueField", "value_field", "value-field", "valueKey", "campo_valor"]).unwrap_or_else(|| "value".to_string());
             let color = attrs.get(&["color", "cor"]);
             NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, color }
+        }
+        "Form" | "form" | "Formulario" | "formulario" => {
+            let on_submit = attrs.get(&["onSubmit", "on_submit", "on-submit", "aoSubmeter", "ao_submeter"]);
+            let name = attrs.get(&["name", "nome"]);
+            NodeType::Form { on_submit, name }
         }
         "Include" | "include" | "Incluir" | "incluir" => {
             let src = attrs
@@ -838,6 +858,10 @@ fn node_from_kdl(node: &KdlNode) -> Option<UiNode> {
         drag_order: None,
         drag_on_reorder: None,
         drag_reorder_key: None,
+        form_control,
+        form_scope: None,
+        form_submit_action: None,
+        form_next_focus: None,
     })
 }
 
