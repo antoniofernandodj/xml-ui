@@ -71,7 +71,10 @@ impl Component for Login {
 
         if action == "entrar" {
             if self.form.is_valid() {
-                ctx.set("status", format!("Bem-vindo, {}!", self.form.value("username")));
+                ctx.set(
+                    "status",
+                    format!("Bem-vindo, {}!", self.form.value("username"))
+                );
             } else {
                 // Mostra erros também nos campos que o usuário nunca tocou.
                 self.form.validate();
@@ -112,7 +115,9 @@ impl AppLogin {
 }
 
 fn main() -> iced::Result {
-    iced::application(|| AppLogin::new(), AppLogin::update, AppLogin::view)
+    iced::application(
+        || AppLogin::new(), AppLogin::update, AppLogin::view
+    )
         .subscription(AppLogin::subscription)
         .title("Glacier - Formulário (Reactive Forms)")
         .run()
