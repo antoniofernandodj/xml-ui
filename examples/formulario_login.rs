@@ -23,8 +23,8 @@ fn sincronizar(form: &Form, ctx: &mut Context) {
 
 impl Login {
     fn novo() -> Self {
-        Self {
-            form: FormBuilder::new("login")
+
+        let form = FormBuilder::new("login")
                 .control(FormControl::new("username", "").required().min_length(3))
                 .control(FormControl::new("password", "").required().min_length(6))
                 // A lógica de submissão fica declarada junto com os controles,
@@ -40,8 +40,9 @@ impl Login {
                         ctx.set("status", "Corrija os campos destacados.");
                     }
                 })
-                .build(),
-        }
+                .build();
+
+        Self { form: form }
     }
 }
 
