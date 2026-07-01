@@ -34,6 +34,14 @@ pub enum Nav {
     Back,
 }
 
+/// Pedido de diálogo feito por um componente (via [`Context::show_dialog`] /
+/// [`Context::close_dialog`]), aplicado pelo motor depois — mesmo padrão de
+/// [`Nav`].
+pub enum DialogAction {
+    Show(crate::dialogs::DialogSpec),
+    Close,
+}
+
 /// Uma variável de contexto nomeada: agrupa a chave e o valor num único valor,
 /// aplicado de uma vez com [`Context::set_var`]. Útil para declarar defaults de
 /// forma legível em vez de repetir a chave string solta.
@@ -67,6 +75,7 @@ pub struct Context<'a> {
     pub(crate) data: &'a mut HashMap<String, String>,
     pub(crate) nav: Option<Nav>,
     pub(crate) effects: Vec<Effect>,
+    pub(crate) dialog: Option<DialogAction>,
 }
 
 impl<'a> Context<'a> {
@@ -93,6 +102,19 @@ impl<'a> Context<'a> {
     /// Pede ao motor para voltar à tela anterior após o `update`.
     pub fn navigate_back(&mut self) {
         self.nav = Some(Nav::Back);
+    }
+
+    /// Pede ao motor para exibir um diálogo modal (ver [`crate::dialogs`])
+    /// sobreposto à tela atual após o `update`. Substitui qualquer diálogo já
+    /// em exibição.
+    pub fn show_dialog(&mut self, spec: crate::dialogs::DialogSpec) {
+        self.dialog = Some(DialogAction::Show(spec));
+    }
+
+    /// Pede ao motor para fechar o diálogo em exibição (se houver) após o
+    /// `update`, sem despachar nenhuma ação de botão.
+    pub fn close_dialog(&mut self) {
+        self.dialog = Some(DialogAction::Close);
     }
 
     /// Agenda um efeito assíncrono: o `future` roda no executor do `iced` e,

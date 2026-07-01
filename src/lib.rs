@@ -5,14 +5,16 @@ pub mod widget;
 pub mod component;
 pub mod stylesheet;
 pub mod forms;
+pub mod dialogs;
 
 pub use parser::{UiNode, NodeType};
 pub use kdl_parser::{parse_kdl, register_bare_flags};
 pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_directives, StyleContext};
 pub use widget::{render_node, EngineMessage};
-pub use component::{Component, Context, ContextVar, Effect, Nav, Template};
+pub use component::{Component, Context, ContextVar, DialogAction, Effect, Nav, Template};
 pub use stylesheet::{StyleSheet, StyleRule};
 pub use forms::{Form, FormBuilder, FormControl, Validator};
+pub use dialogs::{ButtonRole, DialogButton, DialogIcon, DialogSpec};
 
 /// Derives `impl Component` from a struct plus the `<script>` block of an XML
 /// template. See the `contador_macro` example.
@@ -71,6 +73,11 @@ pub struct GlacierUI {
     /// (like `editors` above) because it's transient render/interaction state,
     /// not something a host app's `Component::update` should see or persist.
     drag: Option<DragState>,
+    /// The modal dialog currently in exhibition (see [`dialogs`]), if any.
+    /// [`GlacierUI::render_current`] overlays it on top of the active
+    /// screen; [`GlacierUI::dispatch`] clears it on a button click or a
+    /// dismissible backdrop click.
+    pub dialog: Option<dialogs::DialogSpec>,
 }
 
 /// State of an in-progress drag-and-drop reorder (see `UiNode::drag_*` /
@@ -107,6 +114,7 @@ impl GlacierUI {
             editors: HashMap::new(),
             editor_synced: HashMap::new(),
             drag: None,
+            dialog: None,
         }
     }
 
@@ -169,11 +177,30 @@ impl GlacierUI {
         }
     }
 
-    /// Renders the current active screen.
+    /// Shows a modal dialog (see [`dialogs`]) on top of the active screen,
+    /// from host app code rather than a [`component::Component`]'s `update`
+    /// (which should use [`component::Context::show_dialog`] instead).
+    /// Replaces any dialog already shown.
+    pub fn show_dialog(&mut self, spec: dialogs::DialogSpec) {
+        self.dialog = Some(spec);
+    }
+
+    /// Closes the dialog in exhibition, if any. Host app equivalent of
+    /// [`component::Context::close_dialog`].
+    pub fn close_dialog(&mut self) {
+        self.dialog = None;
+    }
+
+    /// Renders the current active screen, with the active dialog (if any)
+    /// overlaid on top via [`dialogs::overlay`].
     pub fn render_current(&self) -> Result<iced::Element<'_, EngineMessage>, String> {
         let name = self.current_screen.as_ref()
             .ok_or_else(|| "No active screen defined; call set_initial_screen first".to_string())?;
-        self.render(name)
+        let screen = self.render(name)?;
+        Ok(match &self.dialog {
+            Some(spec) => iced::widget::stack![screen, dialogs::overlay(spec, &self.theme())].into(),
+            None => screen,
+        })
     }
 
     /// Registers a component from its XML file, recursively loading any
@@ -230,7 +257,7 @@ impl GlacierUI {
 
         // (b) Behavior: let the component seed its initial state.
         {
-            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new() };
+            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new(), dialog: None };
             comp.init(&mut ctx);
         }
 
@@ -286,6 +313,22 @@ impl GlacierUI {
         }
         let (action, value) = match msg {
             EngineMessage::UiClick(a) => (a.as_str(), None),
+            // Dialog buttons and backdrop dismissal (see `dialogs`) always
+            // close the dialog first; a button click then routes its
+            // `action` to the owning component exactly like a plain
+            // `UiClick`.
+            EngineMessage::DialogDismiss => {
+                if self.dialog.as_ref().is_some_and(|d| d.dismissible) {
+                    self.dialog = None;
+                }
+                return iced::Task::none();
+            }
+            EngineMessage::DialogButton(action) => {
+                self.dialog = None;
+                return self.route_to_owner(action, |comp, bare_action, ctx| {
+                    comp.update(bare_action, None, ctx);
+                });
+            }
             EngineMessage::UiInputChanged { action, value } => (
                 action.as_str(), Some(value.as_str())
             ),
@@ -439,17 +482,23 @@ impl GlacierUI {
 
         // Disjoint per-field borrows (`components` vs `context_data`) are
         // accepted by the borrow checker when done inline like this.
-        let (nav, effects) = if let Some(comp) = self.components.get_mut(&owner) {
-            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new() };
+        let (nav, effects, dialog) = if let Some(comp) = self.components.get_mut(&owner) {
+            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new(), dialog: None };
             route(comp.as_mut(), bare_action, &mut ctx);
-            (ctx.nav, ctx.effects)
+            (ctx.nav, ctx.effects, ctx.dialog)
         } else {
-            (None, Vec::new())
+            (None, Vec::new(), None)
         };
 
         match nav {
             Some(component::Nav::To(s)) => self.navigate_to(&s),
             Some(component::Nav::Back) => self.navigate_back(),
+            None => {}
+        }
+
+        match dialog {
+            Some(component::DialogAction::Show(spec)) => self.dialog = Some(spec),
+            Some(component::DialogAction::Close) => self.dialog = None,
             None => {}
         }
 

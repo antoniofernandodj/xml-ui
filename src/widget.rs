@@ -155,6 +155,14 @@ pub enum EngineMessage {
     /// string (built by `form_input_id`), resolved into a real
     /// `iced::widget::text_input` focus by `GlacierUI::dispatch`.
     UiSubmit { action: String, next_focus: Option<String> },
+    /// A button of the active [`crate::dialogs::DialogSpec`] was clicked.
+    /// Closes the dialog; `action` is then routed to the owning component's
+    /// `update()` just like a normal `UiClick`.
+    DialogButton(String),
+    /// The active dialog's backdrop was clicked (or another dismiss gesture
+    /// fired). Only takes effect if the dialog is `dismissible`; closes it
+    /// without routing any action.
+    DialogDismiss,
 }
 
 /// The stable focus id of a form-bound `TextInput`: `scope` is the enclosing

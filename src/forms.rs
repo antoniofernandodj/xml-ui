@@ -564,7 +564,7 @@ mod tests {
     }
 
     fn test_context(data: &mut HashMap<String, String>) -> Context<'_> {
-        Context { data, nav: None, effects: Vec::new() }
+        Context { data, nav: None, effects: Vec::new(), dialog: None }
     }
 
     #[test]
