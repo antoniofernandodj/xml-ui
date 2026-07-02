@@ -404,6 +404,15 @@ impl GlacierUI {
                 self.prune_expired_toasts();
                 return iced::Task::none();
             }
+            // Tab / Shift+Tab: move focus between focusable widgets. iced's text
+            // inputs don't advance focus on Tab themselves, so a global keyboard
+            // listener (`tab_focus_from_event`) turns the keypress into this.
+            EngineMessage::FocusNext => {
+                return iced::widget::operation::focus_next::<EngineMessage>();
+            }
+            EngineMessage::FocusPrev => {
+                return iced::widget::operation::focus_previous::<EngineMessage>();
+            }
             EngineMessage::UiInputChanged { action, value } => (
                 action.as_str(), Some(value.as_str())
             ),
@@ -615,6 +624,7 @@ impl GlacierUI {
         // that "captured" the event) — `dispatch` just no-ops if `self.drag` is
         // `None`, so this is always safe to keep active.
         subs.push(iced::event::listen_with(drag_end_from_event));
+        subs.push(iced::event::listen_with(tab_focus_from_event));
         iced::Subscription::batch(subs)
     }
 
@@ -1086,6 +1096,23 @@ fn drag_end_from_event(
     match event {
         iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
             Some(EngineMessage::DragEnd)
+        }
+        _ => None,
+    }
+}
+
+/// Maps Tab / Shift+Tab to focus movement between focusable widgets (see
+/// [`EngineMessage::FocusNext`]). A plain `fn` because `iced::event::listen_with`
+/// requires one. iced text inputs ignore Tab, so this is what makes it advance.
+fn tab_focus_from_event(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<EngineMessage> {
+    use iced::keyboard::{key::Named, Event as Kbd, Key};
+    match event {
+        iced::Event::Keyboard(Kbd::KeyPressed { key: Key::Named(Named::Tab), modifiers, .. }) => {
+            Some(if modifiers.shift() { EngineMessage::FocusPrev } else { EngineMessage::FocusNext })
         }
         _ => None,
     }

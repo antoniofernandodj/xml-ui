@@ -170,6 +170,11 @@ pub enum EngineMessage {
     /// prunes expired toasts from the active list. Carries no data of its
     /// own — the engine compares each toast's own timestamp against `now`.
     ToastTick,
+    /// Tab / Shift+Tab pressed (global keyboard subscription): move focus to the
+    /// next / previous focusable widget. iced's text inputs don't advance focus
+    /// on Tab on their own, so the engine drives it (see `tab_focus_from_event`).
+    FocusNext,
+    FocusPrev,
 }
 
 /// The stable focus id of a form-bound `TextInput`: `scope` is the enclosing

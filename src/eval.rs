@@ -800,20 +800,26 @@ fn hydrate_drag_item(
         node.drag_list = Some(list.to_string());
         node.drag_item_key = Some(key.to_string());
     }
-    fn find_handle(node: &mut UiNode, list: &str, key: &str, order: &[String], on_reorder: &str, reorder_key: &str) -> bool {
+    // Hydrate EVERY `dragHandle` in the item body, not just the first. An item
+    // whose body branches on a directive — e.g. `if {e.__dragging} { …handle… }
+    // else { …handle… }` — defines the handle once per branch. Only one branch
+    // renders per item, and it may not be the first one found; stopping at the
+    // first match (the old `find_handle` + `break`) left the *rendered* branch's
+    // handle without drag metadata, so `DragStart` fired with no order and the
+    // reorder silently did nothing.
+    fn hydrate_handles(node: &mut UiNode, list: &str, key: &str, order: &[String], on_reorder: &str, reorder_key: &str) {
         if node.drag_handle {
             node.drag_list = Some(list.to_string());
             node.drag_item_key = Some(key.to_string());
             node.drag_reorder_key = Some(reorder_key.to_string());
             node.drag_order = Some(order.to_vec());
             node.drag_on_reorder = Some(on_reorder.to_string());
-            return true;
         }
-        node.children.iter_mut().any(|c| find_handle(c, list, key, order, on_reorder, reorder_key))
+        for c in node.children.iter_mut() {
+            hydrate_handles(c, list, key, order, on_reorder, reorder_key);
+        }
     }
     for node in nodes.iter_mut() {
-        if find_handle(node, list, key, order, on_reorder, reorder_key) {
-            break;
-        }
+        hydrate_handles(node, list, key, order, on_reorder, reorder_key);
     }
 }
