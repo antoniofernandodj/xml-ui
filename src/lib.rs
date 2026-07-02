@@ -6,6 +6,7 @@ pub mod component;
 pub mod stylesheet;
 pub mod forms;
 pub mod dialogs;
+pub mod toasts;
 
 pub use parser::{UiNode, NodeType};
 pub use kdl_parser::{parse_kdl, register_bare_flags};
@@ -15,6 +16,7 @@ pub use component::{Component, Context, ContextVar, DialogAction, Effect, Nav, T
 pub use stylesheet::{StyleSheet, StyleRule};
 pub use forms::{Form, FormBuilder, FormControl, Validator};
 pub use dialogs::{ButtonRole, DialogButton, DialogIcon, DialogSpec};
+pub use toasts::{ToastKind, ToastSpec};
 
 /// Derives `impl Component` from a struct plus the `<script>` block of an XML
 /// template. See the `contador_macro` example.
@@ -78,6 +80,26 @@ pub struct GlacierUI {
     /// screen; [`GlacierUI::dispatch`] clears it on a button click or a
     /// dismissible backdrop click.
     pub dialog: Option<dialogs::DialogSpec>,
+    /// Toasts currently in exhibition (see [`toasts`]), oldest first.
+    /// [`GlacierUI::render_current`] overlays them on top of the active
+    /// screen (and the dialog, if any); each expires on its own once
+    /// [`GlacierUI::toast_subscription`]'s tick notices its `duration` has
+    /// elapsed since `shown_at`, or earlier if its "×" is clicked
+    /// ([`widget::EngineMessage::ToastDismiss`]).
+    toasts: Vec<ActiveToast>,
+    /// Monotonically increasing id handed to the next [`GlacierUI::show_toast`]
+    /// call, so two toasts with identical content still have distinct
+    /// identities to dismiss/expire independently.
+    next_toast_id: u64,
+}
+
+/// A [`toasts::ToastSpec`] actually in exhibition: the spec plus the
+/// engine-assigned identity and the instant it was shown, needed to dismiss
+/// it individually and to tell when it has expired.
+struct ActiveToast {
+    id: u64,
+    spec: toasts::ToastSpec,
+    shown_at: std::time::Instant,
 }
 
 /// State of an in-progress drag-and-drop reorder (see `UiNode::drag_*` /
@@ -115,6 +137,8 @@ impl GlacierUI {
             editor_synced: HashMap::new(),
             drag: None,
             dialog: None,
+            toasts: Vec::new(),
+            next_toast_id: 0,
         }
     }
 
@@ -191,15 +215,49 @@ impl GlacierUI {
         self.dialog = None;
     }
 
+    /// Shows a toast (see [`toasts`]) on top of the active screen, from host
+    /// app code rather than a [`component::Component`]'s `update` (which
+    /// should use [`component::Context::show_toast`] instead). Cumulative —
+    /// does not replace any toast already shown. Returns the id, which can be
+    /// passed to [`GlacierUI::dismiss_toast`] to close it early.
+    pub fn show_toast(&mut self, spec: toasts::ToastSpec) -> u64 {
+        let id = self.next_toast_id;
+        self.next_toast_id += 1;
+        self.toasts.push(ActiveToast { id, spec, shown_at: std::time::Instant::now() });
+        id
+    }
+
+    /// Closes a specific toast before its natural expiration. A no-op if
+    /// `id` is not (or no longer) in exhibition.
+    pub fn dismiss_toast(&mut self, id: u64) {
+        self.toasts.retain(|t| t.id != id);
+    }
+
+    /// Drops every toast whose `duration` has elapsed since it was shown.
+    /// Called on [`widget::EngineMessage::ToastTick`] (see
+    /// [`GlacierUI::toast_subscription`]).
+    fn prune_expired_toasts(&mut self) {
+        let now = std::time::Instant::now();
+        self.toasts.retain(|t| now.duration_since(t.shown_at) < t.spec.duration);
+    }
+
     /// Renders the current active screen, with the active dialog (if any)
-    /// overlaid on top via [`dialogs::overlay`].
+    /// and any active toasts overlaid on top via [`dialogs::overlay`] and
+    /// [`toasts::overlay`] — toasts on top of the dialog, since they should
+    /// stay visible (and dismissible) even while a modal is up.
     pub fn render_current(&self) -> Result<iced::Element<'_, EngineMessage>, String> {
         let name = self.current_screen.as_ref()
             .ok_or_else(|| "No active screen defined; call set_initial_screen first".to_string())?;
         let screen = self.render(name)?;
-        Ok(match &self.dialog {
+        let with_dialog = match &self.dialog {
             Some(spec) => iced::widget::stack![screen, dialogs::overlay(spec, &self.theme())].into(),
             None => screen,
+        };
+        Ok(if self.toasts.is_empty() {
+            with_dialog
+        } else {
+            let active = self.toasts.iter().map(|t| (t.id, &t.spec));
+            iced::widget::stack![with_dialog, toasts::overlay(active, &self.theme())].into()
         })
     }
 
@@ -257,7 +315,7 @@ impl GlacierUI {
 
         // (b) Behavior: let the component seed its initial state.
         {
-            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new(), dialog: None };
+            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new(), dialog: None, toasts: Vec::new() };
             comp.init(&mut ctx);
         }
 
@@ -328,6 +386,16 @@ impl GlacierUI {
                 return self.route_to_owner(action, |comp, bare_action, ctx| {
                     comp.update(bare_action, None, ctx);
                 });
+            }
+            // Toasts (see `toasts`) never route to a component: dismissing
+            // one (button click or expiry tick) is purely engine-side state.
+            EngineMessage::ToastDismiss(id) => {
+                self.dismiss_toast(*id);
+                return iced::Task::none();
+            }
+            EngineMessage::ToastTick => {
+                self.prune_expired_toasts();
+                return iced::Task::none();
             }
             EngineMessage::UiInputChanged { action, value } => (
                 action.as_str(), Some(value.as_str())
@@ -482,12 +550,12 @@ impl GlacierUI {
 
         // Disjoint per-field borrows (`components` vs `context_data`) are
         // accepted by the borrow checker when done inline like this.
-        let (nav, effects, dialog) = if let Some(comp) = self.components.get_mut(&owner) {
-            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new(), dialog: None };
+        let (nav, effects, dialog, toasts) = if let Some(comp) = self.components.get_mut(&owner) {
+            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new(), dialog: None, toasts: Vec::new() };
             route(comp.as_mut(), bare_action, &mut ctx);
-            (ctx.nav, ctx.effects, ctx.dialog)
+            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts)
         } else {
-            (None, Vec::new(), None)
+            (None, Vec::new(), None, Vec::new())
         };
 
         match nav {
@@ -500,6 +568,10 @@ impl GlacierUI {
             Some(component::DialogAction::Show(spec)) => self.dialog = Some(spec),
             Some(component::DialogAction::Close) => self.dialog = None,
             None => {}
+        }
+
+        for spec in toasts {
+            self.show_toast(spec);
         }
 
         let _ = self.reevaluate_all();
@@ -882,6 +954,15 @@ impl GlacierUI {
     /// The client application should map this subscription to call `check_reload`.
     pub fn reload_subscription(period: Duration) -> iced::Subscription<EngineMessage> {
         iced::time::every(period).map(|_| EngineMessage::FileChanged("".to_string()))
+    }
+
+    /// Returns a Subscription that ticks periodically to expire toasts (see
+    /// [`toasts`]) whose `duration` has elapsed. Without this wired into the
+    /// host app's `subscription()`, toasts are only closed by clicking their
+    /// "×" — they never disappear on their own. A period around 250ms-1s is
+    /// plenty; toasts are seconds-long by nature.
+    pub fn toast_subscription(period: Duration) -> iced::Subscription<EngineMessage> {
+        iced::time::every(period).map(|_| EngineMessage::ToastTick)
     }
 }
 

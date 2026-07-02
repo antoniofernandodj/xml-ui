@@ -163,6 +163,13 @@ pub enum EngineMessage {
     /// fired). Only takes effect if the dialog is `dismissible`; closes it
     /// without routing any action.
     DialogDismiss,
+    /// A toast's "×" button was clicked (see [`crate::toasts`]). Removes the
+    /// toast with this id from the active list; never routed to a component.
+    ToastDismiss(u64),
+    /// Periodic tick (see [`crate::GlacierUI::toast_subscription`]) that
+    /// prunes expired toasts from the active list. Carries no data of its
+    /// own — the engine compares each toast's own timestamp against `now`.
+    ToastTick,
 }
 
 /// The stable focus id of a form-bound `TextInput`: `scope` is the enclosing

@@ -76,6 +76,7 @@ pub struct Context<'a> {
     pub(crate) nav: Option<Nav>,
     pub(crate) effects: Vec<Effect>,
     pub(crate) dialog: Option<DialogAction>,
+    pub(crate) toasts: Vec<crate::toasts::ToastSpec>,
 }
 
 impl<'a> Context<'a> {
@@ -115,6 +116,14 @@ impl<'a> Context<'a> {
     /// `update`, sem despachar nenhuma ação de botão.
     pub fn close_dialog(&mut self) {
         self.dialog = Some(DialogAction::Close);
+    }
+
+    /// Pede ao motor para mostrar um toast (ver [`crate::toasts`]) após o
+    /// `update`. Ao contrário de [`Context::show_dialog`], é cumulativo — não
+    /// substitui nenhum toast já em exibição, e pode ser chamado mais de uma
+    /// vez no mesmo `update` para empilhar vários.
+    pub fn show_toast(&mut self, spec: crate::toasts::ToastSpec) {
+        self.toasts.push(spec);
     }
 
     /// Agenda um efeito assíncrono: o `future` roda no executor do `iced` e,
