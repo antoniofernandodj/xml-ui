@@ -534,19 +534,76 @@ impl UiNode {
         let fragment = doc.root_element();
 
         let mut decls = Vec::new();
-        let mut root: Option<Self> = None;
+        let mut roots: Vec<Self> = Vec::new();
         for child in fragment.children() {
             if let Some(node) = Self::from_node(child) {
                 if matches!(node.kind, NodeType::Import { .. } | NodeType::Link { .. } | NodeType::Style { .. }) {
                     decls.push(node);
-                } else if root.is_none() {
-                    root = Some(node);
+                } else {
+                    roots.push(node);
                 }
             }
         }
 
-        let mut root = root.ok_or_else(|| "No root element found".to_string())?;
+        // Multiple top-level layout nodes become a `Fragment` (their siblings
+        // are spliced into the parent at eval time) instead of silently keeping
+        // only the first — so a component template can be an `if`/`else` pair
+        // (or any list of siblings) with no wrapper node. A single root is kept
+        // as-is for backwards compatibility. Declarations ride along as
+        // children (they're stripped during evaluation) so `load_imports` /
+        // `process_links` still find them. Mirrors the KDL parser exactly.
+        let mut root = match roots.len() {
+            0 => return Err("No root element found".to_string()),
+            1 => roots.pop().expect("len checked"),
+            _ => empty_node(NodeType::Fragment, roots),
+        };
         root.children.extend(decls);
         Ok(root)
     }
 }
+
+/// A bare [`UiNode`] of `kind` with the given `children` and every optional
+/// field defaulted — used for synthetic nodes the parser inserts (e.g. the
+/// `Fragment` wrapping multiple top-level nodes).
+pub(crate) fn empty_node(kind: NodeType, children: Vec<UiNode>) -> UiNode {
+    UiNode {
+        kind,
+        children,
+        width: None,
+        height: None,
+        padding: None,
+        align_x: None,
+        align_y: None,
+        spacing: None,
+        background: None,
+        border_radius: None,
+        border_width: None,
+        border_color: None,
+        class: None,
+        font: None,
+        gradient: None,
+        text_align: None,
+        on_press: None,
+        on_double_click: None,
+        cursor: None,
+        if_cond: None,
+        if_equals: None,
+        if_not_equals: None,
+        is_else: false,
+        for_each: None,
+        for_each_var: None,
+        on_reorder: None,
+        reorder_key: None,
+        drag_handle: false,
+        drag_list: None,
+        drag_item_key: None,
+        drag_order: None,
+        drag_on_reorder: None,
+        drag_reorder_key: None,
+        form_control: None,
+        form_scope: None,
+        form_submit_action: None,
+        form_next_focus: None,
+    }
+}
+

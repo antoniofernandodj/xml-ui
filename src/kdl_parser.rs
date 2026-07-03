@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 use kdl::{KdlDocument, KdlNode, KdlValue};
-use crate::parser::{UiNode, NodeType};
+use crate::parser::{UiNode, NodeType, empty_node};
 
 /// Parses a full KDL template string into a [`UiNode`].
 ///
@@ -76,50 +76,6 @@ pub fn parse_kdl(input: &str) -> Result<UiNode, String> {
     Ok(root)
 }
 
-/// A bare [`UiNode`] of `kind` with the given `children` and every optional
-/// field defaulted — used for synthetic nodes the parser inserts (e.g. the
-/// `Fragment` wrapping multiple top-level nodes).
-fn empty_node(kind: NodeType, children: Vec<UiNode>) -> UiNode {
-    UiNode {
-        kind,
-        children,
-        width: None,
-        height: None,
-        padding: None,
-        align_x: None,
-        align_y: None,
-        spacing: None,
-        background: None,
-        border_radius: None,
-        border_width: None,
-        border_color: None,
-        class: None,
-        font: None,
-        gradient: None,
-        text_align: None,
-        on_press: None,
-        on_double_click: None,
-        cursor: None,
-        if_cond: None,
-        if_equals: None,
-        if_not_equals: None,
-        is_else: false,
-        for_each: None,
-        for_each_var: None,
-        on_reorder: None,
-        reorder_key: None,
-        drag_handle: false,
-        drag_list: None,
-        drag_item_key: None,
-        drag_order: None,
-        drag_on_reorder: None,
-        drag_reorder_key: None,
-        form_control: None,
-        form_scope: None,
-        form_submit_action: None,
-        form_next_focus: None,
-    }
-}
 
 /// Removes a top-level `script { ... }` block from the source, returning the
 /// remaining markup. The body holds Rust code (consumed by `#[component]`), so
