@@ -10,14 +10,65 @@ use std::pin::Pin;
 
 /// Um efeito assíncrono que um componente solicita durante o `update`.
 ///
-/// O motor o transforma num [`iced::Task`]; quando o future completa, seus
-/// pares `(chave, valor)` são mesclados no contexto (via
-/// [`crate::EngineMessage::ContextPatch`]) e a UI é reavaliada. É a peça que
-/// deixa um componente disparar I/O (rede, disco, timers) e refletir o
-/// resultado no estado sem bloquear a thread de UI.
+/// O motor o transforma num [`iced::Task`]; quando o future completa, o
+/// [`EffectOutcome`] resultante é aplicado (via
+/// [`crate::EngineMessage::EffectOutcome`]): seus pares `(chave, valor)` são
+/// mesclados no contexto, o toast (se houver) é exibido, e a UI é reavaliada. É
+/// a peça que deixa um componente disparar I/O (rede, disco, timers) e refletir
+/// o resultado no estado — e pedir um toast do resultado — sem bloquear a thread
+/// de UI.
 pub enum Effect {
-    /// Executa um future e mescla o `Vec<(chave, valor)>` resultante no contexto.
-    Perform(Pin<Box<dyn Future<Output = Vec<(String, String)>> + Send>>),
+    /// Executa um future e aplica o [`EffectOutcome`] resultante.
+    Perform(Pin<Box<dyn Future<Output = EffectOutcome> + Send>>),
+}
+
+/// O que um efeito assíncrono pede ao motor ao terminar, além de dados — o
+/// mesmo vocabulário que o [`Context`] já expõe para o código síncrono de
+/// `update()`, só que aplicado depois que o `future` resolve (quando não há mais
+/// um `Context` vivo para chamar `ctx.show_toast`).
+///
+/// O caso comum (só dados, sem toast) continua ergonômico: qualquer future que
+/// devolva `Vec<(String, String)>` vira um `EffectOutcome` automaticamente (ver
+/// o `From` abaixo), então [`Context::perform`] segue aceitando o retorno
+/// antigo sem mudança.
+///
+/// ```ignore
+/// ctx.perform(async move {
+///     let msg = run_command().await;
+///     EffectOutcome { patch: vec![("status".into(), "ok".into())],
+///                     toast: Some(ToastSpec::success(msg)) }
+/// });
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct EffectOutcome {
+    /// Pares `(chave, valor)` mesclados no contexto (como um `ContextPatch`).
+    pub patch: Vec<(String, String)>,
+    /// Toast a exibir ao terminar, se houver. Diálogo/navegação ficam de fora
+    /// desta fase — dá pra acrescentar depois com o mesmo mecanismo.
+    pub toast: Option<crate::toasts::ToastSpec>,
+}
+
+/// Só dados, sem toast — preserva a compatibilidade de `ctx.perform(async {
+/// vec![...] })`, que continua compilando sem mudar uma linha.
+impl From<Vec<(String, String)>> for EffectOutcome {
+    fn from(patch: Vec<(String, String)>) -> Self {
+        Self { patch, toast: None }
+    }
+}
+
+/// Um único par `(chave, valor)`, sem toast — conveniência para efeitos que
+/// produzem só um dado.
+impl From<(String, String)> for EffectOutcome {
+    fn from(pair: (String, String)) -> Self {
+        Self { patch: vec![pair], toast: None }
+    }
+}
+
+/// Só um toast, sem dados — para um efeito cujo resultado é apenas a notificação.
+impl From<crate::toasts::ToastSpec> for EffectOutcome {
+    fn from(toast: crate::toasts::ToastSpec) -> Self {
+        Self { patch: Vec::new(), toast: Some(toast) }
+    }
 }
 
 /// De onde vem o XML de um componente.
@@ -126,25 +177,44 @@ impl<'a> Context<'a> {
         self.toasts.push(spec);
     }
 
-    /// Agenda um efeito assíncrono: o `future` roda no executor do `iced` e,
-    /// ao completar, seus pares `(chave, valor)` são mesclados no contexto e a
-    /// UI é reavaliada. Use para rede, disco e qualquer I/O sem bloquear a UI.
+    /// Agenda um efeito assíncrono: o `future` roda no executor do `iced` e, ao
+    /// completar, seu [`EffectOutcome`] é aplicado (dados mesclados no contexto,
+    /// toast exibido se houver) e a UI é reavaliada. Use para rede, disco e
+    /// qualquer I/O sem bloquear a UI.
+    ///
+    /// O `future` pode devolver qualquer coisa que vire um [`EffectOutcome`]:
+    /// `Vec<(String, String)>` (só dados — o caso comum), `(String, String)`,
+    /// uma [`crate::toasts::ToastSpec`] (só toast), ou um `EffectOutcome`
+    /// completo. Assim o código que só mescla dados não muda, e quem quer
+    /// notificar o resultado devolve o toast direto — sem chaves reservadas.
     ///
     /// ```ignore
     /// fn update(&mut self, action: &str, _v: Option<&str>, ctx: &mut Context) {
     ///     if action == "load" {
+    ///         // só dados
     ///         ctx.perform(async {
     ///             let body = fetch().await;
     ///             vec![("status".into(), "ok".into()), ("body".into(), body)]
     ///         });
     ///     }
+    ///     if action == "save" {
+    ///         // dados + toast do resultado
+    ///         ctx.perform(async {
+    ///             let msg = save().await;
+    ///             EffectOutcome { patch: vec![("saved".into(), "true".into())],
+    ///                             toast: Some(ToastSpec::success(msg)) }
+    ///         });
+    ///     }
     /// }
     /// ```
-    pub fn perform<F>(&mut self, future: F)
+    pub fn perform<F, T>(&mut self, future: F)
     where
-        F: Future<Output = Vec<(String, String)>> + Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+        T: Into<EffectOutcome> + Send + 'static,
     {
-        self.effects.push(Effect::Perform(Box::pin(future)));
+        self.effects.push(Effect::Perform(Box::pin(async move {
+            future.await.into()
+        })));
     }
 
     /// Agenda um efeito que produz um único par `(chave, valor)`.
@@ -153,7 +223,7 @@ impl<'a> Context<'a> {
         F: Future<Output = (String, String)> + Send + 'static,
     {
         self.effects.push(Effect::Perform(Box::pin(async move {
-            vec![future.await]
+            EffectOutcome::from(future.await)
         })));
     }
 }

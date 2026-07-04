@@ -132,9 +132,15 @@ pub enum EngineMessage {
     NavigateBack,
     FileChanged(String),
     /// Merge `(key, value)` pairs into the context and re-evaluate. Produced by
-    /// async effects ([`crate::component::Effect`]) completing and by component
-    /// subscriptions; the host app just forwards it to [`crate::GlacierUI::dispatch`].
+    /// component subscriptions (long-lived streams emitting raw `EngineMessage`);
+    /// the host app just forwards it to [`crate::GlacierUI::dispatch`].
     ContextPatch(Vec<(String, String)>),
+    /// An async effect ([`crate::component::Effect::Perform`]) completed with an
+    /// [`crate::component::EffectOutcome`]: merge its `patch` into the context,
+    /// show its `toast` (if any), and re-evaluate. Lets a `ctx.perform` future
+    /// request a toast of its result the same way sync `update()` code does,
+    /// without smuggling it through reserved context keys.
+    EffectOutcome(crate::component::EffectOutcome),
     /// Mouse-press on a reorderable item's `dragHandle`. `order` is the full
     /// identity snapshot (every item's `reorderKey` value, in current order) at
     /// the moment the drag started; `key` is this item's own identity.

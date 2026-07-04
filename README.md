@@ -924,6 +924,35 @@ fn update(&mut self, action: &str, _v: Option<&str>, ctx: &mut Context) {
 }
 ```
 
+**Efeito que também notifica (toast)** — o `future` pode devolver um
+[`EffectOutcome`] em vez de só os pares, e aí, além de mesclar os dados, o motor
+mostra um toast do resultado — o mesmo `ctx.show_toast` do código síncrono, só
+que aplicado quando o `future` resolve (quando não há mais um `Context` vivo):
+
+```rust
+use glacier_ui::{EffectOutcome, ToastSpec};
+
+fn update(&mut self, action: &str, _v: Option<&str>, ctx: &mut Context) {
+    if action == "salvar" {
+        ctx.perform(async {
+            match salvar_no_servidor().await {
+                Ok(_)  => EffectOutcome {
+                    patch: vec![("salvo".into(), "true".into())],
+                    toast: Some(ToastSpec::success("Salvo com sucesso.")),
+                },
+                Err(e) => ToastSpec::error(format!("Falha ao salvar: {e}")).into(),
+            }
+        });
+    }
+}
+```
+
+`ctx.perform` aceita qualquer retorno que vire um `EffectOutcome`:
+`Vec<(String, String)>` (só dados — o caso comum, inalterado), `(String, String)`,
+uma `ToastSpec` (só toast) ou um `EffectOutcome` completo. Assim o efeito pede o
+toast pelo caminho normal do motor, sem chaves reservadas nem interceptação no
+app host.
+
 Para isso, `dispatch` agora devolve uma `iced::Task<EngineMessage>` — repasse-a
 no `update` da app:
 
@@ -988,7 +1017,8 @@ pub enum EngineMessage {
     Navigate(String),                                  // navigateTo
     NavigateBack,                                      // navigateBack
     FileChanged(String),                               // tick do hot-reload
-    ContextPatch(Vec<(String, String)>),               // efeitos/subscriptions -> contexto
+    ContextPatch(Vec<(String, String)>),               // subscriptions -> contexto
+    EffectOutcome(EffectOutcome),                      // efeito async: patch + toast
     UiSubmit { action: String, next_focus: Option<String> }, // Enter num formControl
     // ... DragStart/DragHover/DragEnd (drag-and-drop) e UiEditorAction (TextArea)
 }
@@ -997,7 +1027,8 @@ pub enum EngineMessage {
 ### Tipos de apoio
 
 - `Template::File(String)` | `Template::Inline(String)`
-- `Context` — `get`, `set`, `set_var`, `navigate_to`, `navigate_back`
+- `Context` — `get`, `set`, `set_var`, `navigate_to`, `navigate_back`, `perform`, `show_toast`, `show_dialog`
+- `EffectOutcome { patch, toast }` — retorno rico de um `ctx.perform` (dados + toast); `From<Vec<(String, String)>>`/`From<ToastSpec>` para o caso simples
 - `ContextVar::new(key, value)`
 - `Nav::To(String)` | `Nav::Back`
 - `FormBuilder::new(nome).control(FormControl::new(nome, valor_inicial)...).on_submit(closure).build()`

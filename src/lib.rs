@@ -12,7 +12,7 @@ pub use parser::{UiNode, NodeType};
 pub use kdl_parser::{parse_kdl, register_bare_flags};
 pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_directives, StyleContext};
 pub use widget::{render_node, EngineMessage};
-pub use component::{Component, Context, ContextVar, DialogAction, Effect, Nav, Template};
+pub use component::{Component, Context, ContextVar, DialogAction, Effect, EffectOutcome, Nav, Template};
 pub use stylesheet::{StyleSheet, StyleRule};
 pub use forms::{Form, FormBuilder, FormControl, Validator};
 pub use dialogs::{ButtonRole, DialogButton, DialogIcon, DialogSpec};
@@ -437,6 +437,19 @@ impl GlacierUI {
                 let _ = self.reevaluate_all();
                 return iced::Task::none();
             }
+            // An async effect finished: apply its data patch and, if it asked
+            // for one, its toast — the same things a sync `update()` can request,
+            // now reachable from a `ctx.perform` future's result.
+            EngineMessage::EffectOutcome(outcome) => {
+                for (k, v) in &outcome.patch {
+                    self.context_data.insert(k.clone(), v.clone());
+                }
+                if let Some(spec) = &outcome.toast {
+                    self.show_toast(spec.clone());
+                }
+                let _ = self.reevaluate_all();
+                return iced::Task::none();
+            }
             // Drag-and-drop reordering of a `for-each`/`ForEach` list (see
             // `UiNode::drag_*`). `DragStart`/`DragHover` are purely internal —
             // no component ever sees them, same as `window:*` above; only
@@ -602,11 +615,11 @@ impl GlacierUI {
 
         let _ = self.reevaluate_all();
 
-        // Turn each requested effect into an iced Task whose completion feeds a
-        // ContextPatch back through dispatch.
+        // Turn each requested effect into an iced Task whose completion feeds an
+        // EffectOutcome (data patch + optional toast) back through dispatch.
         let tasks = effects.into_iter().map(|effect| match effect {
             component::Effect::Perform(future) => {
-                iced::Task::perform(future, EngineMessage::ContextPatch)
+                iced::Task::perform(future, EngineMessage::EffectOutcome)
             }
         });
         iced::Task::batch(tasks)
@@ -1228,4 +1241,54 @@ fn resize_direction(s: &str) -> Option<iced::window::Direction> {
         "sw" | "southwest" | "south-west" => SouthWest,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod effect_outcome_tests {
+    use super::*;
+    use crate::component::EffectOutcome;
+    use crate::toasts::{ToastKind, ToastSpec};
+
+    // `Into<EffectOutcome>` conversions keep `perform` ergonomic: the common
+    // data-only case and the toast-only case both work without boilerplate.
+    #[test]
+    fn conversions_cover_data_and_toast() {
+        let from_pairs: EffectOutcome = vec![("a".to_string(), "1".to_string())].into();
+        assert_eq!(from_pairs.patch, vec![("a".to_string(), "1".to_string())]);
+        assert!(from_pairs.toast.is_none());
+
+        let from_pair: EffectOutcome = ("k".to_string(), "v".to_string()).into();
+        assert_eq!(from_pair.patch, vec![("k".to_string(), "v".to_string())]);
+
+        let from_toast: EffectOutcome = ToastSpec::success("done").into();
+        assert!(from_toast.patch.is_empty());
+        assert_eq!(from_toast.toast.as_ref().map(|t| t.kind), Some(ToastKind::Success));
+    }
+
+    // Dispatching an EffectOutcome applies its data patch *and* shows its toast,
+    // the same things a sync `update()` could request — no reserved context keys.
+    #[test]
+    fn dispatch_applies_patch_and_toast() {
+        let mut motor = GlacierUI::new();
+        let outcome = EffectOutcome {
+            patch: vec![("status".to_string(), "ok".to_string())],
+            toast: Some(ToastSpec::success("saved")),
+        };
+        let _ = motor.dispatch(&EngineMessage::EffectOutcome(outcome));
+
+        assert_eq!(motor.get_data("status"), Some(&"ok".to_string()));
+        assert_eq!(motor.toasts.len(), 1, "the effect's toast should be shown");
+        assert_eq!(motor.toasts[0].spec.message, "saved");
+    }
+
+    // A data-only outcome patches context without ever touching the toast list.
+    #[test]
+    fn dispatch_data_only_shows_no_toast() {
+        let mut motor = GlacierUI::new();
+        let outcome: EffectOutcome = vec![("n".to_string(), "42".to_string())].into();
+        let _ = motor.dispatch(&EngineMessage::EffectOutcome(outcome));
+
+        assert_eq!(motor.get_data("n"), Some(&"42".to_string()));
+        assert!(motor.toasts.is_empty(), "no toast requested");
+    }
 }
