@@ -19,7 +19,7 @@ traz problema, benefício, custo estimado, esboço de implementação e status.
 | 3 | `width/height` com **pesos** (`fill N` / FillPortion) | Médio | Baixo | 1 | ✅ feito |
 | 4 | **max** width & height (via wrap em container) | Médio-alto | Baixo-médio | 1 | ✅ feito |
 | 5 | **Cor do texto do botão** configurável (desembutir branco) | Médio | Baixo | 1 | ✅ feito |
-| 6 | **Variáveis / design tokens** (`:root` + `var(--x)`) | **Altíssimo** | Médio | 2 | ⬜ |
+| 6 | **Variáveis / design tokens** (`:root` + `var(--x)`) | **Altíssimo** | Médio | 2 | ✅ feito (0.8.0) |
 | 7 | **Pseudo-estados** `:hover` / `:focus` / `:disabled` / `:active` | Alto | Alto | 3 | ⬜ |
 | 8 | **`@media`** (responsivo) | Médio | Alto | 3 | ⬜ |
 | 9 | Seletores **compostos/descendentes** + especificidade + `!important` | Médio-baixo | Alto | 4 | ⬜ |
@@ -82,20 +82,24 @@ do botão pinta só o **fundo**. Impossível botão de texto escuro/tema.
 
 ## Tier 2 — Alto valor, custo médio
 
-### 6. Variáveis / design tokens (`:root { --x } ` + `var(--x)`)
+### 6. Variáveis / design tokens (`:root { --x } ` + `var(--x)`)  ✅ (0.8.0)
 **Problema.** Sem `var()`/custom properties: cada hex é repetido em dezenas de
 regras (ver `app.gss` do rustploy). A paleta não tem fonte única e o `theme.json`
 não é referenciável do `.gss`. Reuso hoje = criar uma classe.
-**Fix.**
-- Aceitar **um** seletor não-classe especial: `:root { --bg: #0D1117; ... }`
-  (declarações `--nome: valor;`), coletadas num mapa de variáveis do sheet.
-- Substituir `var(--nome)` (com fallback opcional `var(--x, #fff)`) nos valores
-  ao resolver as regras.
-- Escopo v1: variáveis **por arquivo**; v2: mapa global mesclado entre sheets
-  (para o layering por prioridade já existente) e ponte opcional com `theme.json`.
-**Arquivos.** `stylesheet.rs` (parse de `:root`/`--x`, resolução de `var()`),
-possivelmente `lib.rs` (mapa global entre sheets). + testes.
-**Impacto no rustploy.** Enorme: colapsa a paleta repetida em ~6 tokens.
+**Fix (feito).**
+- `:root { --nome: valor; }` é o único seletor não-classe aceito (`parse_root_vars`);
+  a chave guarda o `--nome` completo.
+- `var(--nome)` e `var(--nome, fallback)` substituídos nos campos String da regra
+  **no `resolve_classes`** (helper `substitute_vars` + `StyleRule::resolve_var_refs`),
+  não no parse — assim as variáveis são **cross-sheet** (paleta no `app.gss` global
+  resolve `var()` em regras de qualquer sheet com escopo, respeitando a prioridade
+  de layering). Var indefinida sem fallback → string vazia. Sem recursão (1 passada).
+- Tudo contido no `stylesheet.rs` (não tocou parser/eval/widget). `var()` inline em
+  atributo do XML/KDL ainda NÃO resolve (fica p/ v2) — só em valores de classe `.gss`.
+**Arquivos.** `src/stylesheet.rs` + 4 testes (`root_vars_resolve_via_var`,
+`var_fallback_and_undefined`, `vars_are_cross_sheet`, `var_embedded_in_gradient`).
+**Impacto no rustploy (a fazer):** adotar `:root` no `app.gss` e trocar os hex
+repetidos por `var(--x)` — colapsa a paleta em ~6 tokens. Requer subir a dep p/ 0.8.0.
 
 ---
 

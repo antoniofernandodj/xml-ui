@@ -76,13 +76,73 @@ impl StyleRule {
         if other.max_width.is_some() { self.max_width = other.max_width; }
         if other.max_height.is_some() { self.max_height = other.max_height; }
     }
+
+    /// Resolve `var(--x)` em todos os campos String da regra contra `vars`
+    /// (os campos numéricos não suportam `var()`).
+    fn resolve_var_refs(&mut self, vars: &HashMap<String, String>) {
+        let sub = |o: &mut Option<String>| {
+            if let Some(v) = o {
+                if v.contains("var(") {
+                    *v = substitute_vars(v, vars);
+                }
+            }
+        };
+        sub(&mut self.width);
+        sub(&mut self.height);
+        sub(&mut self.padding);
+        sub(&mut self.align_x);
+        sub(&mut self.align_y);
+        sub(&mut self.background);
+        sub(&mut self.border_color);
+        sub(&mut self.color);
+        sub(&mut self.font);
+        sub(&mut self.gradient);
+        sub(&mut self.text_align);
+        sub(&mut self.cursor);
+        sub(&mut self.text_color);
+    }
+}
+
+/// Substitui `var(--nome)` / `var(--nome, fallback)` num valor pelo valor da
+/// variável (ou pelo fallback, ou string vazia se nenhum existir). Uma passada,
+/// sem recursão (uma variável não referencia outra). `var(` sem `)` é deixado
+/// como está.
+fn substitute_vars(value: &str, vars: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(start) = rest.find("var(") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 4..];
+        let Some(end) = after.find(')') else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let inner = after[..end].trim();
+        let (name, fallback) = match inner.split_once(',') {
+            Some((n, f)) => (n.trim(), Some(f.trim())),
+            None => (inner, None),
+        };
+        let replacement = vars
+            .get(name)
+            .map(String::as_str)
+            .or(fallback)
+            .unwrap_or("");
+        out.push_str(replacement);
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A parsed `.gss` document: a map from class name (without the leading `.`)
-/// to its [`StyleRule`].
+/// to its [`StyleRule`], plus the design tokens declared in a `:root { --x }`
+/// block (referenced elsewhere as `var(--x)`).
 #[derive(Debug, Clone, Default)]
 pub struct StyleSheet {
     pub rules: HashMap<String, StyleRule>,
+    /// Variáveis/design tokens de `:root { --nome: valor; }`, sem o `--`… não:
+    /// a chave guarda o `--nome` completo (como aparece em `var(--nome)`).
+    pub variables: HashMap<String, String>,
 }
 
 impl StyleSheet {
@@ -108,6 +168,19 @@ pub fn resolve_classes(classes: &str, sheets: &[&StyleSheet]) -> StyleRule {
             }
         }
     }
+    // Design tokens (`:root { --x }`) de TODOS os sheets ativos, later-sheet
+    // vence — assim uma paleta declarada uma vez (ex.: no `app.gss` global)
+    // resolve `var(--x)` em qualquer regra, inclusive de sheets com escopo.
+    // Substituição no fim (já com a regra mesclada), uma única vez.
+    let mut vars: HashMap<String, String> = HashMap::new();
+    for sheet in sheets {
+        for (k, v) in &sheet.variables {
+            vars.insert(k.clone(), v.clone());
+        }
+    }
+    // Sempre resolve (o método só toca campos que contêm `var(`): mesmo sem
+    // nenhuma variável, um `var(--x, fallback)` deve cair no fallback.
+    merged.resolve_var_refs(&vars);
     merged
 }
 
@@ -170,6 +243,7 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
     let cleaned = strip_comments(input)?;
 
     let mut rules: HashMap<String, StyleRule> = HashMap::new();
+    let mut variables: HashMap<String, String> = HashMap::new();
     let mut rest = cleaned.as_str();
     while let Some(open) = rest.find('{') {
         let selector = rest[..open].trim();
@@ -180,9 +254,16 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
         let body = &after_open[..close];
         rest = &after_open[close + 1..];
 
+        // `:root { --nome: valor; }` — bloco especial de design tokens (a única
+        // exceção à regra "só seletor de classe"). Referenciados com `var(--nome)`.
+        if selector == ":root" {
+            parse_root_vars(body, &mut variables)?;
+            continue;
+        }
+
         if !selector.starts_with('.') {
             return Err(format!(
-                "Selector '{}' must start with '.' (only class selectors are supported)",
+                "Selector '{}' must start with '.' (only class selectors and ':root' are supported)",
                 selector
             ));
         }
@@ -203,7 +284,34 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
         return Err(format!("Expected '{{' after selector '{}'", rest.trim()));
     }
 
-    Ok(StyleSheet { rules })
+    Ok(StyleSheet { rules, variables })
+}
+
+/// Parses the `--nome: valor;` declarations of a `:root { ... }` block into the
+/// sheet's design-token map. As chaves guardam o `--nome` completo.
+fn parse_root_vars(body: &str, vars: &mut HashMap<String, String>) -> Result<(), String> {
+    for decl in body.split(';') {
+        let decl = decl.trim();
+        if decl.is_empty() {
+            continue;
+        }
+        let (key, value) = decl
+            .split_once(':')
+            .ok_or_else(|| format!("Invalid variable declaration '{}' in ':root'", decl))?;
+        let key = key.trim();
+        let value = value.trim();
+        if !key.starts_with("--") {
+            return Err(format!(
+                "Variable '{}' in ':root' must start with '--'",
+                key
+            ));
+        }
+        if value.is_empty() {
+            return Err(format!("Empty value for variable '{}' in ':root'", key));
+        }
+        vars.insert(key.to_string(), value.to_string());
+    }
+    Ok(())
 }
 
 /// Parses the `key: value;` declarations inside a single rule body.
@@ -364,5 +472,46 @@ mod tests {
         assert_eq!(sheet.rules["btn"].text_color.as_deref(), Some("#0D1117"));
         assert_eq!(sheet.rules["panel"].max_width, Some(640.0));
         assert_eq!(sheet.rules["panel"].max_height, Some(480.0));
+    }
+
+    #[test]
+    fn root_vars_resolve_via_var() {
+        let sheet = parse_gss(
+            ":root { --bg: #0D1117; --accent: #58A6FF; } \
+             .card { background: var(--bg); color: var(--accent); }",
+        )
+        .unwrap();
+        assert_eq!(sheet.variables["--bg"].as_str(), "#0D1117");
+        // A substituição acontece na resolução (resolve_classes), não no parse.
+        let r = resolve_classes("card", &[&sheet]);
+        assert_eq!(r.background.as_deref(), Some("#0D1117"));
+        assert_eq!(r.color.as_deref(), Some("#58A6FF"));
+    }
+
+    #[test]
+    fn var_fallback_and_undefined() {
+        let sheet = parse_gss(".x { color: var(--missing, #FF0000); background: var(--nope); }").unwrap();
+        let r = resolve_classes("x", &[&sheet]);
+        assert_eq!(r.color.as_deref(), Some("#FF0000")); // usa o fallback
+        assert_eq!(r.background.as_deref(), Some("")); // sem var nem fallback → vazio
+    }
+
+    #[test]
+    fn vars_are_cross_sheet() {
+        // Paleta declarada num sheet (global), usada por regra de outro (escopo).
+        let global = parse_gss(":root { --ok: #3FB950; }").unwrap();
+        let scoped = parse_gss(".state { color: var(--ok); }").unwrap();
+        let r = resolve_classes("state", &[&global, &scoped]);
+        assert_eq!(r.color.as_deref(), Some("#3FB950"));
+    }
+
+    #[test]
+    fn var_embedded_in_gradient() {
+        let sheet = parse_gss(
+            ":root { --a: #000000; --b: #FFFFFF; } .g { gradient: var(--a) var(--b); }",
+        )
+        .unwrap();
+        let r = resolve_classes("g", &[&sheet]);
+        assert_eq!(r.gradient.as_deref(), Some("#000000 #FFFFFF"));
     }
 }
