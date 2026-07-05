@@ -57,23 +57,54 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::component::{Component, Context, FetchResult, PendingFetch, Template};
-use mlua::{Function, Lua, MultiValue, Table, Thread, ThreadStatus, Value};
+use crate::component::{
+    Component, Context, FetchResult, PendingFetch, StreamCommand, StreamCommandKind,
+    StreamEventKind, StreamKind, StreamRequest, Template,
+};
+use mlua::{Function, Lua, MultiValue, RegistryKey, Table, Thread, ThreadStatus, Value};
 
-/// Prelúdio Lua injetado antes do `<script>` do usuário. Define `fetch`, que
-/// **suspende** a corrotina da ação (via `coroutine.yield`) até o motor concluir
-/// a requisição de rede e retomá-la com a resposta — o que dá, no código Lua, a
-/// aparência de `async/await`:
+/// Prelúdio Lua injetado antes do `<script>` do usuário. Define `fetch` e,
+/// para streams de vida longa, `sse` / `websocket` (ver [`LuaComponent::drive`]).
+///
+/// `fetch` **suspende** a corrotina até a resposta (aparência de `await`).
+/// `sse`/`websocket` **não** suspendem: cedem um pedido de abertura, o motor
+/// registra o stream e retoma na hora devolvendo um handle. A partir daí os
+/// eventos chegam pelos handlers nomeados em `opts` (`on_message`, `on_open`,
+/// `on_error`, `on_close`), e o handle permite enviar/fechar:
 ///
 /// ```lua
-/// function carregar()
-///     local res = fetch("https://api.exemplo/dados")  -- "await": não bloqueia
-///     if res.ok then ctx.dados = res.body end
+/// function init()
+///     conn = websocket("wss://ex/ws", { on_message = "on_msg" })
 /// end
+/// function on_msg(data) ctx.ultima = data end
+/// function enviar() conn:send(ctx.texto) end
 /// ```
 const PRELUDE: &str = r#"
 function fetch(url, opts)
     return coroutine.yield({ __glacier_fetch = true, url = url, opts = opts or {} })
+end
+
+function sse(url, opts)
+    local id = coroutine.yield({ __glacier_stream_open = true, kind = "sse", url = url, opts = opts or {} })
+    return {
+        id = id,
+        close = function(self)
+            return coroutine.yield({ __glacier_stream_cmd = true, id = self.id, cmd = "close" })
+        end,
+    }
+end
+
+function websocket(url, opts)
+    local id = coroutine.yield({ __glacier_stream_open = true, kind = "ws", url = url, opts = opts or {} })
+    return {
+        id = id,
+        send = function(self, text)
+            return coroutine.yield({ __glacier_stream_cmd = true, id = self.id, cmd = "send", text = text })
+        end,
+        close = function(self)
+            return coroutine.yield({ __glacier_stream_cmd = true, id = self.id, cmd = "close" })
+        end,
+    }
 end
 "#;
 
@@ -94,8 +125,34 @@ pub struct LuaComponent {
     ctx_table: Table,
     /// Corrotinas suspensas num `fetch`, aguardando a resposta, por `id`.
     pending: RefCell<HashMap<u64, Thread>>,
-    /// Gerador de `id` para requisições de `fetch`.
+    /// Streams de vida longa abertos (`sse`/`websocket`), por `id`: os handlers
+    /// Lua registrados (`on_message`, …) que o motor chama a cada evento.
+    streams: RefCell<HashMap<u64, StreamRegistration>>,
+    /// Gerador de `id`, compartilhado por `fetch`es e streams (ids únicos no
+    /// componente).
     next_id: Cell<u64>,
+}
+
+/// Handlers Lua de um stream aberto, guardados como referências no registry do
+/// interpretador (resolvidas na hora do evento). Um slot `None` = sem handler
+/// para aquele evento.
+struct StreamRegistration {
+    on_open: Option<RegistryKey>,
+    on_message: Option<RegistryKey>,
+    on_error: Option<RegistryKey>,
+    on_close: Option<RegistryKey>,
+}
+
+impl StreamRegistration {
+    /// A referência do handler para um dado tipo de evento, se registrada.
+    fn handler(&self, kind: StreamEventKind) -> Option<&RegistryKey> {
+        match kind {
+            StreamEventKind::Open => self.on_open.as_ref(),
+            StreamEventKind::Message => self.on_message.as_ref(),
+            StreamEventKind::Error => self.on_error.as_ref(),
+            StreamEventKind::Closed => self.on_close.as_ref(),
+        }
+    }
 }
 
 impl LuaComponent {
@@ -150,6 +207,7 @@ impl LuaComponent {
             lua,
             ctx_table,
             pending: RefCell::new(HashMap::new()),
+            streams: RefCell::new(HashMap::new()),
             next_id: Cell::new(1),
         })
     }
@@ -226,27 +284,146 @@ impl LuaComponent {
         self.drive(thread, MultiValue::from_iter([Value::Table(res)]), ctx)
     }
 
-    /// Resume a corrotina uma vez com `args`; sincroniza o contexto de volta e,
-    /// se ela suspendeu num `fetch`, registra a requisição e guarda a corrotina
-    /// para retomada posterior. Se terminou, nada mais a fazer.
-    fn drive(&self, thread: Thread, args: MultiValue, ctx: &mut Context) -> mlua::Result<()> {
-        let yielded: MultiValue = thread.resume(args)?;
-        self.sync_from_lua(ctx)?;
+    /// Aloca o próximo `id` (único no componente, compartilhado por fetch/stream).
+    fn alloc_id(&self) -> u64 {
+        let id = self.next_id.get();
+        self.next_id.set(id + 1);
+        id
+    }
 
-        if thread.status() != ThreadStatus::Resumable {
-            return Ok(()); // corrotina terminou
-        }
+    /// Guia a corrotina até ela terminar ou suspender num `fetch`. Cada `yield`
+    /// carrega um pedido que o motor entende:
+    ///
+    /// - `__glacier_fetch`: registra a requisição, guarda a corrotina em
+    ///   `pending` e **para** (retomada depois via [`Self::resume_inner`]).
+    /// - `__glacier_stream_open`: abre um stream, registra os handlers e
+    ///   **retoma na hora** devolvendo o `id` (o Lua recebe o handle).
+    /// - `__glacier_stream_cmd`: registra o comando de saída (`send`/`close`) e
+    ///   **retoma na hora**.
+    ///
+    /// Só `fetch` suspende de verdade; stream-open/cmd continuam o mesmo turno.
+    fn drive(&self, thread: Thread, mut args: MultiValue, ctx: &mut Context) -> mlua::Result<()> {
+        loop {
+            let yielded: MultiValue = thread.resume(args)?;
+            self.sync_from_lua(ctx)?;
 
-        // Suspendeu: o único yield que o motor entende é um pedido de `fetch`.
-        if let Some(Value::Table(req)) = yielded.into_iter().next() {
+            if thread.status() != ThreadStatus::Resumable {
+                return Ok(()); // corrotina terminou
+            }
+
+            let Some(Value::Table(req)) = yielded.into_iter().next() else {
+                return Ok(()); // yield que o motor não entende: deixa parada
+            };
+
             if req.get::<bool>("__glacier_fetch").unwrap_or(false) {
-                let id = self.next_id.get();
-                self.next_id.set(id + 1);
+                let id = self.alloc_id();
                 ctx.fetches.push(self.parse_fetch(id, &req)?);
                 self.pending.borrow_mut().insert(id, thread);
+                return Ok(()); // suspende até a resposta
             }
+
+            if req.get::<bool>("__glacier_stream_open").unwrap_or(false) {
+                let id = self.alloc_id();
+                self.register_stream(id, &req, ctx)?;
+                // Retoma devolvendo o id como handle e segue no mesmo turno.
+                args = MultiValue::from_iter([Value::Integer(id as i64)]);
+                continue;
+            }
+
+            if req.get::<bool>("__glacier_stream_cmd").unwrap_or(false) {
+                self.record_stream_cmd(&req, ctx)?;
+                args = MultiValue::new();
+                continue;
+            }
+
+            return Ok(()); // tabela cedida sem marcador conhecido
         }
+    }
+
+    /// Registra um stream pedido por `sse`/`websocket`: lê `kind`, `url`, os
+    /// headers e os handlers nomeados de `opts`, guarda os handlers e empurra o
+    /// [`StreamRequest`] para o motor abrir a conexão.
+    fn register_stream(&self, id: u64, req: &Table, ctx: &mut Context) -> mlua::Result<()> {
+        let kind = match req.get::<String>("kind")?.as_str() {
+            "ws" => StreamKind::Ws,
+            _ => StreamKind::Sse,
+        };
+        let url: String = req.get("url")?;
+        let opts: Option<Table> = req.get("opts")?;
+        let (headers, reg) = match opts {
+            Some(o) => {
+                let headers = parse_headers_table(&o)?;
+                let reg = StreamRegistration {
+                    on_open: self.handler_key(&o, "on_open")?,
+                    on_message: self.handler_key(&o, "on_message")?,
+                    on_error: self.handler_key(&o, "on_error")?,
+                    on_close: self.handler_key(&o, "on_close")?,
+                };
+                (headers, reg)
+            }
+            None => (
+                Vec::new(),
+                StreamRegistration { on_open: None, on_message: None, on_error: None, on_close: None },
+            ),
+        };
+        self.streams.borrow_mut().insert(id, reg);
+        ctx.streams.push(StreamRequest::new(id, kind, url, headers));
         Ok(())
+    }
+
+    /// Resolve um handler de `opts[name]` num [`RegistryKey`]: aceita uma
+    /// função direta ou o **nome** de uma função global (resolvida agora). Um
+    /// nome sem global correspondente, ou um valor de outro tipo, vira `None`.
+    fn handler_key(&self, opts: &Table, name: &str) -> mlua::Result<Option<RegistryKey>> {
+        match opts.get::<Value>(name)? {
+            Value::Function(f) => Ok(Some(self.lua.create_registry_value(f)?)),
+            Value::String(s) => match self.lua.globals().get::<Value>(s.to_string_lossy())? {
+                Value::Function(f) => Ok(Some(self.lua.create_registry_value(f)?)),
+                _ => Ok(None),
+            },
+            _ => Ok(None),
+        }
+    }
+
+    /// Extrai o [`StreamCommand`] (`send`/`close`) que o handle Lua cedeu.
+    fn record_stream_cmd(&self, req: &Table, ctx: &mut Context) -> mlua::Result<()> {
+        let id: u64 = req.get("id")?;
+        let kind = match req.get::<String>("cmd")?.as_str() {
+            "close" => StreamCommandKind::Close,
+            _ => StreamCommandKind::Send,
+        };
+        let text: Option<String> = req.get("text")?;
+        ctx.stream_cmds.push(StreamCommand::new(id, kind, text.unwrap_or_default()));
+        Ok(())
+    }
+
+    /// Entrega um evento de stream ao handler Lua registrado (se houver),
+    /// rodando-o como corrotina (pode, ele mesmo, chamar `fetch`/abrir streams).
+    /// No `Closed`, descarta o registro do stream (e suas refs de handler).
+    fn on_stream_event_inner(
+        &self,
+        id: u64,
+        kind: StreamEventKind,
+        data: &str,
+        ctx: &mut Context,
+    ) -> mlua::Result<()> {
+        let func: Option<Function> = {
+            let streams = self.streams.borrow();
+            match streams.get(&id).and_then(|r| r.handler(kind)) {
+                Some(key) => Some(self.lua.registry_value(key)?),
+                None => None,
+            }
+        };
+        if kind == StreamEventKind::Closed {
+            self.streams.borrow_mut().remove(&id);
+        }
+        let Some(func) = func else { return Ok(()) };
+
+        self.sync_to_lua(ctx)?;
+        self.lua.globals().set("value", data)?;
+        let thread = self.lua.create_thread(func)?;
+        let args = MultiValue::from_iter([Value::String(self.lua.create_string(data)?)]);
+        self.drive(thread, args, ctx)
     }
 
     /// Extrai uma [`PendingFetch`] da tabela `{ url, opts }` que o `fetch` cedeu.
@@ -257,17 +434,7 @@ impl LuaComponent {
             Some(o) => {
                 let method = o.get::<Option<String>>("method")?.unwrap_or_else(|| "GET".into());
                 let body = o.get::<Option<String>>("body")?;
-                let headers = match o.get::<Option<Table>>("headers")? {
-                    Some(h) => {
-                        let mut v = Vec::new();
-                        for pair in h.pairs::<String, String>() {
-                            let (k, val) = pair?;
-                            v.push((k, val));
-                        }
-                        v
-                    }
-                    None => Vec::new(),
-                };
+                let headers = parse_headers_table(&o)?;
                 (method, body, headers)
             }
             None => ("GET".into(), None, Vec::new()),
@@ -313,6 +480,25 @@ impl Component for LuaComponent {
             eprintln!("[glacier-ui] erro ao retomar fetch em '{}': {}", self.name, e);
         }
     }
+
+    fn on_stream_event(&mut self, id: u64, kind: StreamEventKind, data: &str, ctx: &mut Context) {
+        if let Err(e) = self.on_stream_event_inner(id, kind, data, ctx) {
+            eprintln!("[glacier-ui] erro em stream Lua '{}' (id {}): {}", self.name, id, e);
+        }
+    }
+}
+
+/// Lê a subtabela `headers` de uma tabela de opções (`fetch`/`sse`/`websocket`)
+/// como uma lista de pares `(nome, valor)`. Ausente/`nil` devolve vazio.
+fn parse_headers_table(opts: &Table) -> mlua::Result<Vec<(String, String)>> {
+    let mut headers = Vec::new();
+    if let Some(h) = opts.get::<Option<Table>>("headers")? {
+        for pair in h.pairs::<String, String>() {
+            let (k, v) = pair?;
+            headers.push((k, v));
+        }
+    }
+    Ok(headers)
 }
 
 /// Converte um [`Value`] Lua na string que o contexto do motor guarda. Números
@@ -343,14 +529,7 @@ mod tests {
     /// Roda `func`/`value` contra um mapa de contexto e devolve o mapa mutado,
     /// exercitando o mesmo caminho de `update`.
     fn drive(comp: &LuaComponent, func: &str, value: Option<&str>, mut data: HashMap<String, String>) -> HashMap<String, String> {
-        let mut ctx = Context {
-            data: &mut data,
-            nav: None,
-            effects: Vec::new(),
-            dialog: None,
-            toasts: Vec::new(),
-            fetches: Vec::new(),
-        };
+        let mut ctx = Context::new(&mut data);
         comp.run(func, value, &mut ctx);
         data
     }
@@ -438,14 +617,7 @@ mod tests {
         // 1) roda a ação: `fetch` cede, a corrotina suspende e um PendingFetch aparece.
         let id;
         {
-            let mut ctx = Context {
-                data: &mut data,
-                nav: None,
-                effects: Vec::new(),
-                dialog: None,
-                toasts: Vec::new(),
-                fetches: Vec::new(),
-            };
+            let mut ctx = Context::new(&mut data);
             comp.run("carregar", None, &mut ctx);
             assert_eq!(ctx.fetches.len(), 1, "deveria ter suspendido num fetch");
             assert_eq!(ctx.fetches[0].url, "http://exemplo/api");
@@ -456,19 +628,78 @@ mod tests {
 
         // 2) o motor entrega a resposta: a corrotina retoma no ponto do fetch.
         {
-            let mut ctx = Context {
-                data: &mut data,
-                nav: None,
-                effects: Vec::new(),
-                dialog: None,
-                toasts: Vec::new(),
-                fetches: Vec::new(),
-            };
+            let mut ctx = Context::new(&mut data);
             let res = FetchResult { ok: true, status: 200, body: "OLA".into(), error: String::new() };
             comp.resume_inner(id, &res, &mut ctx).unwrap();
         }
         assert_eq!(data.get("dados").map(String::as_str), Some("OLA"));
         assert_eq!(data.get("erro"), None);
+    }
+
+    #[test]
+    fn sse_registra_stream_sem_suspender_e_handler_recebe_mensagens() {
+        let mut comp = LuaComponent::from_source(
+            "function init() sse('http://ex/stream', { on_message = 'on_ev', on_close = 'on_fim' }) end\n\
+             function on_ev(d) ctx.ultima = d end\n\
+             function on_fim() ctx.fim = 'sim' end",
+            "t.xml",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+
+        // init abre o stream: um StreamRequest aparece e a corrotina NÃO fica
+        // suspensa (sse não bloqueia como fetch).
+        let id;
+        {
+            let mut ctx = Context::new(&mut data);
+            comp.run("init", None, &mut ctx);
+            assert_eq!(ctx.streams.len(), 1, "init deveria ter aberto 1 stream");
+            assert_eq!(ctx.streams[0].kind, StreamKind::Sse);
+            assert_eq!(ctx.streams[0].url, "http://ex/stream");
+            assert!(ctx.fetches.is_empty(), "sse não usa o caminho de fetch");
+            id = ctx.streams[0].id;
+        }
+
+        // Uma mensagem do stream chama on_message('on_ev') com o texto.
+        {
+            let mut ctx = Context::new(&mut data);
+            comp.on_stream_event(id, StreamEventKind::Message, "oi", &mut ctx);
+        }
+        assert_eq!(data.get("ultima").map(String::as_str), Some("oi"));
+
+        // Ao fechar, on_close roda e o registro do stream é descartado.
+        {
+            let mut ctx = Context::new(&mut data);
+            comp.on_stream_event(id, StreamEventKind::Closed, "", &mut ctx);
+        }
+        assert_eq!(data.get("fim").map(String::as_str), Some("sim"));
+        assert!(comp.streams.borrow().is_empty(), "Closed deveria limpar o registro");
+    }
+
+    #[test]
+    fn websocket_handle_envia_comando_de_saida() {
+        let comp = LuaComponent::from_source(
+            "function go()\n\
+               local c = websocket('ws://ex', { on_message = 'on_ev' })\n\
+               c:send('ola')\n\
+             end\n\
+             function on_ev(d) ctx.ultima = d end",
+            "t.xml",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        let mut ctx = Context::new(&mut data);
+        comp.run("go", None, &mut ctx);
+        // Abriu um WebSocket e enfileirou um `send` — sem suspender.
+        assert_eq!(ctx.streams.len(), 1);
+        assert_eq!(ctx.streams[0].kind, StreamKind::Ws);
+        assert_eq!(ctx.stream_cmds.len(), 1, "c:send deveria enfileirar 1 comando");
+        assert_eq!(ctx.stream_cmds[0].kind, StreamCommandKind::Send);
+        assert_eq!(ctx.stream_cmds[0].text, "ola");
+        // O comando referencia o mesmo id do stream aberto.
+        assert_eq!(ctx.stream_cmds[0].id, ctx.streams[0].id);
     }
 
     #[test]
@@ -587,28 +818,14 @@ mod tests {
         // `fetch` do prelúdio funciona dentro do módulo importado.
         let id;
         {
-            let mut ctx = Context {
-                data: &mut data,
-                nav: None,
-                effects: Vec::new(),
-                dialog: None,
-                toasts: Vec::new(),
-                fetches: Vec::new(),
-            };
+            let mut ctx = Context::new(&mut data);
             comp.run("carregar", None, &mut ctx);
             assert_eq!(ctx.fetches.len(), 1, "o módulo deveria ter suspendido num fetch");
             assert_eq!(ctx.fetches[0].url, "http://ex/x");
             id = ctx.fetches[0].id;
         }
         {
-            let mut ctx = Context {
-                data: &mut data,
-                nav: None,
-                effects: Vec::new(),
-                dialog: None,
-                toasts: Vec::new(),
-                fetches: Vec::new(),
-            };
+            let mut ctx = Context::new(&mut data);
             let res = FetchResult { ok: true, status: 200, body: "PONG".into(), error: String::new() };
             comp.resume_inner(id, &res, &mut ctx).unwrap();
         }

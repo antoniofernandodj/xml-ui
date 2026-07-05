@@ -116,6 +116,84 @@ impl FetchResult {
     }
 }
 
+/// Tipo de stream de vida longa aberto pela camada Lua: `sse` (só leitura,
+/// Server-Sent Events sobre HTTP) ou `websocket` (bidirecional). Faz parte da
+/// identidade da subscription do motor (ver [`crate::net::StreamKey`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StreamKind {
+    /// Server-Sent Events: o motor lê o corpo HTTP evento a evento.
+    Sse,
+    /// WebSocket: leitura *e* envio (`conn:send`) sobre a mesma conexão.
+    Ws,
+}
+
+/// Um stream de vida longa que a camada Lua pediu para abrir via `sse(url, ..)`
+/// / `websocket(url, ..)`. Acumulado no [`Context`] durante o `update` e
+/// convertido pelo motor numa `iced::Subscription` (ver [`crate::net`]); cada
+/// evento recebido chama de volta o handler Lua registrado (`on_message`, …)
+/// via [`Component::on_stream_event`]. Ao contrário de [`PendingFetch`], não é
+/// one-shot: fica vivo emitindo eventos até fechar.
+#[derive(Debug, Clone)]
+pub struct StreamRequest {
+    /// Identifica este stream dentro do componente dono (roteamento dos eventos
+    /// e dos comandos de saída).
+    pub(crate) id: u64,
+    pub(crate) kind: StreamKind,
+    pub(crate) url: String,
+    pub(crate) headers: Vec<(String, String)>,
+}
+
+impl StreamRequest {
+    pub(crate) fn new(
+        id: u64,
+        kind: StreamKind,
+        url: String,
+        headers: Vec<(String, String)>,
+    ) -> Self {
+        Self { id, kind, url, headers }
+    }
+}
+
+/// Comando de saída para um stream já aberto, pedido pela camada Lua via
+/// `conn:send(texto)` / `conn:close()`. Acumulado no [`Context`] e entregue
+/// pelo motor à conexão viva (canal `mpsc` guardado quando o stream ficou
+/// pronto).
+#[derive(Debug, Clone)]
+pub struct StreamCommand {
+    pub(crate) id: u64,
+    pub(crate) kind: StreamCommandKind,
+    pub(crate) text: String,
+}
+
+impl StreamCommand {
+    pub(crate) fn new(id: u64, kind: StreamCommandKind, text: String) -> Self {
+        Self { id, kind, text }
+    }
+}
+
+/// A ação de um [`StreamCommand`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamCommandKind {
+    /// Envia `text` pela conexão (WebSocket). Sem efeito em SSE (só leitura).
+    Send,
+    /// Fecha a conexão.
+    Close,
+}
+
+/// O que aconteceu num stream aberto pela camada Lua, entregue a
+/// [`Component::on_stream_event`] para chamar o handler Lua correspondente.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamEventKind {
+    /// Conexão estabelecida (`on_open`).
+    Open,
+    /// Uma mensagem/evento chegou (`on_message`) — o texto vem em `data`.
+    Message,
+    /// Erro na conexão (`on_error`) — a mensagem vem em `data`.
+    Error,
+    /// Conexão encerrada (`on_close`).
+    Closed,
+}
+
 /// De onde vem o XML de um componente.
 pub enum Template {
     /// Caminho em disco — mantém o hot-reload do motor.
@@ -176,9 +254,30 @@ pub struct Context<'a> {
     /// Requisições de rede pedidas via `fetch` na camada Lua, transformadas em
     /// efeitos assíncronos pelo motor após o `update`.
     pub(crate) fetches: Vec<PendingFetch>,
+    /// Streams de vida longa (`sse`/`websocket`) que a camada Lua pediu para
+    /// abrir; o motor os converte em subscriptions após o `update`.
+    pub(crate) streams: Vec<StreamRequest>,
+    /// Comandos de saída (`conn:send`/`conn:close`) para streams já abertos.
+    pub(crate) stream_cmds: Vec<StreamCommand>,
 }
 
 impl<'a> Context<'a> {
+    /// Cria um contexto novo espelhando `data`, com todos os acumuladores
+    /// (efeitos, fetches, streams, …) vazios. Ponto único de construção para
+    /// que adicionar um acumulador não force editar cada call-site.
+    pub(crate) fn new(data: &'a mut HashMap<String, String>) -> Self {
+        Self {
+            data,
+            nav: None,
+            effects: Vec::new(),
+            dialog: None,
+            toasts: Vec::new(),
+            fetches: Vec::new(),
+            streams: Vec::new(),
+            stream_cmds: Vec::new(),
+        }
+    }
+
     /// Lê um valor do contexto de estado.
     pub fn get(&self, key: &str) -> Option<&String> {
         self.data.get(key)
@@ -323,6 +422,22 @@ pub trait Component {
     /// usa isto para retomar a corrotina Lua suspensa no ponto do `fetch`,
     /// passando o resultado — o que dá a aparência de `async/await`.
     fn resume_fetch(&mut self, _id: u64, _result: &FetchResult, _ctx: &mut Context) {}
+
+    /// Entrega um evento de um stream de vida longa (`sse`/`websocket`) aberto
+    /// pelo componente: o `id` da requisição (ver [`StreamRequest`]), o que
+    /// aconteceu ([`StreamEventKind`]) e, para `Message`/`Error`, o texto em
+    /// `data` (vazio para `Open`/`Closed`). Componentes sem streams não
+    /// precisam implementar. A [`crate::lua::LuaComponent`] usa isto para chamar
+    /// o handler Lua registrado (`on_message`, `on_open`, `on_error`,
+    /// `on_close`), que pode escrever em `ctx` como qualquer ação.
+    fn on_stream_event(
+        &mut self,
+        _id: u64,
+        _kind: StreamEventKind,
+        _data: &str,
+        _ctx: &mut Context,
+    ) {
+    }
 
     /// Fontes contínuas de eventos externos (sockets, timers, watchers) que
     /// alimentam o contexto. Mapeie cada stream para

@@ -95,6 +95,15 @@ pub struct GlacierUI {
     /// (see [`GlacierUI::subscription`]'s window-resize listener) and defaulted
     /// to a desktop-ish size until the first real `Resized` event arrives.
     viewport: (f32, f32),
+    /// Long-lived streams (`sse`/`websocket`) a component's Lua asked to open,
+    /// keyed by `(owner, id)`. [`GlacierUI::subscription`] turns each into an
+    /// `iced::Subscription`, so inserting/removing here starts/stops the actual
+    /// connection on the next runtime re-evaluation.
+    active_streams: HashMap<(String, u64), component::StreamRequest>,
+    /// Outbound command channels for live WebSocket streams, keyed the same way.
+    /// Populated when a stream signals [`net::StreamEvent::Ready`]; used to
+    /// deliver `conn:send`/`conn:close` to the connection task.
+    stream_senders: HashMap<(String, u64), net::WsSender>,
 }
 
 /// A [`toasts::ToastSpec`] actually in exhibition: the spec plus the
@@ -151,6 +160,8 @@ impl GlacierUI {
             toasts: Vec::new(),
             next_toast_id: 0,
             viewport: (1280.0, 800.0),
+            active_streams: HashMap::new(),
+            stream_senders: HashMap::new(),
         }
     }
 
@@ -337,10 +348,17 @@ impl GlacierUI {
         self.load_imports(&ast)?;
         self.process_links(&name, &ast)?;
 
-        // (b) Behavior: let the component seed its initial state.
-        {
-            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new(), dialog: None, toasts: Vec::new(), fetches: Vec::new() };
+        // (b) Behavior: let the component seed its initial state. Streams it
+        //     opens in `init()` are registered so the first `subscription()`
+        //     call (once the app loop starts) brings them live; other async
+        //     requests (fetch/effects) from `init` aren't wired here.
+        let init_streams = {
+            let mut ctx = component::Context::new(&mut self.context_data);
             comp.init(&mut ctx);
+            ctx.streams
+        };
+        for req in init_streams {
+            self.active_streams.insert((name.clone(), req.id), req);
         }
 
         // (c) Children: collect before moving `comp` into the map, then register
@@ -490,6 +508,32 @@ impl GlacierUI {
                 let result = result.clone();
                 return self.run_on_owner(&owner, move |comp, ctx| {
                     comp.resume_fetch(id, &result, ctx);
+                });
+            }
+            // An event from a long-lived stream (`sse`/`websocket`). `Ready`
+            // just stores the outbound channel (WebSocket sends); the others are
+            // routed to the owning component to invoke the Lua handler. `Closed`
+            // also tears down the engine-side bookkeeping.
+            EngineMessage::LuaStream { owner, id, event } => {
+                let owner = owner.clone();
+                let id = *id;
+                use component::StreamEventKind as K;
+                let (kind, data) = match event {
+                    net::StreamEvent::Ready(sender) => {
+                        self.stream_senders.insert((owner, id), sender.clone());
+                        return iced::Task::none();
+                    }
+                    net::StreamEvent::Open => (K::Open, String::new()),
+                    net::StreamEvent::Message(d) => (K::Message, d.clone()),
+                    net::StreamEvent::Error(e) => (K::Error, e.clone()),
+                    net::StreamEvent::Closed => {
+                        self.stream_senders.remove(&(owner.clone(), id));
+                        self.active_streams.remove(&(owner.clone(), id));
+                        (K::Closed, String::new())
+                    }
+                };
+                return self.run_on_owner(&owner, move |comp, ctx| {
+                    comp.on_stream_event(id, kind, &data, ctx);
                 });
             }
             // Drag-and-drop reordering of a `for-each`/`ForEach` list (see
@@ -647,10 +691,10 @@ impl GlacierUI {
     ) -> iced::Task<EngineMessage> {
         // Disjoint per-field borrows (`components` vs `context_data`) are
         // accepted by the borrow checker when done inline like this.
-        let (nav, effects, dialog, toasts, fetches) = if let Some(comp) = self.components.get_mut(owner) {
-            let mut ctx = component::Context { data: &mut self.context_data, nav: None, effects: Vec::new(), dialog: None, toasts: Vec::new(), fetches: Vec::new() };
+        let (nav, effects, dialog, toasts, fetches, streams, stream_cmds) = if let Some(comp) = self.components.get_mut(owner) {
+            let mut ctx = component::Context::new(&mut self.context_data);
             run(comp.as_mut(), &mut ctx);
-            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts, ctx.fetches)
+            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts, ctx.fetches, ctx.streams, ctx.stream_cmds)
         } else {
             return iced::Task::none();
         };
@@ -694,6 +738,36 @@ impl GlacierUI {
             }));
         }
 
+        // Newly opened streams are just recorded; `subscription()` (re-evaluated
+        // by the runtime after this update) turns them into live connections.
+        for req in streams {
+            self.active_streams.insert((owner.to_string(), req.id), req);
+        }
+
+        // Outbound `conn:send`/`conn:close`: for a live WebSocket, hand the
+        // command to its channel. A `close` on a stream without a sender (SSE,
+        // read-only) can't be signalled to the task, so we stop it by dropping
+        // the subscription (removing it from `active_streams`).
+        for cmd in stream_cmds {
+            let key = (owner.to_string(), cmd.id);
+            match cmd.kind {
+                component::StreamCommandKind::Send => {
+                    if let Some(sender) = self.stream_senders.get_mut(&key) {
+                        let _ = sender.try_send(net::WsCommand::Send(cmd.text));
+                    }
+                }
+                component::StreamCommandKind::Close => {
+                    if let Some(sender) = self.stream_senders.get_mut(&key) {
+                        // WebSocket: graceful close; the task then emits `Closed`,
+                        // which cleans up the sender and `active_streams`.
+                        let _ = sender.try_send(net::WsCommand::Close);
+                    } else {
+                        self.active_streams.remove(&key);
+                    }
+                }
+            }
+        }
+
         iced::Task::batch(tasks)
     }
 
@@ -712,6 +786,19 @@ impl GlacierUI {
         subs.push(iced::event::listen_with(tab_focus_from_event));
         // Window resizes → EngineMessage::Viewport, so `@media` blocks re-resolve.
         subs.push(iced::event::listen_with(viewport_from_event));
+        // Long-lived streams opened by components' Lua (`sse`/`websocket`): one
+        // subscription each, keyed by `StreamKey` so the runtime keeps it alive
+        // while it's in `active_streams` and drops it once removed.
+        for ((owner, id), req) in &self.active_streams {
+            let key = net::StreamKey {
+                owner: owner.clone(),
+                id: *id,
+                kind: req.kind,
+                url: req.url.clone(),
+                headers: req.headers.clone(),
+            };
+            subs.push(iced::Subscription::run_with(key, build_stream));
+        }
         iced::Subscription::batch(subs)
     }
 
@@ -1194,6 +1281,26 @@ fn collect_links(node: &UiNode, out: &mut Vec<(String, String, Option<String>)>)
 /// Maps a raw left-mouse-button release to `EngineMessage::DragEnd`, ignoring
 /// every other event. Used by [`GlacierUI::subscription`]'s global listener —
 /// a plain `fn` (not a closure) because `iced::event::listen_with` requires one.
+/// Builds the event stream for one long-lived stream subscription (see
+/// [`GlacierUI::subscription`]). A plain `fn` because `Subscription::run_with`
+/// requires a function pointer; everything it needs comes from the `key`. Opens
+/// the SSE or WebSocket connection (via [`net`]) and tags each
+/// [`net::StreamEvent`] with its `owner`/`id` as an [`EngineMessage::LuaStream`].
+fn build_stream(key: &net::StreamKey) -> impl iced::futures::Stream<Item = EngineMessage> + use<> {
+    use iced::futures::StreamExt;
+    let owner = key.owner.clone();
+    let id = key.id;
+    let events = match key.kind {
+        component::StreamKind::Sse => {
+            net::sse(key.url.clone(), key.headers.clone()).left_stream()
+        }
+        component::StreamKind::Ws => {
+            net::websocket(key.url.clone(), key.headers.clone()).right_stream()
+        }
+    };
+    events.map(move |event| EngineMessage::LuaStream { owner: owner.clone(), id, event })
+}
+
 fn drag_end_from_event(
     event: iced::Event,
     _status: iced::event::Status,

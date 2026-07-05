@@ -1,0 +1,31 @@
+<Container
+    padding="24"
+    alignX="Center"
+    alignY="Center"
+    width="fill"
+    height="fill"
+    background="#2E3440"
+>
+    <Column spacing="14" align="Center" width="460">
+        <Text content="SSE + WebSocket em Lua" size="22" bold="true" color="#ECEFF4" />
+
+        <Text content="— Server-Sent Events —" size="13" bold="true" color="#88C0D0" />
+        <Row spacing="10" align="Center">
+            <Button text="Abrir SSE" onClick="abrir_sse" color="#5E81AC" padding="10 18" />
+            <Button text="Fechar SSE" onClick="fechar_sse" color="#BF616A" padding="10 18" />
+        </Row>
+        <Text content="SSE: {sse_status}" size="13" color="#EBCB8B" />
+        <Text content="{sse_msg}" size="15" color="#A3BE8C" />
+
+        <Text content="— WebSocket (echo) —" size="13" bold="true" color="#88C0D0" />
+        <Row spacing="10" align="Center">
+            <Button text="Conectar" onClick="abrir_ws" color="#5E81AC" padding="10 18" />
+            <Button text="Enviar ping" onClick="enviar_ws" color="#A3BE8C" padding="10 18" />
+            <Button text="Fechar" onClick="fechar_ws" color="#BF616A" padding="10 18" />
+        </Row>
+        <Text content="WS: {ws_status}" size="13" color="#EBCB8B" />
+        <Text content="{ws_msg}" size="15" color="#A3BE8C" />
+    </Column>
+</Container>
+
+<script src="stream_lua.lua"></script>

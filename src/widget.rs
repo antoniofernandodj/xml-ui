@@ -188,6 +188,12 @@ pub enum EngineMessage {
     /// A `fetch` requested by a component's Lua (`crate::lua`) finished: resume
     /// the suspended coroutine `id` on component `owner` with the HTTP result.
     LuaResume { owner: String, id: u64, result: crate::component::FetchResult },
+    /// An event from a long-lived stream (`sse`/`websocket`) opened by a
+    /// component's Lua: routed to `owner` so it can call the registered handler
+    /// (`on_message`, …). `StreamEvent::Ready` also hands the engine the
+    /// outbound command channel for WebSocket sends. See
+    /// [`crate::GlacierUI::subscription`] and [`crate::net`].
+    LuaStream { owner: String, id: u64, event: crate::net::StreamEvent },
 }
 
 /// The stable focus id of a form-bound `TextInput`: `scope` is the enclosing

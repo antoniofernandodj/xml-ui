@@ -1,8 +1,8 @@
 {
+    "Lua.diagnostics.disable": [
+        "lowercase-global"
+    ],
     "Lua.diagnostics.globals": [
-        "buscar",
-        "init",
-        "ctx",
-        "fetch"
+        "sse", "ctx", "websocket"
     ]
 }
