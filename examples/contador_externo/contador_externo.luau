@@ -1,5 +1,5 @@
 -- Comportamento do contador, num arquivo Lua separado do template.
--- O template o referencia via <script src="../scripts/contador_externo.lua">.
+-- O template o referencia via <script src="../scripts/contador_externo.luau">.
 --
 -- O contexto do motor é a tabela global `ctx`: ler/escrever `ctx.contador`
 -- atualiza o binding {contador} da markup. Ações de onChange chegam com o

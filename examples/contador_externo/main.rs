@@ -6,11 +6,11 @@ use std::time::Duration;
 /// externo** em vez de embutir o código:
 ///
 /// ```xml
-/// <script src="contador_externo.lua"></script>
+/// <script src="contador_externo.luau"></script>
 /// ```
 ///
-/// O caminho é resolvido relativo ao diretório do template. `register_lua` lê o
-/// template, segue o `src`, carrega o Lua e roteia as ações (`onClick`/`onChange`)
+/// O caminho é resolvido relativo ao diretório do template. `register_component` lê o
+/// template, segue o `src`, carrega o Lua e roteia as ações (`on_click`/`onChange`)
 /// para as funções homônimas — que leem/escrevem o contexto pela tabela `ctx`.
 struct App {
     motor: GlacierUI,
@@ -19,7 +19,7 @@ struct App {
 impl App {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register_lua("contador", "examples/contador_externo/contador_externo.xml") {
+        if let Err(e) = motor.register_component("contador", "examples/contador_externo/contador_externo.xml") {
             eprintln!("Erro ao registrar: {}", e);
         }
         motor.set_initial_screen("contador");

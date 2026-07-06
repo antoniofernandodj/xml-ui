@@ -8,7 +8,7 @@
 >
     <Column spacing="16" align="Center">
         <Text content="fetch em Lua (async/await via corrotina)" size="22" bold="true" color="#ECEFF4" />
-        <Button text="Buscar meu IP" onClick="buscar" color="#5E81AC" padding="12 24" />
+        <Button text="Buscar meu IP" on_click="buscar" color="#5E81AC" padding="12 24" />
         <Text content="Status: {status}" size="14" color="#EBCB8B" />
         <Text content="{resultado}" size="16" color="#A3BE8C" />
     </Column>

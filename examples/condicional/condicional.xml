@@ -24,7 +24,7 @@
                 />
                 <Button
                     text="Sair"
-                    onClick="logout"
+                    on_click="logout"
                     color="#BF616A"
                     width="200"
                     padding="10"
@@ -40,7 +40,7 @@
                 />
                 <Button
                     text="Entrar"
-                    onClick="login"
+                    on_click="login"
                     color="#A3BE8C"
                     width="200"
                     padding="10"

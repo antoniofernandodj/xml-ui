@@ -4,8 +4,8 @@ use std::time::Duration;
 
 /// Streams de vida longa (SSE e WebSocket) a partir do `<script>` Lua.
 ///
-/// No template `stream_lua.xml`:
-/// ```lua
+/// No template `stream_luau.xml`:
+/// ```luau
 /// sse_conn = sse("https://sse.dev/test", { on_message = "sse_recebeu" })
 /// ws_conn  = websocket("wss://echo.websocket.org", { on_message = "ws_recebeu" })
 /// ws_conn:send("ping")   -- envia pela conexão viva
@@ -28,10 +28,10 @@ impl App {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
         // Por padrão usa os endpoints públicos; aponte para a API local com
-        //   GLACIER_STREAM_TEMPLATE=examples/stream_lua/stream_local.xml
+        //   GLACIER_STREAM_TEMPLATE=examples/stream_luau/stream_local.xml
         let template = std::env::var("GLACIER_STREAM_TEMPLATE")
-            .unwrap_or_else(|_| "examples/stream_lua/stream_lua.xml".to_string());
-        if let Err(e) = motor.register_lua("stream", &template) {
+            .unwrap_or_else(|_| "examples/stream_luau/stream_luau.xml".to_string());
+        if let Err(e) = motor.register_component("stream", &template) {
             eprintln!("Erro ao registrar: {}", e);
         }
         motor.set_initial_screen("stream");

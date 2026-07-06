@@ -18,7 +18,7 @@ impl Component for Toasts {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/toasts/toasts.kdl".into())
+        Template::File("examples/toasts/toasts.xml".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

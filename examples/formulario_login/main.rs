@@ -22,7 +22,7 @@ fn sincronizar(form: &Form, ctx: &mut Context) {
 }
 
 impl Login {
-    fn novo() -> Self {
+    fn new() -> Self {
 
         let form = FormBuilder::new("login")
                 .control(FormControl::new("username", "").required().min_length(3))
@@ -52,7 +52,7 @@ impl Component for Login {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/formulario_login/formulario_login.kdl".into())
+        Template::File("examples/formulario_login/formulario_login.xml".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {
@@ -80,7 +80,7 @@ struct AppLogin { motor: GlacierUI }
 impl AppLogin {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register(Box::new(Login::novo())) {
+        if let Err(e) = motor.register(Box::new(Login::new())) {
             eprintln!("Erro ao registrar 'login': {}", e);
         }
         motor.set_initial_screen("login");

@@ -13,8 +13,8 @@
 
         <Row class="actions">
             <!-- `btn` (escopada) dá padding + cor base; `btn-danger` sobrescreve a cor. -->
-            <Button class="btn btn-danger" text="-" onClick="decrementar" />
-            <Button class="btn btn-success" text="+" onClick="incrementar" />
+            <Button class="btn btn-danger" text="-" on_click="decrementar" />
+            <Button class="btn btn-success" text="+" on_click="incrementar" />
         </Row>
 
         <!-- Atributo inline vence a classe: cor explícita ganha de `subtitle`. -->

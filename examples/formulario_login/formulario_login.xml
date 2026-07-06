@@ -1,0 +1,24 @@
+<!-- Formulário de login: `Form` agrupa os `TextInput`s ligados aos
+     `FormControl`s do componente (por `formControl`, veja formulario_login.rs).
+     Enter em qualquer campo sempre dispara `onSubmit`; se houver um próximo
+     campo, o foco também avança para ele — dá para preencher e submeter o
+     formulário inteiro sem tocar no mouse. -->
+<Container padding="24" width="fill" height="fill" background="#2E3440">
+    <Column spacing="16" width="360">
+        <Text content="Entrar" size="24" bold="true" color="#ECEFF4" />
+        <Form onSubmit="entrar" name="login" width="fill">
+            <Column spacing="6" width="fill">
+                <Text content="Usuário" size="13" color="#D8DEE9" />
+                <TextInput formControl="username" placeholder="ao menos 3 caracteres" width="fill" />
+                <Text content="{erro_username}" size="12" color="#BF616A" />
+            </Column>
+            <Column spacing="6" width="fill">
+                <Text content="Senha" size="13" color="#D8DEE9" />
+                <TextInput formControl="password" placeholder="ao menos 6 caracteres" secure="true" width="fill" />
+                <Text content="{erro_password}" size="12" color="#BF616A" />
+            </Column>
+            <Button text="Entrar" on_click="entrar" color="#5E81AC" width="fill" />
+        </Form>
+        <Text content="{status}" size="13" color="#A3BE8C" />
+    </Column>
+</Container>

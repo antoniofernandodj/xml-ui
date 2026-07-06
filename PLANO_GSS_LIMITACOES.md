@@ -65,7 +65,7 @@ do iced não capam o próprio tamanho, o `render_node` **envolve qualquer nó co
 teto num `container().max_width()/.max_height()`** (ponto único antes do
 `mouse_area`) — vale para todo tipo de nó, não só Container. `min-*` ficou de
 fora (o iced não expõe fácil; usar por ora).
-**Arquivos.** `stylesheet.rs`, `parser.rs`, `kdl_parser.rs`, `eval.rs`,
+**Arquivos.** `stylesheet.rs`, `parser.rs`, `eval.rs`,
 `widget.rs`. + teste de parse.
 
 ### 5. Cor do texto do botão configurável  ✅
@@ -75,7 +75,7 @@ do botão pinta só o **fundo**. Impossível botão de texto escuro/tema.
 `textColor`) — mesma camada de `font`/`text_align`, sem tocar em
 `NodeType::Button`. Resolvido no `eval` (inline > classe) e aplicado no
 `button::Style.text_color`; default branco (não quebra nada).
-**Arquivos.** `stylesheet.rs`, `parser.rs`, `kdl_parser.rs`, `eval.rs`,
+**Arquivos.** `stylesheet.rs`, `parser.rs`, `eval.rs`,
 `widget.rs`.
 
 ---
@@ -95,7 +95,7 @@ não é referenciável do `.gss`. Reuso hoje = criar uma classe.
   resolve `var()` em regras de qualquer sheet com escopo, respeitando a prioridade
   de layering). Var indefinida sem fallback → string vazia. Sem recursão (1 passada).
 - Tudo contido no `stylesheet.rs` (não tocou parser/eval/widget). `var()` inline em
-  atributo do XML/KDL ainda NÃO resolve (fica p/ v2) — só em valores de classe `.gss`.
+  atributo do XML ainda NÃO resolve (fica p/ v2) — só em valores de classe `.gss`.
 **Arquivos.** `src/stylesheet.rs` + 4 testes (`root_vars_resolve_via_var`,
 `var_fallback_and_undefined`, `vars_are_cross_sheet`, `var_embedded_in_gradient`).
 **Impacto no rustploy (a fazer):** adotar `:root` no `app.gss` e trocar os hex

@@ -11,8 +11,8 @@
     <Column spacing="20" alignX="Center">
         <Text content="Valor do Contador: {contador}" size="28" bold="true" color="#ECEFF4" />
         <Row spacing="15" alignY="Center">
-            <Button text="Diminuir" onClick="decrementar" color="#BF616A" padding="10 20" />
-            <Button text="Aumentar" onClick="incrementar" color="#A3BE8C" padding="10 20" />
+            <Button text="Diminuir" on_click="decrementar" color="#BF616A" padding="10 20" />
+            <Button text="Aumentar" on_click="incrementar" color="#A3BE8C" padding="10 20" />
         </Row>
     </Column>
 </Container>
@@ -51,6 +51,7 @@ impl Component for Contador {
     - [Conteúdo e controles](#conteúdo-e-controles)
     - [Estruturais (composição, fluxo, recursos)](#estruturais-composição-fluxo-recursos)
   - [Atributos de layout e estilo](#atributos-de-layout-e-estilo)
+  - [Ações built-in](#ações-built-in)
   - [Data binding e templating](#data-binding-e-templating)
   - [Controle de fluxo](#controle-de-fluxo)
     - [Atributos Diretivas (Recomendado)](#atributos-diretivas-recomendado)
@@ -68,7 +69,7 @@ impl Component for Contador {
     - [`ContextVar`](#contextvar)
   - [Navegação entre telas](#navegação-entre-telas)
   - [`<script>` em Lua](#script-em-lua)
-    - [Rede: `fetch`](#rede-fetch-asyncawait-via-corrotina)
+    - [Rede: `fetch` (async/await via corrotina)](#rede-fetch-asyncawait-via-corrotina)
     - [Imports / módulos: `require`](#imports--módulos-require)
   - [Stylesheets `.gss`](#stylesheets-gss)
   - [Estilos escopados inline: `<style>` / `style`](#estilos-escopados-inline-style--style)
@@ -223,7 +224,7 @@ Todas as tags aceitam variações de caixa e nomes em inglês **ou** português.
 | Tag | Aliases | Atributos próprios |
 |---|---|---|
 | `<Text>` | `text` | `content`/`texto`, `size`/`tamanho`, `bold`/`negrito`, `color`/`cor` |
-| `<Button>` | `button`, `Botao` | `text`/`texto`, `onClick`/`aoClicar`, `navigateTo`/`irPara`, `navigateBack`/`voltar`, `color`/`cor` |
+| `<Button>` | `button`, `Botao` | `text`/`texto`, `on_click`/`aoClicar`, `navigateTo`/`irPara`, `navigateBack`/`voltar`, `color`/`cor` |
 | `<TextInput>` | `Input`, `EntradaTexto` | `placeholder`/`dica`, `value`/`valor`, `onChange`/`aoMudar`, `secure`/`password` (mascara o texto), `formControl` (liga a um `FormControl` pelo nome — veja [Formulários](#formulários-reactive-forms)) |
 | `<Form>` | `Formulario` | `onSubmit`/`aoSubmeter`, `name`/`nome` (opcional, só necessário com dois `<Form>`s de controles homônimos no mesmo componente) — renderiza como `<Column>` |
 | `<Select>` | `Dropdown`, `PickList`, `ComboBox`, `Seletor` | `options`/`items` (chave de contexto com array JSON), `value`/`valor` (chave com o valor selecionado), `onChange`/`onSelect`, `placeholder`, `labelField` (padrão `label`), `valueField` (padrão `value`), `color`/`cor`. Estilizável via `.gss` (`background`, `border*`, `color`). |
@@ -280,7 +281,7 @@ Disponíveis em **qualquer** tag:
 
 ## Ações built-in
 
-Algumas ações de `onClick`/`onPress` são tratadas pelo próprio motor, sem
+Algumas ações de `on_click`/`onPress` são tratadas pelo próprio motor, sem
 precisar de código no componente — basta referenciá-las no markup:
 
 | Ação | Efeito |
@@ -295,15 +296,15 @@ precisar de código no componente — basta referenciá-las no markup:
 As ações `window:*` permitem montar uma barra de título customizada para uma
 janela sem decorações (`decorations: false` nas `window::Settings` do iced):
 
-```kdl
-Row class="titlebar" width="fill" {
-    Row width="fill" on_press="window:drag" {       // região de arraste
-        Text "Meu App"
-    }
-    Button "—" onClick="window:minimize"
-    Button "▢" onClick="window:maximize"
-    Button "✕" onClick="window:close"
-}
+```xml
+<Row class="titlebar" width="fill">
+    <Row width="fill" onPress="window:drag">      <!-- região de arraste -->
+        <Text content="Meu App" />
+    </Row>
+    <Button text="—" on_click="window:minimize" />
+    <Button text="▢" on_click="window:maximize" />
+    <Button text="✕" on_click="window:close" />
+</Row>
 ```
 
 ---
@@ -440,7 +441,7 @@ struct Login {
 }
 
 impl Login {
-    fn novo() -> Self {
+    fn new() -> Self {
         Self {
             form: FormBuilder::new("login")
                 .control(FormControl::new("username", "").required().min_length(3))
@@ -460,12 +461,12 @@ impl Login {
 }
 ```
 
-```kdl
-Form onSubmit="entrar" name="login" width=fill {
-    TextInput formControl="username" placeholder="usuário" width=fill
-    TextInput formControl="password" placeholder="senha" secure width=fill
-    Button text="Entrar" onClick="entrar"
-}
+```xml
+<Form onSubmit="entrar" name="login" width="fill">
+    <TextInput formControl="username" placeholder="usuário" width="fill" />
+    <TextInput formControl="password" placeholder="senha" secure="true" width="fill" />
+    <Button text="Entrar" on_click="entrar" />
+</Form>
 ```
 
 `TextInput formControl="username"` sem `value`/`onChange` explícitos usa o
@@ -515,7 +516,7 @@ até ele também for `width=fill` (`<Column>`, `<Form>` etc. têm default
 a nota de layout abaixo). Por isso o `<Form>` do exemplo e os `<Column>` que
 envolvem cada campo também levam `width=fill`.
 
-Veja `examples/formulario_login/` (`main.rs` + `formulario_login.kdl`).
+Veja `examples/formulario_login/` (`main.rs` + `formulario_login.xml`).
 
 ---
 
@@ -572,7 +573,7 @@ pub trait Component {
 }
 ```
 
-- `update` recebe a ação (`onClick`/`onChange`); `value` vem preenchido em inputs e é `None` em cliques.
+- `update` recebe a ação (`on_click`/`onChange`); `value` vem preenchido em inputs e é `None` em cliques.
 - `on_form_submit` recebe só o `onSubmit` de um `<Form>` (veja [Formulários](#formulários-reactive-forms)) — nunca passa por `update`, então atualização de campo e submissão não competem pelo mesmo `match`.
 - `Context` expõe `get`, `set`, `set_var`, `navigate_to`, `navigate_back`.
 - O estado próprio mora nos campos do struct; o contexto guarda só a projeção string usada pelos templates.
@@ -581,8 +582,10 @@ Registre com `motor.register(Box::new(MeuComponente { .. }))`: o motor parseia o
 template, processa `<import>`/`<link>`, chama `init` e passa a rotear ações para
 o `update`.
 
-> Há também a API de baixo nível `register_component(name, path)`, que registra
-> **só a UI** (o comportamento fica no `update()` do app). As duas convivem.
+> Há também `register_component(name, path)`, que registra um componente a
+> partir de um arquivo: se o template tiver um `<script>`, o comportamento
+> **Luau** é ligado automaticamente; senão fica só a UI (o comportamento, se
+> houver, vem do `update()` do app ou de um `Component` em Rust via `register`).
 
 ### Componentes aninhados e roteamento de ações
 
@@ -661,16 +664,17 @@ Componentes também podem pedir navegação de dentro do `update` via
 ## `<script>` em Lua
 
 Dá para colocar o comportamento **dentro do próprio template**, num bloco
-`<script>` com funções **Lua** (5.4). `register_lua` lê o arquivo, carrega o
-script e roteia cada ação (`onClick`/`onChange`/`onSubmit`) para a função de
-mesmo nome — tudo **interpretado em tempo de execução**, sem recompilar o app.
+`<script>` com funções **Lua** (5.4). Ao registrar o template com
+`register_component`, o motor detecta o `<script>`, carrega o script e roteia
+cada ação (`on_click`/`onChange`/`onSubmit`) para a função de mesmo nome — tudo
+**interpretado em tempo de execução**, sem recompilar o app.
 
 ```xml
 <!-- examples/contador_macro/contador_macro.xml -->
 <Container ...>
     <Text content="Valor: {contador}" />
-    <Button text="+" onClick="incrementar" />
-    <Button text="-" onClick="decrementar" />
+    <Button text="+" on_click="incrementar" />
+    <Button text="-" on_click="decrementar" />
 </Container>
 
 <script>
@@ -682,33 +686,33 @@ function decrementar() ctx.contador = ctx.contador - 1 end
 
 ```rust
 let mut motor = GlacierUI::new();
-motor.register_lua("contador", "examples/contador_macro/contador_macro.xml")?;
+motor.register_component("contador", "examples/contador_macro/contador_macro.xml")?;
 ```
 
 Como funciona:
 
-- cada função Lua vira uma ação de mesmo nome (casada com `onClick`/`onChange`/`onSubmit`);
+- cada função Lua vira uma ação de mesmo nome (casada com `on_click`/`onChange`/`onSubmit`);
 - o **contexto** do motor é a tabela global `ctx`: ler `ctx.contador` devolve o valor atual e atribuir `ctx.contador = ...` grava de volta. Como Lua coage strings numéricas em aritmética, `ctx.contador + 1` sobre `"0"` volta como `"1"`. Atribuir `ctx.x = nil` **remove** a chave do contexto;
 - ações de `onChange` recebem o texto digitado como 1º argumento **e** na global `value` (`function set_nome(v) ctx.nome = v end`);
 - a função opcional `init()` semeia o estado inicial.
 
 Depois de cada chamada, a tabela `ctx` é copiada de volta ao contexto e os
 bindings `{contador}` refletem na próxima avaliação. O `<script>` é removido
-**antes** do parse XML/KDL, então pode ficar como irmão da raiz sem invalidar o
+**antes** do parse XML, então pode ficar como irmão da raiz sem invalidar o
 documento.
 
-**Arquivo Lua externo:** em vez de embutir o código, aponte para um `.lua`
+**Arquivo Lua externo:** em vez de embutir o código, aponte para um `.luau`
 separado com `src` (ou `from`) — o caminho é resolvido relativo ao diretório do
 template:
 
 ```xml
-<script src="contador.lua"></script>
+<script src="contador.luau"></script>
 ```
 
 **Vantagem:** mudar a lógica do `<script>` não exige recompilar — junto com o
 hot-reload do markup, a UI e o comportamento iteram sem build. Veja
 `examples/contador_macro.rs` (inline), `examples/contador_externo.rs` (arquivo
-externo) e o módulo `glacier_ui::lua`.
+externo) e o módulo `glacier_ui::luau`.
 
 ### Rede: `fetch` (async/await via corrotina)
 
@@ -717,7 +721,7 @@ O Lua tem uma função global `fetch(url, opts)` para chamadas HTTP/HTTPS (via
 resposta chega — a UI **não trava** durante a requisição, mas o código Lua fica
 com cara de `await`, síncrono e linear:
 
-```lua
+```luau
 function buscar()
     ctx.status = "carregando..."                 -- já aparece na tela
     local res = fetch("https://api.exemplo/dados") -- suspende aqui, sem bloquear
@@ -732,16 +736,16 @@ end
 O resultado é uma tabela `{ ok, status, body, error }`. O 2º argumento `opts` é
 opcional: `{ method = "POST", body = "...", headers = { ["Authorization"] = "..." } }`.
 Como cada `fetch` volta ao ponto exato onde parou, dá pra encadear várias em
-sequência. Veja `examples/fetch_lua.rs`.
+sequência. Veja `examples/fetch_luau.rs`.
 
 ### Imports / módulos: `require`
 
-Para não amontoar tudo num `<script>`, extraia lógica em **bibliotecas** `.lua`
+Para não amontoar tudo num `<script>`, extraia lógica em **bibliotecas** `.luau`
 e importe com `require` — um client de rede, utilitários, etc., cada peça
 encapsulada e reutilizável entre componentes:
 
-```lua
--- net/http_client.lua — a lógica de rede mora aqui, isolada
+```luau
+-- net/http_client.luau — a lógica de rede mora aqui, isolada
 local Client = {}
 Client.__index = Client
 function Client.new(base) return setmetatable({ base = base }, Client) end
@@ -749,9 +753,9 @@ function Client:get(path) return fetch(self.base .. path) end  -- usa o fetch as
 return Client
 ```
 
-```lua
+```luau
 -- <script> do template
-local http = require("net.http_client")   -- net/http_client.lua
+local http = require("net.http_client")   -- net/http_client.luau
 local api  = http.new("https://api.exemplo")
 
 function carregar()
@@ -760,7 +764,7 @@ function carregar()
 end
 ```
 
-`require("a.b")` procura `a/b.lua` (e depois `a/b/init.lua`) nas raízes, **nesta
+`require("a.b")` procura `a/b.luau` (e depois `a/b/init.luau`) nas raízes, **nesta
 ordem**:
 
 1. o **diretório do template** (mesma convenção do `src=`);
@@ -772,8 +776,8 @@ Detalhes: o módulo roda no **mesmo** interpretador do componente, então enxerg
 `fetch` e as globais — um client importado pode suspender a ação como qualquer
 código inline. Cada módulo é carregado **uma vez** e cacheado (como no Lua
 padrão); um módulo sem `return` vira `true`. Módulos são carregados no
-*startup* do componente, então editar um `.lua` importado pede reiniciar o app
-(o hot-reload observa só o template). Veja `examples/imports_lua/`.
+*startup* do componente, então editar um `.luau` importado pede reiniciar o app
+(o hot-reload observa só o template). Veja `examples/imports_luau/`.
 
 ---
 
@@ -845,25 +849,6 @@ específicos de uma página/cartão que não valem reutilizar.
 <Container class="card">
     <Text class="title" content="Olá" />
 </Container>
-```
-
-Em **KDL** não há tag de fechamento; use uma *string multilinha* (`"""…"""`)
-como argumento do nó `style`. O parser distingue **inline** de **arquivo** pela
-presença de `{`/quebra de linha (um caminho não tem nenhum dos dois):
-
-```kdl
-// inline: corpo GSS numa string multilinha
-style """
-.card  { padding: 24; background: #1E1E2E; border-radius: 16; }
-.title { size: 26; bold: true; color: #CDD6F4; }
-"""
-
-// arquivo externo (continua válido): vira um stylesheet link
-style "styles/estilos.gss"
-
-Container class="card" {
-    Text "Olá" class="title"
-}
 ```
 
 - **Escopo:** as classes só valem na subárvore do componente declarante, **em
@@ -1072,7 +1057,7 @@ tela sem você escrever nenhum `match` de mensagens.
 |---|---|
 | `new()` | cria um motor vazio. |
 | `register(Box<dyn Component>)` | registra um componente (UI + comportamento + `children()` em cascata). |
-| `register_component(name, path)` | API de baixo nível: registra só a UI a partir de um arquivo. |
+| `register_component(name, path)` | registra um componente de um arquivo; liga o comportamento Luau se o template tiver `<script>`, senão só a UI. |
 | `load_stylesheet(path)` | carrega/recarrega um `.gss` **global** e reavalia tudo. |
 | `theme()` | o `iced::Theme` do `<link rel="theme">`, ou `Theme::Dark`. |
 | `dispatch(&EngineMessage)` | roteia a mensagem ao componente dono, aplica navegação/reload/patch e devolve uma `iced::Task` com os efeitos pedidos. |
@@ -1090,7 +1075,7 @@ tela sem você escrever nenhum `match` de mensagens.
 
 ```rust
 pub enum EngineMessage {
-    UiClick(String),                                   // onClick
+    UiClick(String),                                   // on_click
     UiInputChanged { action: String, value: String },  // onChange
     Navigate(String),                                  // navigateTo
     NavigateBack,                                      // navigateBack
@@ -1121,10 +1106,10 @@ pub enum EngineMessage {
 | Exemplo | Demonstra | Rodar |
 |---|---|---|
 | `contador` | `Component` básico com estado e cliques. | `cargo run --example contador` |
-| `contador_macro` | comportamento embutido no template via `<script>` Lua (`register_lua`). | `cargo run --example contador_macro` |
-| `contador_externo` | `<script src="...">` apontando para um arquivo `.lua` externo. | `cargo run --example contador_externo` |
-| `fetch_lua` | chamada de rede (`fetch`) a partir do Lua, async via corrotina. | `cargo run --example fetch_lua` |
-| `imports_lua` | `require` de bibliotecas Lua (client de rede + utilitários), lógica modularizada. | `cargo run --example imports_lua` |
+| `contador_macro` | comportamento embutido no template via `<script>` Luau (`register_component`). | `cargo run --example contador_macro` |
+| `contador_externo` | `<script src="...">` apontando para um arquivo `.luau` externo. | `cargo run --example contador_externo` |
+| `fetch_luau` | chamada de rede (`fetch`) a partir do Lua, async via corrotina. | `cargo run --example fetch_luau` |
+| `imports_luau` | `require` de bibliotecas Lua (client de rede + utilitários), lógica modularizada. | `cargo run --example imports_luau` |
 | `perfil` | inputs (`TextInput`), cliques, `<import>` de um cartão, `Image` e `ContextVar`. | `cargo run --example perfil` |
 | `lista` | `<ForEach>` sobre JSON com um componente (`<import>`) por item. | `cargo run --example lista` |
 | `condicional` | `<if>` / `<else>` (truthy e comparação). | `cargo run --example condicional` |
@@ -1132,7 +1117,6 @@ pub enum EngineMessage {
 | `aninhado` | componente registrado dentro de outro (`children()`), com roteamento por namespace. | `cargo run --example aninhado` |
 | `estilos` | stylesheets `.gss` (globais e com escopo via `<link>`), classes e tema. | `cargo run --example estilos` |
 | `estilos_inline` | classes `.gss` inline e com escopo via bloco `<style>` (XML). | `cargo run --example estilos_inline` |
-| `estilos_inline_kdl` | o mesmo em KDL, com o corpo GSS numa string multilinha de `style`. | `cargo run --example estilos_inline_kdl` |
 | `formulario_login` | `Form`/`FormBuilder`/`FormControl`: validação, Enter para submeter/avançar campo. | `cargo run --example formulario_login` |
 
 ---

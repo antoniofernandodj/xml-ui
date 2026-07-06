@@ -6,8 +6,8 @@ use std::time::Duration;
 /// `decrementar`) vivem em `examples/contador_macro/contador_macro.xml`, dentro de `<script>`.
 ///
 /// O `<script>` agora é **Lua**, interpretado em tempo de execução (sem
-/// compilar): `register_lua` lê o arquivo, carrega o script e roteia cada ação
-/// (`onClick`) para a função Lua homônima. As funções leem/escrevem o contexto
+/// compilar): `register_component` lê o arquivo, carrega o script e roteia cada ação
+/// (`on_click`) para a função Lua homônima. As funções leem/escrevem o contexto
 /// pela tabela global `ctx`, então `{contador}` na markup reflete `ctx.contador`.
 struct App {
     motor: GlacierUI,
@@ -16,7 +16,7 @@ struct App {
 impl App {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register_lua("contador", "examples/contador_macro/contador_macro.xml") {
+        if let Err(e) = motor.register_component("contador", "examples/contador_macro/contador_macro.xml") {
             eprintln!("Erro ao registrar: {}", e);
         }
         motor.set_initial_screen("contador");

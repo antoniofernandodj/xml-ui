@@ -19,7 +19,7 @@ impl Component for Dialogs {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/dialogs/dialogs.kdl".into())
+        Template::File("examples/dialogs/dialogs.xml".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

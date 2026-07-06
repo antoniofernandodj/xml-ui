@@ -6,7 +6,7 @@ fn test_parser_basic() {
     <Container padding="15" width="200" background="#FFFFFF">
         <Column spacing="10">
             <Text content="Hello World" size="20" bold="true" />
-            <Button text="Click Me" onClick="btn_click" />
+            <Button text="Click Me" on_click="btn_click" />
         </Column>
     </Container>
     "##;
@@ -440,7 +440,7 @@ struct ChildComp;
 impl Component for ChildComp {
     fn name(&self) -> &str { "ChildComp" }
     fn template(&self) -> Template {
-        Template::Inline(r#"<Container><Button text="C" onClick="ping" /></Container>"#.into())
+        Template::Inline(r#"<Container><Button text="C" on_click="ping" /></Container>"#.into())
     }
     fn update(&mut self, action: &str, _v: Option<&str>, ctx: &mut Context) {
         if action == "ping" { ctx.set("child_pinged", "true"); }
@@ -453,7 +453,7 @@ impl Component for ParentComp {
     fn name(&self) -> &str { "parent" }
     fn template(&self) -> Template {
         Template::Inline(
-            r#"<Container><Button text="P" onClick="parent_act" /><ChildComp /></Container>"#.into(),
+            r#"<Container><Button text="P" on_click="parent_act" /><ChildComp /></Container>"#.into(),
         )
     }
     fn update(&mut self, action: &str, _v: Option<&str>, ctx: &mut Context) {
@@ -745,41 +745,6 @@ fn test_inline_style_overrides_linked_by_document_order() {
 
     std::fs::remove_file(linked).ok();
     std::fs::remove_file(path).ok();
-}
-
-#[test]
-fn test_kdl_inline_style_parses_to_style_node() {
-    // A multi-line `style` argument carrying `.gss` source is an inline,
-    // scoped sheet; a single-line path stays a `stylesheet` link.
-    let kdl = r#"
-        style """
-        .card { background: #1E1E2E; padding: 16; }
-        """
-        style "styles/app.gss"
-
-        Container class="card" {
-            Text "hi"
-        }
-    "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-
-    let mut found_inline = false;
-    let mut found_linked = false;
-    for child in &ast.children {
-        match &child.kind {
-            NodeType::Style { css } => {
-                found_inline = true;
-                assert!(css.contains(".card"), "inline style keeps its gss body");
-            }
-            NodeType::Link { rel, href, .. } if rel == "stylesheet" => {
-                found_linked = true;
-                assert_eq!(href, "styles/app.gss");
-            }
-            _ => {}
-        }
-    }
-    assert!(found_inline, "multi-line style arg should parse to a Style node");
-    assert!(found_linked, "single-line style arg should stay a stylesheet Link");
 }
 
 #[test]
@@ -1232,585 +1197,6 @@ fn test_precedence_foreach_if_attributes() {
     std::fs::remove_file(path).ok();
 }
 
-// ---------------------------------------------------------------------------
-// KDL parser
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_kdl_basic_layout() {
-    let kdl = r##"
-    Container padding=15 width=200 background="#FFFFFF" {
-        Column spacing=10 {
-            Text "Hello World" size=20 bold
-            Button "Click Me" onClick="btn_click"
-        }
-    }
-    "##;
-
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-
-    assert_eq!(ast.kind, NodeType::Container);
-    assert_eq!(ast.padding.as_deref(), Some("15"));
-    assert_eq!(ast.width.as_deref(), Some("200"));
-    assert_eq!(ast.background.as_deref(), Some("#FFFFFF"));
-
-    assert_eq!(ast.children.len(), 1);
-    let column = &ast.children[0];
-    assert_eq!(column.kind, NodeType::Column);
-    assert_eq!(column.spacing, Some(10.0));
-    assert_eq!(column.children.len(), 2);
-
-    if let NodeType::Text { content, size, bold, .. } = &column.children[0].kind {
-        assert_eq!(content, "Hello World");
-        assert_eq!(*size, Some(20.0));
-        assert!(bold, "o flag abreviado `bold` deve virar bold=true");
-    } else {
-        panic!("primeiro filho do Column deveria ser Text");
-    }
-
-    if let NodeType::Button { text, on_click, .. } = &column.children[1].kind {
-        assert_eq!(text, "Click Me");
-        assert_eq!(on_click.as_deref(), Some("btn_click"));
-    } else {
-        panic!("segundo filho do Column deveria ser Button");
-    }
-}
-
-#[test]
-fn test_kdl_declarations_hoisted() {
-    // theme/style/import/data viram nós Link/Import anexados como filhos da raiz.
-    let kdl = r#"
-    theme "styles/theme.json"
-    style "styles/estilos.gss"
-    import "PerfilCard" from="templates/perfil_card.xml"
-    data "styles/dados.json" as="perfil"
-
-    Container {
-        Text "ola"
-    }
-    "#;
-
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.kind, NodeType::Container);
-
-    let mut found_theme = false;
-    let mut found_style = false;
-    let mut found_data = false;
-    let mut found_import = false;
-    for child in &ast.children {
-        match &child.kind {
-            NodeType::Link { rel, href, name } if rel == "theme" => {
-                found_theme = true;
-                assert_eq!(href, "styles/theme.json");
-                assert!(name.is_none());
-            }
-            NodeType::Link { rel, href, .. } if rel == "stylesheet" => {
-                found_style = true;
-                assert_eq!(href, "styles/estilos.gss");
-            }
-            NodeType::Link { rel, href, name } if rel == "data" => {
-                found_data = true;
-                assert_eq!(href, "styles/dados.json");
-                assert_eq!(name.as_deref(), Some("perfil"));
-            }
-            NodeType::Import { name, from } => {
-                found_import = true;
-                assert_eq!(name, "PerfilCard");
-                assert_eq!(from, "templates/perfil_card.xml");
-            }
-            _ => {}
-        }
-    }
-    assert!(found_theme && found_style && found_data && found_import,
-        "todas as declarações deveriam ser anexadas como filhos da raiz");
-}
-
-#[test]
-fn test_kdl_flow_control_attributes() {
-    // if/else/for-each como atributos, igual ao XML.
-    // `else` aceita o flag abreviado (bare) ou a forma KDL v2 `else=#true`.
-    let kdl = r#"
-    Column {
-        Text "Bem-vindo, {usuario}" if="{logado}"
-        Text "Faça login" else
-        CartaoUsuario for-each="usuarios" var="u" nome="{u.nome}"
-    }
-    "#;
-
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    let c = &ast.children;
-    assert_eq!(c.len(), 3);
-
-    assert_eq!(c[0].if_cond.as_deref(), Some("{logado}"));
-    assert!(c[1].is_else, "o flag `else` deveria marcar is_else");
-    assert_eq!(c[2].for_each.as_deref(), Some("usuarios"));
-    assert_eq!(c[2].for_each_var.as_deref(), Some("u"));
-    if let NodeType::Component { name, props } = &c[2].kind {
-        assert_eq!(name, "CartaoUsuario");
-        assert_eq!(props.get("nome").map(String::as_str), Some("{u.nome}"));
-    } else {
-        panic!("esperava um Component CartaoUsuario");
-    }
-}
-
-#[test]
-fn test_kdl_script_block_stripped() {
-    // O bloco `script { ... }` (corpo Rust) é removido antes do parse KDL.
-    let kdl = r#"
-    Container {
-        Text "ola"
-    }
-
-    script {
-        fn incrementar(self) {
-            self.contador += 1;
-        }
-    }
-    "#;
-
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.kind, NodeType::Container);
-    assert_eq!(ast.children.len(), 1);
-}
-
-#[test]
-fn test_kdl_file_end_to_end() {
-    // Um arquivo .kdl roda no motor exatamente como um .xml: o parser é
-    // escolhido pela extensão.
-    let mut motor = GlacierUI::new();
-
-    std::fs::create_dir_all("templates").ok();
-    let path = "templates/test_e2e.kdl";
-    std::fs::write(
-        path,
-        r#"
-        Column {
-            Text "Contador: {contador}" size=24 bold
-            Button "+" onClick="incrementar"
-        }
-        "#,
-    ).unwrap();
-
-    motor.register_component("kdl_e2e", path).unwrap();
-    motor.define_data("contador", "7");
-
-    let ev = motor.evaluated_templates.get("kdl_e2e").unwrap();
-    assert_eq!(ev.kind, NodeType::Column);
-    if let NodeType::Text { content, size, bold, .. } = &ev.children[0].kind {
-        assert_eq!(content, "Contador: 7");
-        assert_eq!(*size, Some(24.0));
-        assert!(bold);
-    } else {
-        panic!("esperava o Text interpolado");
-    }
-
-    std::fs::remove_file(path).ok();
-}
-
-#[test]
-fn test_kdl_import_and_scoped_stylesheet() {
-    // Usa os arquivos reais do exemplo `painel_kdl`: o template importa um
-    // componente KDL e declara uma folha .gss escopada.
-    let mut motor = GlacierUI::new();
-    motor.register_component("painel_kdl", "examples/painel_kdl/painel_kdl.kdl").unwrap();
-
-    // O `import "CartaoKdl"` deve ter registrado o componente importado.
-    assert!(
-        motor.parsed_templates.contains_key("CartaoKdl"),
-        "o import do CartaoKdl deveria ter sido carregado"
-    );
-
-    // Árvore avaliada: a classe escopada `.painel` foi resolvida nos campos da
-    // raiz (após a avaliação `class` vira None — as classes viram atributos).
-    let ev = motor.evaluated_templates.get("painel_kdl").unwrap();
-    assert_eq!(ev.padding.as_deref(), Some("30"), ".painel (escopada) aplica padding");
-    assert_eq!(ev.background.as_deref(), Some("#11111B"), ".painel aplica background");
-
-    // Os CartaoKdl foram inlinados: cada um vira o Container raiz do cartão
-    // (width 320, background #181825 vindos dos atributos inline do componente).
-    // O template usa as duas formas (continuação com `\` e em múltiplas linhas).
-    let cards = collect_cards(ev);
-    assert_eq!(cards.len(), 4, "esperava 4 cartões inlinados (formas `\\` + multilinha)");
-    assert_eq!(cards[0].width.as_deref(), Some("320"), "o cartão importado aplica seu width inline");
-    assert_eq!(cards[0].background.as_deref(), Some("#181825"));
-
-    // As props nome/cargo foram interpoladas no contexto local de cada cartão.
-    let textos = collect_texts(ev);
-    assert!(textos.iter().any(|t| t == "Clara Silva"), "prop nome deveria ser interpolada");
-    assert!(textos.iter().any(|t| t == "Designer de Interface"), "prop cargo deveria ser interpolada");
-    // Cartões escritos na forma multilinha (sem `\`) também foram parseados.
-    assert!(textos.iter().any(|t| t == "Mateus Rocha"), "cartão multilinha (com filhos) deveria existir");
-    assert!(textos.iter().any(|t| t == "Helena Dias"), "cartão multilinha (com `;`) deveria existir");
-}
-
-#[test]
-fn test_kdl_multiline_node_props() {
-    // Props em linhas próprias, sem `\`. O primeiro nó fecha no dedent (próximo
-    // irmão); o segundo fecha explicitamente com `;`.
-    let kdl = r##"
-    Column {
-        CartaoKdl
-            nome="Mateus Rocha"
-            cargo="Gerente de Produto"
-            cor="#A6E3A1"
-        CartaoKdl
-            nome="Ana Lima"
-            cor="#89B4FA";
-    }
-    "##;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.kind, NodeType::Column);
-    assert_eq!(ast.children.len(), 2, "duas referências de componente irmãs");
-
-    let props0 = component_props(&ast.children[0]);
-    assert_eq!(props0.get("nome").map(String::as_str), Some("Mateus Rocha"));
-    assert_eq!(props0.get("cargo").map(String::as_str), Some("Gerente de Produto"));
-    assert_eq!(props0.get("cor").map(String::as_str), Some("#A6E3A1"));
-
-    let props1 = component_props(&ast.children[1]);
-    assert_eq!(props1.get("nome").map(String::as_str), Some("Ana Lima"));
-    assert_eq!(props1.get("cor").map(String::as_str), Some("#89B4FA"));
-}
-
-#[test]
-fn test_kdl_multiline_node_with_children() {
-    // Props em múltiplas linhas terminadas por um bloco de filhos `{ ... }`.
-    let kdl = r#"
-    Container
-        class="card"
-        padding=20 {
-            Text "dentro"
-        }
-    "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.kind, NodeType::Container);
-    assert_eq!(ast.class.as_deref(), Some("card"));
-    assert_eq!(ast.padding.as_deref(), Some("20"));
-    assert_eq!(ast.children.len(), 1);
-    if let NodeType::Text { content, .. } = &ast.children[0].kind {
-        assert_eq!(content, "dentro");
-    } else {
-        panic!("esperava o Text filho");
-    }
-}
-
-#[test]
-fn test_kdl_backslash_continuation_still_works() {
-    // A forma legada com `\` continua válida e equivale à multilinha.
-    let kdl = "
-    CartaoKdl \\
-        nome=\"Clara Silva\" \\
-        cargo=\"Engenheira\" \\
-        cor=\"#89B4FA\"
-    ";
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    let props = component_props(&ast);
-    assert_eq!(props.get("nome").map(String::as_str), Some("Clara Silva"));
-    assert_eq!(props.get("cargo").map(String::as_str), Some("Engenheira"));
-    assert_eq!(props.get("cor").map(String::as_str), Some("#89B4FA"));
-}
-
-#[test]
-fn test_kdl_multiline_preserves_inline_style_block() {
-    // O conteúdo da string multilinha (GSS de um `style` inline) não é tocado
-    // pelo pré-processador de continuação, mesmo com chaves/`:`/`;` por linha.
-    let kdl = r##"
-    style """
-    .card {
-        padding: 16;
-        color: #CDD6F4;
-    }
-    """
-    Container class="card" {
-        Text "oi"
-    }
-    "##;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    // O nó de estilo inline foi içado como filho da raiz, com o GSS intacto.
-    let style = ast.children.iter().find_map(|c| match &c.kind {
-        NodeType::Style { css } => Some(css.clone()),
-        _ => None,
-    }).expect("esperava um nó Style inline");
-    assert!(style.contains("padding: 16;"), "o corpo GSS deve ficar intacto");
-    assert!(style.contains("color: #CDD6F4;"));
-}
-
-#[test]
-fn test_kdl_close_brace_then_sibling_same_line() {
-    // `} node2 {` na mesma linha: o KDL exige terminador após o bloco de filhos;
-    // o pré-processador quebra a linha para que ambos os nós sejam parseados.
-    let kdl = r#"
-    Column {
-        Container {
-            Text "a"
-        } Container {
-            Text "b"
-        }
-    }
-    "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.kind, NodeType::Column);
-    assert_eq!(ast.children.len(), 2, "os dois Containers irmãos devem ser parseados");
-    assert!(matches!(ast.children[0].kind, NodeType::Container));
-    assert!(matches!(ast.children[1].kind, NodeType::Container));
-    let textos = collect_texts(&ast);
-    assert_eq!(textos, vec!["a".to_string(), "b".to_string()]);
-}
-
-#[test]
-fn test_kdl_close_brace_chain_and_compact() {
-    // Forma compacta numa só linha, com fechamentos encadeados `} }`.
-    let kdl = r#"
-    Row { Container { Text "x" } Container { Text "y" } }
-    "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.kind, NodeType::Row);
-    assert_eq!(ast.children.len(), 2);
-    assert_eq!(collect_texts(&ast), vec!["x".to_string(), "y".to_string()]);
-}
-
-#[test]
-fn test_kdl_close_brace_inside_strings_not_split() {
-    // Um `}` dentro de string normal e dentro de `"""` (corpo GSS) não pode
-    // disparar a quebra de linha.
-    let kdl = r##"
-    style """
-    .a { color: #fff; } .b { color: #000; }
-    """
-    Column {
-        Text "tem } chave" class="a"
-    }
-    "##;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.kind, NodeType::Column);
-    // O Text com `}` literal no conteúdo continua um único nó intacto.
-    let textos = collect_texts(&ast);
-    assert_eq!(textos, vec!["tem } chave".to_string()]);
-    // O style inline preservou o GSS (inclusive duas regras na mesma linha).
-    let style = ast.children.iter().find_map(|c| match &c.kind {
-        NodeType::Style { css } => Some(css.clone()),
-        _ => None,
-    }).expect("esperava o nó Style inline");
-    assert!(style.contains(".a { color: #fff; } .b { color: #000; }"));
-}
-
-#[test]
-fn test_kdl_builtin_bare_flag_on_own_continuation_line() {
-    // Um flag bare *do framework* (`bold`) numa linha de continuação própria
-    // deve ser dobrado de volta no nó acima — sem registro do cliente, e sem
-    // virar um novo nó irmão que engole as propriedades seguintes.
-    let kdl = r##"
-    Column {
-        Text "Título"
-            bold
-            size=24
-            color="#fff"
-        Text "depois"
-    }
-    "##;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.children.len(), 2, "o flag `bold` não pode virar um nó extra");
-    if let NodeType::Text { content, size, bold, color } = &ast.children[0].kind {
-        assert_eq!(content, "Título");
-        assert!(bold, "o flag bare `bold` deve virar bold=true");
-        assert_eq!(*size, Some(24.0), "o size sobrevive ao fold");
-        assert_eq!(color.as_deref(), Some("#fff"), "a cor sobrevive ao fold");
-    } else {
-        panic!("o primeiro filho deveria ser um Text, veio {:?}", ast.children[0].kind);
-    }
-}
-
-#[test]
-fn test_kdl_builtin_secure_flag_on_own_continuation_line() {
-    // Regressão: `secure` é um flag *de widget* (intrínseco ao TextInput), então
-    // é built-in — sem registro do cliente. Numa linha de continuação própria ele
-    // dobra no nó acima em vez de virar um nó irmão que engole value/onChange.
-    // Era o bug do TextInput `secure` nos templates do rustploy.
-    let kdl = r#"
-    Column {
-        Text "CLIENT SECRET" class="label_cap"
-        TextInput ""
-            secure
-            class="field_input"
-            value="gp_client_secret"
-            onChange="field:gp_client_secret"
-        Text "depois" class="muted"
-    }
-    "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.kind, NodeType::Column);
-    // Três filhos: o label, o input e o Text seguinte — sem nó espúrio `secure`.
-    assert_eq!(ast.children.len(), 3, "o flag `secure` não pode virar um nó extra");
-
-    let input = &ast.children[1];
-    assert_eq!(input.class.as_deref(), Some("field_input"), "a classe deve ficar no input");
-    if let NodeType::TextInput { placeholder, value_var, on_change, secure } = &input.kind {
-        assert_eq!(placeholder, "", "o placeholder vazio é preservado");
-        assert!(*secure, "o flag bare `secure` deve virar secure=true");
-        assert_eq!(value_var, "gp_client_secret", "o binding value sobrevive ao fold");
-        assert_eq!(on_change, "field:gp_client_secret", "o onChange sobrevive ao fold");
-    } else {
-        panic!("o segundo filho deveria ser um TextInput, veio {:?}", input.kind);
-    }
-}
-
-#[test]
-fn test_kdl_registered_bare_flag_leading_continuation_with_property() {
-    // Um flag bare registrado seguido de propriedades na mesma linha de
-    // continuação (`else class="tab_on"`) também deve ser dobrado no nó acima.
-    // Re-registrar é idempotente.
-    glacier_ui::register_bare_flags(["else"]);
-    glacier_ui::register_bare_flags(["else", "secure"]);
-
-    let kdl = r#"
-    Row {
-        Button "OAuth2"
-            else
-            class="tab_on"
-            onClick="gp_mode:oauth"
-    }
-    "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.children.len(), 1, "o `else` não pode virar um nó irmão");
-    let btn = &ast.children[0];
-    assert!(btn.is_else, "o flag bare `else` deve marcar is_else");
-    assert_eq!(btn.class.as_deref(), Some("tab_on"));
-    if let NodeType::Button { text, on_click, .. } = &btn.kind {
-        assert_eq!(text, "OAuth2");
-        assert_eq!(on_click.as_deref(), Some("gp_mode:oauth"));
-    } else {
-        panic!("esperava um Button, veio {:?}", btn.kind);
-    }
-}
-
-#[test]
-fn test_kdl_block_else_not_treated_as_flag() {
-    // A forma de bloco `} else { ... }` continua sendo um nó-bloco (não um flag
-    // de continuação): o flag `else` só dobra quando não abre um bloco.
-    let kdl = r#"
-    Column {
-        if cond="{tab}" equals="git" {
-            Text "git"
-        } else {
-            Text "web"
-        }
-    }
-    "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    let textos = collect_texts(&ast);
-    assert!(textos.contains(&"git".to_string()));
-    assert!(textos.contains(&"web".to_string()));
-}
-
-#[test]
-fn test_kdl_rustploy_remote_ui_templates_parse() {
-    // Cobertura de regressão com os templates REAIS da remote-ui do rustploy
-    // (snapshots em tests/fixtures/rustploy_remote_ui/). São o motivo original
-    // do fix de flags bare em linha de continuação (`secure`, `else`): cada um
-    // deve parsear sem que um flag vire um nó irmão espúrio que engole as
-    // propriedades seguintes. NB: cópias — se os originais mudarem muito,
-    // re-sincronize estes arquivos.
-    //
-    // `else` é um flag de aplicação, então registramos como a remote-ui faz no
-    // boot (`secure`/`password` já são built-in de widget).
-    glacier_ui::register_bare_flags(["else", "senao"]);
-
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rustploy_remote_ui");
-    // Nomes de flag que NUNCA podem aparecer como um nó/componente: indicariam
-    // que um flag bare foi lido como início de um novo nó.
-    let flag_names = [
-        "secure", "password", "seguro", "senha",
-        "bold", "negrito", "else", "senao",
-        "navigateBack", "navigate_back", "navigate-back", "voltar",
-    ];
-
-    for name in ["app", "home", "login", "service", "shell"] {
-        let path = format!("{dir}/{name}.kdl");
-        let src = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("lendo fixture {name}.kdl: {e}"));
-        let ast = glacier_ui::parse_kdl(&src)
-            .unwrap_or_else(|e| panic!("parse de {name}.kdl falhou: {e}"));
-
-        let mut spurious = Vec::new();
-        let mut secure_inputs = 0usize;
-        collect_flag_nodes(&ast, &flag_names, &mut spurious, &mut secure_inputs);
-        assert!(
-            spurious.is_empty(),
-            "{name}.kdl: flag bare lido como nó espúrio: {spurious:?}"
-        );
-
-        // home.kdl tem dois campos mascarados (CLIENT SECRET e PAT): o flag
-        // `secure` em linha própria precisa ter sido dobrado no TextInput.
-        if name == "home" {
-            assert_eq!(
-                secure_inputs, 2,
-                "home.kdl deveria ter 2 TextInput secure=true (CLIENT SECRET e PAT)"
-            );
-        }
-    }
-}
-
-/// Anda a árvore coletando (1) nós `Component` cujo nome é um keyword de flag
-/// bare — sinal de que um flag virou nó por engano — e (2) a contagem de
-/// `TextInput` com `secure=true`.
-fn collect_flag_nodes(
-    node: &UiNode,
-    flag_names: &[&str],
-    spurious: &mut Vec<String>,
-    secure_inputs: &mut usize,
-) {
-    match &node.kind {
-        NodeType::Component { name, .. }
-            if flag_names.iter().any(|f| name.eq_ignore_ascii_case(f)) =>
-        {
-            spurious.push(name.clone());
-        }
-        NodeType::TextInput { secure: true, .. } => *secure_inputs += 1,
-        _ => {}
-    }
-    for child in &node.children {
-        collect_flag_nodes(child, flag_names, spurious, secure_inputs);
-    }
-}
-
-/// Helper: props de um nó referência de componente (`<NomeComp .../>`).
-fn component_props(node: &UiNode) -> std::collections::HashMap<String, String> {
-    if let NodeType::Component { props, .. } = &node.kind {
-        props.clone()
-    } else {
-        panic!("esperava um NodeType::Component, veio {:?}", node.kind);
-    }
-}
-
-// Os cartões inlinados são os Containers de width 320 (assinatura do CartaoKdl).
-fn collect_cards(node: &UiNode) -> Vec<&UiNode> {
-    let mut out = Vec::new();
-    fn walk<'a>(node: &'a UiNode, out: &mut Vec<&'a UiNode>) {
-        if matches!(node.kind, NodeType::Container) && node.width.as_deref() == Some("320") {
-            out.push(node);
-        }
-        for child in &node.children {
-            walk(child, out);
-        }
-    }
-    walk(node, &mut out);
-    out
-}
-
-// Coleta o conteúdo de todo Text na árvore avaliada.
-fn collect_texts(node: &UiNode) -> Vec<String> {
-    let mut out = Vec::new();
-    fn walk(node: &UiNode, out: &mut Vec<String>) {
-        if let NodeType::Text { content, .. } = &node.kind {
-            out.push(content.clone());
-        }
-        for child in &node.children {
-            walk(child, out);
-        }
-    }
-    walk(node, &mut out);
-    out
-}
 
 #[test]
 fn test_unknown_extension_falls_back_to_xml() {
@@ -1945,13 +1331,13 @@ fn test_ui_submit_always_dispatches_regardless_of_next_focus() {
 }
 
 #[test]
-fn test_kdl_form_control_defaults_value_and_on_change() {
-    let kdl = r#"
-        Form onSubmit="entrar" {
-            TextInput formControl="usuario"
-        }
+fn test_form_control_defaults_value_and_on_change() {
+    let xml = r#"
+        <Form onSubmit="entrar">
+            <TextInput formControl="usuario" />
+        </Form>
     "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
+    let ast = UiNode::parse_xml(xml).unwrap();
     match &ast.kind {
         NodeType::Form { on_submit, .. } => assert_eq!(on_submit.as_deref(), Some("entrar")),
         other => panic!("esperava NodeType::Form, veio {:?}", other),
@@ -1969,13 +1355,13 @@ fn test_kdl_form_control_defaults_value_and_on_change() {
 }
 
 #[test]
-fn test_kdl_form_control_respects_explicit_value_and_on_change() {
-    let kdl = r#"
-        Form {
-            TextInput formControl="usuario" value="outro_valor" onChange="outraAcao"
-        }
+fn test_form_control_respects_explicit_value_and_on_change() {
+    let xml = r#"
+        <Form>
+            <TextInput formControl="usuario" value="outro_valor" onChange="outraAcao" />
+        </Form>
     "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
+    let ast = UiNode::parse_xml(xml).unwrap();
     let input = &ast.children[0];
     match &input.kind {
         NodeType::TextInput { value_var, on_change, .. } => {
@@ -1988,17 +1374,13 @@ fn test_kdl_form_control_respects_explicit_value_and_on_change() {
 
 /// Sanity check on the actual shipped template (`examples/formulario_login.rs`
 /// uses this same path): parses and evaluates end-to-end and has the two
-/// expected `formControl`-bound inputs in order. A previous release shipped
-/// this file with a bare `secure=true` KDL boolean, which this crate's `kdl`
-/// version (KDL2 grammar — bare `true`/`false` aren't valid property values;
-/// use `secure="true"` or the bare flag `secure`) rejects at parse time, so
-/// the example crashed on startup with nothing failing in `cargo test`. This
-/// test loads the real file so that class of bug fails here instead.
+/// expected `formControl`-bound inputs in order. Loading the real file keeps a
+/// broken example template from slipping through `cargo test`.
 #[test]
 fn test_formulario_login_example_template_parses_and_evaluates() {
     let mut motor = GlacierUI::new();
     motor
-        .register_component("formulario_login_smoke", "examples/formulario_login/formulario_login.kdl")
+        .register_component("formulario_login_smoke", "examples/formulario_login/formulario_login.xml")
         .expect("o template do exemplo formulario_login deve parsear e avaliar sem erro");
 
     let evaluated = motor.evaluated_templates.get("formulario_login_smoke").unwrap();
@@ -2014,60 +1396,33 @@ fn test_formulario_login_example_template_parses_and_evaluates() {
 
 // ── Fragment (multi-root component templates) ───────────────────────────────
 
-/// A KDL template with more than one top-level node parses into a transparent
-/// `Fragment` holding them, instead of silently keeping only the first.
-#[test]
-fn test_parse_kdl_multiple_roots_becomes_fragment() {
-    let kdl = r#"
-        Column class="a"
-        Column class="b"
-    "#;
-    let ast = glacier_ui::parse_kdl(kdl).unwrap();
-    assert_eq!(ast.kind, NodeType::Fragment);
-    assert_eq!(ast.children.len(), 2);
-    assert_eq!(ast.children[0].class.as_deref(), Some("a"));
-    assert_eq!(ast.children[1].class.as_deref(), Some("b"));
-}
-
-/// A single-root template is still returned as that root (no Fragment wrapper),
-/// preserving backwards compatibility.
-#[test]
-fn test_parse_kdl_single_root_unchanged() {
-    let ast = glacier_ui::parse_kdl(r#"Column class="only""#).unwrap();
-    assert_eq!(ast.kind, NodeType::Column);
-    assert_eq!(ast.class.as_deref(), Some("only"));
-}
-
 /// A component whose template is a fragment (an `if`/`else` pair) splices the
 /// matching branch into the parent — no wrapper node, and the branch is chosen
 /// per-instance from the passed prop.
 #[test]
 fn test_fragment_component_splices_if_else_branch() {
-    // `else` is an app-registered bare flag (KDL has no value-less args), same
-    // as the host app does at boot before parsing its templates.
-    glacier_ui::register_bare_flags(["else"]);
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
-    let card = "templates/test_frag_card.kdl";
-    let main = "templates/test_frag_main.kdl";
+    let card = "templates/test_frag_card.xml";
+    let main = "templates/test_frag_main.xml";
     std::fs::write(
         card,
         r#"
-        Column if="{filler}" equals="1" class="filler"
-        Column else class="card" {
-          Text "{name}"
-        }
+        <Column if="{filler}" equals="1" class="filler" />
+        <Column else class="card">
+          <Text content="{name}" />
+        </Column>
         "#,
     )
     .unwrap();
     std::fs::write(
         main,
         r#"
-        import "FragCard" from="templates/test_frag_card.kdl"
-        Column class="grid" {
-          FragCard filler="0" name="Alice"
-          FragCard filler="1" name="Zzz"
-        }
+        <import name="FragCard" from="templates/test_frag_card.xml" />
+        <Column class="grid">
+          <FragCard filler="0" name="Alice" />
+          <FragCard filler="1" name="Zzz" />
+        </Column>
         "#,
     )
     .unwrap();
@@ -2097,4 +1452,65 @@ fn test_fragment_component_splices_if_else_branch() {
 
     std::fs::remove_file(card).ok();
     std::fs::remove_file(main).ok();
+}
+
+// ── Registro unificado: register_component liga Luau se houver <script> ──────
+
+/// `register_component` presume que "sempre pode haver Luau": um template com um
+/// bloco `<script>` tem seu comportamento Luau ligado automaticamente (sem um
+/// `register_luau` à parte). O `init()` semeia o estado e a ação roteia para a
+/// função Luau de mesmo nome.
+#[test]
+fn test_register_component_wires_luau_when_script_present() {
+    let mut motor = GlacierUI::new();
+    std::fs::create_dir_all("templates").ok();
+    let path = "templates/test_scripted_unified.xml";
+    std::fs::write(
+        path,
+        r#"
+<Container>
+  <Text content="{n}" />
+  <Button text="+" onClick="inc" />
+</Container>
+<script>
+function init() ctx.n = ctx.n or 0 end
+function inc() ctx.n = ctx.n + 1 end
+</script>
+"#,
+    )
+    .unwrap();
+
+    motor.register_component("scripted", path).unwrap();
+    motor.set_initial_screen("scripted");
+
+    // init() do <script> semeou o estado.
+    assert_eq!(motor.context_data.get("n").map(String::as_str), Some("0"));
+
+    // A ação "inc" roteia para a função Luau homônima do componente scriptado.
+    let _ = motor.dispatch(&glacier_ui::EngineMessage::UiClick("inc".into()));
+    assert_eq!(motor.context_data.get("n").map(String::as_str), Some("1"));
+
+    std::fs::remove_file(path).ok();
+}
+
+/// Sem `<script>`, `register_component` continua só-UI: nenhuma behavior é
+/// registrada, então uma ação sem dono simplesmente não faz nada (não entra em
+/// pânico) — o mesmo que antes da unificação.
+#[test]
+fn test_register_component_ui_only_when_no_script() {
+    let mut motor = GlacierUI::new();
+    std::fs::create_dir_all("templates").ok();
+    let path = "templates/test_uionly_unified.xml";
+    std::fs::write(
+        path,
+        r#"<Container><Button text="x" onClick="nada" /></Container>"#,
+    )
+    .unwrap();
+
+    motor.register_component("uionly", path).unwrap();
+    motor.set_initial_screen("uionly");
+    // Ação sem behavior é no-op (não deve entrar em pânico).
+    let _ = motor.dispatch(&glacier_ui::EngineMessage::UiClick("nada".into()));
+
+    std::fs::remove_file(path).ok();
 }

@@ -17,7 +17,7 @@
 
         <Button
             text="Trocar tema"
-            onClick="trocar_tema"
+            on_click="trocar_tema"
             color="#89B4FA"
             width="fill"
             padding="12"

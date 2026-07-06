@@ -4,8 +4,8 @@ use std::time::Duration;
 
 /// Chamadas de rede a partir do `<script>` Lua, sem bloquear a UI.
 ///
-/// No template `fetch_lua.xml`, a função `buscar` faz:
-/// ```lua
+/// No template `fetch_luau.xml`, a função `buscar` faz:
+/// ```luau
 /// local res = fetch("https://api.ipify.org?format=json")
 /// ```
 /// `fetch` **suspende a corrotina** da ação (via `coroutine.yield`); o motor
@@ -20,7 +20,7 @@ struct App {
 impl App {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register_lua("fetch", "examples/fetch_lua/fetch_lua.xml") {
+        if let Err(e) = motor.register_component("fetch", "examples/fetch_luau/fetch_luau.xml") {
             eprintln!("Erro ao registrar: {}", e);
         }
         motor.set_initial_screen("fetch");

@@ -1,14 +1,14 @@
 //! Diálogos modais estilo `QMessageBox`: informação, aviso, erro, confirmação
 //! e pergunta, além de uma variante totalmente customizável.
 //!
-//! Ao contrário do resto do glacier-ui (declarado em KDL/XML e cacheado como
+//! Ao contrário do resto do glacier-ui (declarado em XML e cacheado como
 //! árvore de template), um diálogo é transiente e disparado por código — um
 //! [`Component::update`](crate::Component::update) pede
 //! [`Context::show_dialog`](crate::Context::show_dialog) com um
 //! [`DialogSpec`], o motor o sobrepõe (overlay) à tela atual em
 //! [`crate::GlacierUI::render_current`], e o clique num botão chega de volta
 //! ao `update()` do mesmo componente como uma ação comum — a mesma rota de
-//! um `<Button onClick="...">`.
+//! um `<Button on_click="...">`.
 //!
 //! ```ignore
 //! ctx.show_dialog(DialogSpec::question("Excluir?", "Essa ação não pode ser desfeita.")
@@ -71,7 +71,7 @@ pub enum ButtonRole {
 
 /// Um botão do diálogo: rótulo mostrado, ação despachada ao `update()` do
 /// componente dono da tela quando clicado (a mesma convenção de
-/// `onClick="..."` num `<Button>`), e papel visual.
+/// `on_click="..."` num `<Button>`), e papel visual.
 #[derive(Debug, Clone)]
 pub struct DialogButton {
     pub label: String,

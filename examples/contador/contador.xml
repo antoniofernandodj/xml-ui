@@ -16,13 +16,13 @@
         <Row spacing="15" align="Center">
             <Button
                 text="Diminuir"
-                onClick="decrementar"
+                on_click="decrementar"
                 color="#BF616A"
                 padding="10 20"
             />
             <Button
                 text="Aumentar"
-                onClick="incrementar"
+                on_click="incrementar"
                 color="#A3BE8C"
                 padding="10 20"
             />

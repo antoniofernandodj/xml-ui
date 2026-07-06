@@ -24,12 +24,12 @@
             />
         </Row>
         <Row spacing="15" align="Center">
-            <Button text="Diminuir" onClick="decrementar" color="#BF616A" padding="10 20" />
-            <Button text="Zerar"    onClick="zerar"       color="#4C566A" padding="10 20" />
-            <Button text="Aumentar" onClick="incrementar" color="#A3BE8C" padding="10 20" />
+            <Button text="Diminuir" on_click="decrementar" color="#BF616A" padding="10 20" />
+            <Button text="Zerar"    on_click="zerar"       color="#4C566A" padding="10 20" />
+            <Button text="Aumentar" on_click="incrementar" color="#A3BE8C" padding="10 20" />
         </Row>
     </Column>
 </Container>
 
 <!-- Comportamento em Lua, num arquivo separado (resolvido relativo a este template). -->
-<script src="contador_externo.lua"></script>
+<script src="contador_externo.luau"></script>

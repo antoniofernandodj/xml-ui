@@ -70,7 +70,7 @@ impl EffectOutcome {
 }
 
 /// Uma requisição de rede pedida pela camada Lua via `fetch(url, opts)`
-/// (ver [`crate::lua`]). É acumulada no [`Context`] durante o `update` e
+/// (ver [`crate::luau`]). É acumulada no [`Context`] durante o `update` e
 /// convertida pelo motor num efeito assíncrono (HTTP via [`crate::net`]); ao
 /// completar, a corrotina Lua suspensa `id` é retomada com o [`FetchResult`].
 #[derive(Debug, Clone)]
@@ -418,7 +418,7 @@ pub trait Component {
 
     /// Retoma um `fetch` assíncrono que completou: o motor entrega o `id` da
     /// requisição (ver [`PendingFetch`]) e o [`FetchResult`]. Componentes que
-    /// não fazem rede não precisam implementar. A [`crate::lua::LuaComponent`]
+    /// não fazem rede não precisam implementar. A [`crate::luau::LuauComponent`]
     /// usa isto para retomar a corrotina Lua suspensa no ponto do `fetch`,
     /// passando o resultado — o que dá a aparência de `async/await`.
     fn resume_fetch(&mut self, _id: u64, _result: &FetchResult, _ctx: &mut Context) {}
@@ -427,7 +427,7 @@ pub trait Component {
     /// pelo componente: o `id` da requisição (ver [`StreamRequest`]), o que
     /// aconteceu ([`StreamEventKind`]) e, para `Message`/`Error`, o texto em
     /// `data` (vazio para `Open`/`Closed`). Componentes sem streams não
-    /// precisam implementar. A [`crate::lua::LuaComponent`] usa isto para chamar
+    /// precisam implementar. A [`crate::luau::LuauComponent`] usa isto para chamar
     /// o handler Lua registrado (`on_message`, `on_open`, `on_error`,
     /// `on_close`), que pode escrever em `ctx` como qualquer ação.
     fn on_stream_event(

@@ -1,4 +1,4 @@
--- util/strings.lua
+-- util/strings.luau
 --
 -- Módulo de lógica pura (sem rede): utilitários de string. Mostra que dá para
 -- modularizar QUALQUER lógica, não só clients — e importar de vários lugares.

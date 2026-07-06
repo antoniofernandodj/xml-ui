@@ -1,5 +1,5 @@
 //! Regressão: template XML multi-raiz (par if/else por atributo, sem nó
-//! wrapper) deve virar um `Fragment` — como no parser KDL — em vez de manter
+//! wrapper) deve virar um `Fragment` — em vez de manter
 //! silenciosamente só a primeira raiz (o que fazia todo NavItem renderizar o
 //! ramo "on" e sumir com o ramo else).
 
@@ -19,8 +19,8 @@ fn navitem_if_else_por_atributo_em_componente_multi_raiz() {
     let nav_item = write_tmp(
         "nav_item.xml",
         r#"
-<Button class="nav_item_on" if="{view}" equals="{target}" onClick="{action}" text="ON {label}" />
-<Button class="nav_item" else onClick="{action}" text="OFF {label}" />
+<Button class="nav_item_on" if="{view}" equals="{target}" on_click="{action}" text="ON {label}" />
+<Button class="nav_item" else on_click="{action}" text="OFF {label}" />
 "#,
     );
     let shell = write_tmp(

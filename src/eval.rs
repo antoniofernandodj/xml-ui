@@ -8,7 +8,7 @@ use crate::stylesheet::{StyleSheet, StyleRule, resolve_classes};
 /// The script is stripped *before* XML parsing, so it may sit as a sibling of
 /// the root element (it would otherwise make the document multi-rooted). The
 /// markup parser ignores the script; its Lua body is interpreted at runtime by
-/// [`crate::lua::LuaComponent`].
+/// [`crate::luau::LuauComponent`].
 pub fn strip_script(xml: &str) -> (String, Option<String>) {
     let lower = xml.to_ascii_lowercase();
     if let Some(open_start) = lower.find("<script") {

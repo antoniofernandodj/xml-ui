@@ -16,7 +16,7 @@ struct Tarefa {
     nome: String,
 }
 
-/// Componente que encapsula UI (template KDL) + comportamento + estado: a
+/// Componente que encapsula UI (template XML) + comportamento + estado: a
 /// ordem "oficial" das tarefas vive aqui, não só no contexto.
 struct ListaReordenavel {
     tarefas: Vec<Tarefa>,
@@ -42,7 +42,7 @@ impl Component for ListaReordenavel {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/lista_reordenavel/lista_reordenavel.kdl".into())
+        Template::File("examples/lista_reordenavel/lista_reordenavel.xml".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {
@@ -51,20 +51,19 @@ impl Component for ListaReordenavel {
     }
 
     fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {
-        if action != "reordenar" {
-            return;
+        if action == "reordenar" {
+            let Some(value) = value else { return };
+            let Ok(ids) = serde_json::from_str::<Vec<String>>(value) else { return };
+    
+            // Reordena `self.tarefas` seguindo a nova ordem de ids que o motor
+            // já vinha refletindo ao vivo no contexto enquanto o usuário arrastava.
+            let mut by_id: HashMap<String, Tarefa> =
+                self.tarefas.drain(..).map(|t| (t.id.clone(), t)).collect();
+            self.tarefas = ids.into_iter().filter_map(|id| by_id.remove(&id)).collect();
+    
+            ctx.set("ultima_ordem", value.to_string());
+            self.sincronizar(ctx);
         }
-        let Some(value) = value else { return };
-        let Ok(ids) = serde_json::from_str::<Vec<String>>(value) else { return };
-
-        // Reordena `self.tarefas` seguindo a nova ordem de ids que o motor
-        // já vinha refletindo ao vivo no contexto enquanto o usuário arrastava.
-        let mut by_id: HashMap<String, Tarefa> =
-            self.tarefas.drain(..).map(|t| (t.id.clone(), t)).collect();
-        self.tarefas = ids.into_iter().filter_map(|id| by_id.remove(&id)).collect();
-
-        ctx.set("ultima_ordem", value.to_string());
-        self.sincronizar(ctx);
     }
 }
 

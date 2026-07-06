@@ -6,14 +6,14 @@ Bugs e limitações do glacier-ui já diagnosticados, para resolver no futuro.
 
 ## Diretiva (`if` / `else` / `ForEach`) como **nó raiz** de um componente é ignorada
 
-**Sintoma.** Um componente KDL cujo template tem uma diretiva condicional como
+**Sintoma.** Um componente cujo template tem uma diretiva condicional como
 **nó raiz** — ex.:
 
-```kdl
-// loading_row.kdl
-if cond="{flag}" equals="true" {
-  Row class="loading_row" { Text "Carregando…" }
-}
+```xml
+<!-- loading_row.xml -->
+<if cond="{flag}" equals="true">
+  <Row class="loading_row"><Text content="Carregando…" /></Row>
+</if>
 ```
 
 renderiza os filhos **sempre**, independentemente da condição. No caso real que
@@ -43,7 +43,7 @@ NodeType::Include { .. } | NodeType::Component { .. } | NodeType::Import { .. }
 Ou seja: a diretiva-raiz vira um `Container` comum, **descartando a condição**
 (e, no caso do `ForEach`, a iteração) e renderizando os filhos incondicional-
 mente. Some-se a isso que o parser mantém um único nó de topo "como está"
-(`src/kdl_parser.rs`, ~L70: 1 root → mantém; N roots → `Fragment`), então um
+(`src/parser.rs`, `parse_xml`: 1 root → mantém; N roots → `Fragment`), então um
 componente com uma só diretiva no topo entrega exatamente esse `If`/`ForEach`
 para o `eval_owned`.
 
@@ -54,11 +54,11 @@ para o `eval_owned`.
 **Workaround (atual).** Mover a diretiva para **fora** do componente, inline no
 call site, onde `expand_children` a avalia normalmente:
 
-```kdl
-// call site
-if cond="{flag}" equals="true" {
-  LoadingRow
-}
+```xml
+<!-- call site -->
+<if cond="{flag}" equals="true">
+  <LoadingRow />
+</if>
 ```
 
 e deixar o template do componente com um nó "normal" na raiz (ex.: `Row`).

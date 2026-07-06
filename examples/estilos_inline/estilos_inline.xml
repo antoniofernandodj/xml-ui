@@ -60,8 +60,8 @@
       <Text class="valor" content="{valor}" />
 
       <Row class="actions">
-        <Button class="btn btn-menos" text="−" onClick="decrementar" />
-        <Button class="btn btn-mais" text="+" onClick="incrementar" />
+        <Button class="btn btn-menos" text="−" on_click="decrementar" />
+        <Button class="btn btn-mais" text="+" on_click="incrementar" />
       </Row>
 
       <!-- Atributo inline vence a classe: esta cor ganha de `.dica`. -->

@@ -153,7 +153,7 @@ pub enum NodeType {
         css: String,
     },
     /// A transparent grouping node: renders its children inline into the parent,
-    /// adding no layout box of its own. Produced by [`crate::parse_kdl`] when a
+    /// adding no layout box of its own. Produced by [`UiNode::parse_xml`] when a
     /// template has more than one top-level node (so a component template can be
     /// a "fragment" of siblings — e.g. an `if`/`else` pair — without a wrapper),
     /// and also writable explicitly as `Fragment { … }`. During evaluation
@@ -570,7 +570,7 @@ impl UiNode {
         // (or any list of siblings) with no wrapper node. A single root is kept
         // as-is for backwards compatibility. Declarations ride along as
         // children (they're stripped during evaluation) so `load_imports` /
-        // `process_links` still find them. Mirrors the KDL parser exactly.
+        // `process_links` still find them.
         let mut root = match roots.len() {
             0 => return Err("No root element found".to_string()),
             1 => roots.pop().expect("len checked"),

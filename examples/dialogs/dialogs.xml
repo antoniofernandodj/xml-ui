@@ -1,0 +1,23 @@
+<!-- Painel de gatilhos para o exemplo `dialogs`. Os diálogos em si não fazem
+     parte deste template — são construídos em Rust (ver examples/dialogs.rs)
+     e sobrepostos pelo motor via GlacierUI::render_current. -->
+<Container padding="30" alignX="center" alignY="center" width="fill" height="fill" background="#2E3440">
+    <Column spacing="16" alignX="center">
+        <Text content="Diálogos (estilo QMessageBox)" size="22" bold="true" color="#ECEFF4" />
+        <Text content="Clique num botão para abrir o diálogo correspondente." size="13" color="#D8DEE9" />
+
+        <Row spacing="10">
+            <Button text="Information" on_click="mostrar_info" color="#5E81AC" padding="8 16" />
+            <Button text="Warning" on_click="mostrar_warning" color="#D08770" padding="8 16" />
+            <Button text="Error" on_click="mostrar_error" color="#BF616A" padding="8 16" />
+        </Row>
+        <Row spacing="10">
+            <Button text="Question" on_click="mostrar_question" color="#B48EAD" padding="8 16" />
+            <Button text="Confirm (com detalhe)" on_click="mostrar_confirm" color="#B48EAD" padding="8 16" />
+        </Row>
+
+        <Rule width="400" />
+
+        <Text content="Último resultado: {resultado}" size="14" color="#A3BE8C" />
+    </Column>
+</Container>

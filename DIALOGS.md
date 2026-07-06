@@ -6,7 +6,7 @@ versão `0.4.9`.
 
 ## Por que é diferente do resto do glacier-ui
 
-O resto do framework é declarativo — a UI vem de um template KDL/XML,
+O resto do framework é declarativo — a UI vem de um template XML,
 cacheada como árvore (`UiNode`) e reavaliada a cada mudança de contexto. Um
 diálogo não segue esse caminho: ele é transiente (aberto e fechado por
 código, não faz parte de nenhuma tela) e construído inteiramente em Rust
@@ -37,7 +37,7 @@ detalhe destacado, tipo `QMessageBox::setDetailedText`), `.dismissible(bool)`.
 ### `DialogButton` — um botão
 
 `label`, `action` (string roteada ao `Component::update` do dono da tela
-quando clicado — mesma convenção de `onClick="..."` num `<Button>`), `role`
+quando clicado — mesma convenção de `on_click="..."` num `<Button>`), `role`
 (`ButtonRole::Accept|Neutral|Destructive`, só controla a cor). Atalhos:
 `ok`, `yes`, `no`, `cancel`, `save`, `discard`, `retry`, `close`.
 
@@ -82,7 +82,7 @@ componente dono da tela ativa, exatamente como um `UiClick` comum.
 
 ## Exemplo
 
-`examples/dialogs.rs` + `templates/dialogs.kdl` — um painel com um botão por
+`examples/dialogs/main.rs` + `examples/dialogs/dialogs.xml` — um painel com um botão por
 variante (`Information`/`Warning`/`Error`/`Question`/`Confirm com detalhe`).
 Rodar com `cargo run --example dialogs`.
 

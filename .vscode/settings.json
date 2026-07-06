@@ -3,6 +3,9 @@
         "lowercase-global"
     ],
     "Lua.diagnostics.globals": [
-        "sse", "ctx", "websocket"
+        "sse",
+        "ctx",
+        "websocket",
+        "fetch"
     ]
 }

@@ -1,0 +1,24 @@
+<!-- Painel de gatilhos para o exemplo `toasts`. Os toasts em si não fazem
+     parte deste template — são construídos em Rust (ver examples/toasts.rs)
+     e sobrepostos pelo motor via GlacierUI::render_current. -->
+<Container padding="30" alignX="center" alignY="center" width="fill" height="fill" background="#2E3440">
+    <Column spacing="16" alignX="center">
+        <Text content="Toasts (info / sucesso / aviso / erro)" size="22" bold="true" color="#ECEFF4" />
+        <Text content="Clique num botão para empilhar o toast correspondente; cada um some sozinho depois de alguns segundos." size="13" color="#D8DEE9" />
+
+        <Row spacing="10">
+            <Button text="Info" on_click="mostrar_info" color="#5E81AC" padding="8 16" />
+            <Button text="Sucesso" on_click="mostrar_sucesso" color="#A3BE8C" padding="8 16" />
+            <Button text="Aviso" on_click="mostrar_aviso" color="#D08770" padding="8 16" />
+            <Button text="Erro" on_click="mostrar_erro" color="#BF616A" padding="8 16" />
+        </Row>
+        <Row spacing="10" alignX="center">
+            <Button text="Com título + duração longa" on_click="mostrar_com_titulo" color="#B48EAD" padding="8 16" />
+            <Button text="Empilhar vários" on_click="mostrar_varios" color="#88C0D0" padding="8 16" />
+        </Row>
+
+        <Rule width="440" />
+
+        <Text content="Toasts disparados: {total_disparados}" size="14" color="#A3BE8C" />
+    </Column>
+</Container>

@@ -30,7 +30,7 @@
 
         <Button
             text="{texto_botao}"
-            onClick="seguir_usuario"
+            on_click="seguir_usuario"
             width="fill"
             color="{btn_color}"
             padding="10 15"

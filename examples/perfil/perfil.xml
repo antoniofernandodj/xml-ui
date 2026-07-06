@@ -64,14 +64,14 @@
                     <Row spacing="10" width="fill">
                         <Button
                             text="Desenvolvedora"
-                            onClick="set_dev"
+                            on_click="set_dev"
                             color="#89B4FA"
                             width="fill"
                             padding="8"
                         />
                         <Button
                             text="Designer"
-                            onClick="set_designer"
+                            on_click="set_designer"
                             color="#F5C2E7"
                             width="fill"
                             padding="8"

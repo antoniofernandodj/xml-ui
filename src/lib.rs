@@ -1,9 +1,8 @@
 pub mod parser;
-pub mod kdl_parser;
 pub mod eval;
 pub mod widget;
 pub mod component;
-pub mod lua;
+pub mod luau;
 pub mod net;
 pub mod stylesheet;
 pub mod forms;
@@ -11,11 +10,10 @@ pub mod dialogs;
 pub mod toasts;
 
 pub use parser::{UiNode, NodeType};
-pub use kdl_parser::{parse_kdl, register_bare_flags};
 pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_directives, StyleContext};
 pub use widget::{render_node, EngineMessage};
 pub use component::{Component, Context, ContextVar, DialogAction, Effect, EffectOutcome, FetchResult, Nav, Template};
-pub use lua::LuaComponent;
+pub use luau::LuauComponent;
 pub use stylesheet::{StyleSheet, StyleRule};
 pub use forms::{Form, FormBuilder, FormControl, Validator};
 pub use dialogs::{ButtonRole, DialogButton, DialogIcon, DialogSpec};
@@ -286,6 +284,14 @@ impl GlacierUI {
 
     /// Registers a component from its XML file, recursively loading any
     /// components it declares via `<import name="..." from="..." />`.
+    ///
+    /// The single entry point for file-based components: if the template carries
+    /// a `<script>` block (inline or an external `src`/`from` pointing at a
+    /// `.luau` file), its **Luau** behavior is wired automatically — the Luau
+    /// functions read/write the context via the global `ctx` table and each one
+    /// answers the action of the same name (see [`crate::luau`]). A template
+    /// without a `<script>` is UI-only. Either way there is no separate
+    /// registration call for scripted vs. plain components.
     pub fn register_component(&mut self, name: &str, path: &str) -> Result<(), String> {
         self.register_component_inner(name, path)?;
         // Evaluate once, after the whole import graph has been loaded.
@@ -304,28 +310,15 @@ impl GlacierUI {
         self.reevaluate_all()
     }
 
-    /// Registra um componente cujo comportamento é o bloco `<script>` **Lua** do
-    /// próprio template — UI e lógica no mesmo arquivo, interpretado em tempo de
-    /// execução (sem etapa de compilação). Atalho para
-    /// `register(Box::new(LuaComponent::from_file(path, name)?))`.
-    ///
-    /// As funções Lua leem e escrevem o contexto pela tabela global `ctx`; veja
-    /// [`crate::lua`].
-    pub fn register_lua(&mut self, name: &str, path: &str) -> Result<(), String> {
-        let comp = lua::LuaComponent::from_file(path, name)?;
-        self.register(Box::new(comp))
-    }
-
     /// Registers a single component and its `children()` recursively, without
     /// re-evaluating. Used by [`GlacierUI::register`].
-    fn register_one(&mut self, mut comp: Box<dyn component::Component>) -> Result<(), String> {
+    fn register_one(&mut self, comp: Box<dyn component::Component>) -> Result<(), String> {
         use component::Template;
 
         let name = comp.name().to_string();
 
-        // (a) UI: resolve the template and feed it through the parse pipeline,
-        //     which picks XML or KDL by the file extension. `File` templates
-        //     keep hot-reload support.
+        // (a) UI: resolve the template and feed it through the XML parse
+        //     pipeline. `File` templates keep hot-reload support.
         let (markup, path) = match comp.template() {
             Template::File(path) => {
                 let content = std::fs::read_to_string(&path)
@@ -340,35 +333,42 @@ impl GlacierUI {
             Template::Inline(s) => (s, None),
         };
 
-        // Parse via XML or KDL (picked by extension), with any `<script>` block
-        // stripped — its Lua body is run at runtime by `LuaComponent`, not here.
+        // Parse the XML markup, with any `<script>` block stripped — its Lua
+        // body is run at runtime by `LuaComponent`, not here.
         let (ast, _script) = parse_markup(path.as_deref(), &markup)
             .map_err(|e| format!("Failed to parse template for component '{}': {}", name, e))?;
         self.parsed_templates.insert(name.clone(), ast.clone());
         self.load_imports(&ast)?;
         self.process_links(&name, &ast)?;
 
-        // (b) Behavior: let the component seed its initial state. Streams it
-        //     opens in `init()` are registered so the first `subscription()`
-        //     call (once the app loop starts) brings them live; other async
-        //     requests (fetch/effects) from `init` aren't wired here.
+        // (b) Behavior + (c) children: seed initial state (see
+        //     `install_component`), then register each Rust `children()`
+        //     recursively so their templates/behavior are available too.
+        let children = comp.children();
+        self.install_component(&name, comp);
+        for child in children {
+            self.register_one(child)?;
+        }
+        Ok(())
+    }
+
+    /// Runs `comp.init` — recording any streams it opens so the first
+    /// `subscription()` call brings them live (other async requests from `init`
+    /// aren't wired here) — and stores the component under `name` so
+    /// [`GlacierUI::dispatch`] can route actions to it. Shared by the
+    /// `Box<dyn Component>` path ([`GlacierUI::register_one`]) and the file-based
+    /// path ([`GlacierUI::register_component_inner`], which wires a
+    /// [`luau::LuauComponent`] when the template carries a `<script>`).
+    fn install_component(&mut self, name: &str, mut comp: Box<dyn component::Component>) {
         let init_streams = {
             let mut ctx = component::Context::new(&mut self.context_data);
             comp.init(&mut ctx);
             ctx.streams
         };
         for req in init_streams {
-            self.active_streams.insert((name.clone(), req.id), req);
+            self.active_streams.insert((name.to_string(), req.id), req);
         }
-
-        // (c) Children: collect before moving `comp` into the map, then register
-        //     each recursively so their templates/behavior are available too.
-        let children = comp.children();
-        self.components.insert(name, comp);
-        for child in children {
-            self.register_one(child)?;
-        }
-        Ok(())
+        self.components.insert(name.to_string(), comp);
     }
 
     /// Routes an [`EngineMessage`] to the owning component (the one backing the
@@ -387,7 +387,7 @@ impl GlacierUI {
             }
             // Built-in window controls: drive the host window without any
             // component code, so a borderless app can wire its custom titlebar
-            // straight from markup — `onClick="window:close"` for the buttons,
+            // straight from markup — `on_click="window:close"` for the buttons,
             // `onPress="window:drag"` for the draggable region and
             // `onPress="window:resize:se"` for the edge/corner resize handles.
             // The window `Id` is resolved lazily via `latest`, keeping this
@@ -502,7 +502,7 @@ impl GlacierUI {
             // to that component so it can resume the suspended coroutine. The
             // resumed coroutine may itself issue more `fetch`es (chained
             // requests), which `run_on_owner` turns into further tasks.
-            EngineMessage::LuaResume { owner, id, result } => {
+            EngineMessage::LuauResume { owner, id, result } => {
                 let owner = owner.clone();
                 let id = *id;
                 let result = result.clone();
@@ -514,7 +514,7 @@ impl GlacierUI {
             // just stores the outbound channel (WebSocket sends); the others are
             // routed to the owning component to invoke the Lua handler. `Closed`
             // also tears down the engine-side bookkeeping.
-            EngineMessage::LuaStream { owner, id, event } => {
+            EngineMessage::LuauStream { owner, id, event } => {
                 let owner = owner.clone();
                 let id = *id;
                 use component::StreamEventKind as K;
@@ -734,7 +734,7 @@ impl GlacierUI {
             let id = req.id;
             let owner_name = owner.to_string();
             tasks.push(iced::Task::perform(crate::net::perform(req), move |result| {
-                EngineMessage::LuaResume { owner: owner_name.clone(), id, result }
+                EngineMessage::LuauResume { owner: owner_name.clone(), id, result }
             }));
         }
 
@@ -822,6 +822,16 @@ impl GlacierUI {
         self.load_imports(&ast)?;
         // Process this component's `<link>` declarations.
         self.process_links(name, &ast)?;
+
+        // Presume Luau: if the template carries a `<script>` (inline or an
+        // external `src`/`from`), wire that component's Luau behavior; otherwise
+        // it stays UI-only (its actions fall back to the owning screen, exactly
+        // as before). This is what unifies file-based registration — there is no
+        // separate `register_luau`, and imported components can be scripted too.
+        if luau::has_script(&content) {
+            let comp = luau::LuauComponent::from_file(path, name)?;
+            self.install_component(name, Box::new(comp));
+        }
 
         Ok(())
     }
@@ -1055,7 +1065,7 @@ impl GlacierUI {
                 if let Ok(modified) = metadata.modified() {
                     let last_modified = self.file_mod_times.get(name);
                     if last_modified.map_or(true, |&last| modified > last) {
-                        // File changed, reload it (XML or KDL by extension).
+                        // File changed, reload it (XML).
                         if let Ok(content) = std::fs::read_to_string(path) {
                             if let Ok((new_ast, _script)) = parse_markup(Some(path.as_str()), &content) {
                                 updates.push((name.clone(), new_ast, modified));
@@ -1186,21 +1196,14 @@ impl GlacierUI {
     }
 }
 
-/// Parses a template's source into a [`UiNode`], picking the parser by the
-/// file extension: `.kdl` uses the KDL parser, anything else (including unknown
-/// extensions and inline templates with no path) falls back to XML.
-///
-/// `path` is `None` for inline templates. The returned tuple carries the
-/// `<script>` body for XML templates (KDL strips its `script` block internally
-/// and never surfaces one here).
-fn parse_markup(path: Option<&str>, content: &str) -> Result<(UiNode, Option<String>), String> {
-    if path.is_some_and(|p| p.to_ascii_lowercase().ends_with(".kdl")) {
-        Ok((parse_kdl(content)?, None))
-    } else {
-        let (markup, script) = eval::strip_script(content);
-        let markup = eval::normalize_bare_directives(&markup);
-        Ok((UiNode::parse_xml(&markup)?, script))
-    }
+/// Parses a template's XML source into a [`UiNode`], returning the tree and its
+/// `<script>` body (if any). Templates are XML; `path` is kept in the signature
+/// (currently unused) so call sites can pass the source path for future
+/// diagnostics.
+fn parse_markup(_path: Option<&str>, content: &str) -> Result<(UiNode, Option<String>), String> {
+    let (markup, script) = eval::strip_script(content);
+    let markup = eval::normalize_bare_directives(&markup);
+    Ok((UiNode::parse_xml(&markup)?, script))
 }
 
 /// Namespaced keys under which a resource's modification time is stored in
@@ -1298,7 +1301,7 @@ fn build_stream(key: &net::StreamKey) -> impl iced::futures::Stream<Item = Engin
             net::websocket(key.url.clone(), key.headers.clone()).right_stream()
         }
     };
-    events.map(move |event| EngineMessage::LuaStream { owner: owner.clone(), id, event })
+    events.map(move |event| EngineMessage::LuauStream { owner: owner.clone(), id, event })
 }
 
 fn drag_end_from_event(

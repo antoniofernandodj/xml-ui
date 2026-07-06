@@ -25,7 +25,7 @@
 
         <Button
             text="Adicionar membro"
-            onClick="adicionar"
+            on_click="adicionar"
             color="#89B4FA"
             width="fill"
             padding="12"

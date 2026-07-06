@@ -1,7 +1,7 @@
 //! Camada HTTP mínima sobre [`hyper`], usada pelo `fetch` da camada Lua
-//! (ver [`crate::lua`]). Faz uma requisição assíncrona (GET/POST/…) e devolve
+//! (ver [`crate::luau`]). Faz uma requisição assíncrona (GET/POST/…) e devolve
 //! um [`FetchResult`] — sem bloquear a thread de UI: o future roda no executor
-//! do `iced` e seu resultado volta como [`crate::EngineMessage::LuaResume`].
+//! do `iced` e seu resultado volta como [`crate::EngineMessage::LuauResume`].
 
 use std::sync::OnceLock;
 
