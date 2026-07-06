@@ -61,7 +61,7 @@ use crate::component::{
     Component, Context, FetchResult, PendingFetch, StreamCommand, StreamCommandKind,
     StreamEventKind, StreamKind, StreamRequest, Template,
 };
-use mlua::{Function, Lua, MultiValue, RegistryKey, Table, Thread, ThreadStatus, Value};
+use mlua::{Function, Lua, LuaSerdeExt, MultiValue, RegistryKey, Table, Thread, ThreadStatus, Value};
 
 /// Prelúdio Lua injetado antes do `<script>` do usuário. Define `fetch` e,
 /// para streams de vida longa, `sse` / `websocket` (ver [`LuauComponent::drive`]).
@@ -164,6 +164,9 @@ impl LuauComponent {
         // que o `<script>` possa importar bibliotecas (ex.: clients de rede).
         install_module_system(&luau, module_roots(&path))
             .map_err(|e| format!("Erro ao instalar sistema de módulos Luau: {}", e))?;
+        // Expõe o global `json` (encode/decode) para o script e seus módulos —
+        // essencial para consumir/produzir os payloads JSON das APIs via `fetch`.
+        install_json(&luau).map_err(|e| format!("Erro ao instalar `json` Luau: {}", e))?;
         // A tabela `ctx` precisa existir ANTES de rodar o script do usuário: o
         // corpo de topo pode referenciá-la (ex.: `Console.new(ctx)`). Ela é o
         // mesmo objeto entre chamadas (só limpa/repopulada em `sync_to_luau`),
@@ -577,6 +580,65 @@ mod tests {
     }
 
     #[test]
+    fn json_decode_le_campos_de_um_objeto() {
+        let comp = LuauComponent::from_source(
+            "function go() local t = json.decode(ctx.raw) ctx.nome = t.nome ctx.n = t.n end",
+            "t.xml",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        data.insert("raw".into(), r#"{"nome":"web","n":3}"#.into());
+        let data = drive(&comp, "go", None, data);
+        assert_eq!(data.get("nome").map(String::as_str), Some("web"));
+        // Número inteiro do JSON vira inteiro Luau → "3" (não "3.0").
+        assert_eq!(data.get("n").map(String::as_str), Some("3"));
+    }
+
+    #[test]
+    fn json_encode_de_array_preserva_ordem() {
+        let comp = LuauComponent::from_source(
+            "function go() ctx.out = json.encode({ 'a', 'b', 'c' }) end",
+            "t.xml",
+            "c",
+        )
+        .unwrap();
+        let data = drive(&comp, "go", None, HashMap::new());
+        // Tabela 1-indexada sequencial → array JSON, na ordem.
+        assert_eq!(data.get("out").map(String::as_str), Some(r#"["a","b","c"]"#));
+    }
+
+    #[test]
+    fn json_roundtrip_array_de_objetos_reencaixa_a_forma() {
+        // Espelha o uso real: decodificar a lista crua de uma API e reencodar
+        // só os campos que o template itera.
+        let comp = LuauComponent::from_source(
+            "function build()\n\
+               local svcs = json.decode(ctx.raw)\n\
+               local out = {}\n\
+               for i, s in ipairs(svcs) do out[i] = { name = s.name, up = s.running } end\n\
+               ctx.services = json.encode(out)\n\
+             end",
+            "t.xml",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        data.insert(
+            "raw".into(),
+            r#"[{"name":"web","running":true},{"name":"db","running":false}]"#.into(),
+        );
+        let data = drive(&comp, "build", None, data);
+        // Ordem de chaves de objeto não é garantida; valida a estrutura.
+        let out: serde_json::Value =
+            serde_json::from_str(data.get("services").expect("services")).unwrap();
+        assert_eq!(out[0]["name"], "web");
+        assert_eq!(out[0]["up"], true);
+        assert_eq!(out[1]["name"], "db");
+        assert_eq!(out[1]["up"], false);
+    }
+
+    #[test]
     fn fetch_suspende_a_corrotina_e_retoma_com_a_resposta() {
         let comp = LuauComponent::from_source(
             r#"
@@ -965,6 +1027,42 @@ fn install_module_system(luau: &Lua, roots: Vec<PathBuf>) -> mlua::Result<()> {
     })?;
 
     luau.globals().set("require", require)?;
+    Ok(())
+}
+
+/// Instala o global `json` com `json.encode(value)` e `json.decode(str)`,
+/// ponte para o `serde_json` via [`LuaSerdeExt`] do `mlua`. É o que permite ao
+/// `<script>` consumir a resposta de um `fetch` (`json.decode(res.body)`) e
+/// montar payloads/strings JSON que os templates iteram
+/// (`ctx.lista = json.encode(t)`), sem um parser em Lua puro.
+///
+/// Mapeamento:
+/// - `decode`: string JSON → [`serde_json::Value`] → tabela Luau (objetos viram
+///   tabelas por chave; arrays, tabelas 1-indexadas; `null` vira `nil`).
+/// - `encode`: valor Luau → [`serde_json::Value`] → string JSON. Uma tabela com
+///   chaves `1..n` sequenciais vira array JSON; caso contrário, objeto. Uma
+///   tabela **vazia** é ambígua e serializa como objeto `{}` — quem precisa de
+///   `[]` para uma lista vazia deve tratar esse caso no próprio script.
+fn install_json(luau: &Lua) -> mlua::Result<()> {
+    let json = luau.create_table()?;
+
+    let decode = luau.create_function(|luau, s: String| {
+        let v: serde_json::Value = serde_json::from_str(&s)
+            .map_err(|e| mlua::Error::runtime(format!("json.decode: {e}")))?;
+        luau.to_value(&v)
+    })?;
+
+    let encode = luau.create_function(|luau, v: Value| {
+        let json: serde_json::Value = luau
+            .from_value(v)
+            .map_err(|e| mlua::Error::runtime(format!("json.encode: {e}")))?;
+        serde_json::to_string(&json)
+            .map_err(|e| mlua::Error::runtime(format!("json.encode: {e}")))
+    })?;
+
+    json.set("decode", decode)?;
+    json.set("encode", encode)?;
+    luau.globals().set("json", json)?;
     Ok(())
 }
 
