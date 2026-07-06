@@ -643,6 +643,23 @@ mod tests {
     }
 
     #[test]
+    fn json_array_forca_colchetes_em_tabela_vazia() {
+        let comp = LuauComponent::from_source(
+            "function go()\n\
+               ctx.obj = json.encode({})\n\
+               ctx.arr = json.encode(json.array({}))\n\
+               ctx.nested = json.encode({ ws = json.array({}), name = 'x' })\n\
+             end",
+            "t.xml", "c",
+        )
+        .unwrap();
+        let d = drive(&comp, "go", None, HashMap::new());
+        assert_eq!(d.get("obj").map(String::as_str), Some("{}"));
+        assert_eq!(d.get("arr").map(String::as_str), Some("[]"));
+        assert_eq!(d.get("nested").map(String::as_str), Some(r#"{"name":"x","ws":[]}"#));
+    }
+
+    #[test]
     fn form_control_sem_handler_escreve_no_contexto() {
         // Um `formControl="url"` (onChange implícito = "url") sem função `url`
         // no script deve gravar ctx.url com o texto digitado — o loop que o
@@ -1153,8 +1170,22 @@ fn install_json(luau: &Lua) -> mlua::Result<()> {
             .map_err(|e| mlua::Error::runtime(format!("json.encode: {e}")))
     })?;
 
+    // `json.array(t)` marca `t` como ARRAY para o encode, resolvendo a ambiguidade
+    // da tabela vazia: `json.encode({})` produz `{}` (objeto), mas
+    // `json.encode(json.array({}))` produz `[]`. Necessário ao (re)encodar structs
+    // com campos `Vec` que podem ficar vazios (ex.: reencodar um spec editado
+    // cujo `watch_paths`/`domains` esvaziou) — sem isso o servidor recusaria o
+    // `[]` esperado ao ver um `{}`. Tabelas vindas de `json.decode('[]')` já vêm
+    // marcadas; isto é para arrays CRIADOS no Luau. Sem efeito em tabelas com
+    // itens (já detectadas como array). Devolve a própria tabela (encadeável).
+    let array = luau.create_function(|luau, t: Table| {
+        t.set_metatable(Some(luau.array_metatable()))?;
+        Ok(t)
+    })?;
+
     json.set("decode", decode)?;
     json.set("encode", encode)?;
+    json.set("array", array)?;
     luau.globals().set("json", json)?;
     Ok(())
 }
@@ -1207,3 +1238,4 @@ fn extract_script(markup: &str) -> Option<String> {
     let close = lower[gt..].find("</script>")? + gt;
     Some(markup[gt..close].to_string())
 }
+
