@@ -348,6 +348,14 @@ impl LuauComponent {
                 continue;
             }
 
+            if req.get::<bool>("__glacier_dialog").unwrap_or(false) {
+                ctx.show_dialog(build_dialog(&req)?);
+                // Não suspende: o diálogo é aplicado pelo motor após o turno; a
+                // corrotina segue (o botão de confirmação despacha sua própria ação).
+                args = MultiValue::new();
+                continue;
+            }
+
             return Ok(()); // tabela cedida sem marcador conhecido
         }
     }
@@ -513,6 +521,25 @@ fn parse_headers_table(opts: &Table) -> mlua::Result<Vec<(String, String)>> {
     Ok(headers)
 }
 
+/// Constrói o [`DialogSpec`] a partir do pedido `confirm(opts)` do prelúdio:
+/// dois botões (cancelar neutro → só fecha; confirmar → despacha
+/// `confirm_action`), não dispensável clicando fora. `destructive` pinta o botão
+/// de confirmação como perigo.
+fn build_dialog(req: &Table) -> mlua::Result<crate::dialogs::DialogSpec> {
+    use crate::dialogs::{ButtonRole, DialogButton, DialogIcon, DialogSpec};
+    let title: String = req.get::<Option<String>>("title")?.unwrap_or_default();
+    let message: String = req.get::<Option<String>>("message")?.unwrap_or_default();
+    let confirm_label = req.get::<Option<String>>("confirm_label")?.unwrap_or_else(|| "OK".into());
+    let confirm_action = req.get::<Option<String>>("confirm_action")?.unwrap_or_default();
+    let cancel_label = req.get::<Option<String>>("cancel_label")?.unwrap_or_else(|| "Cancelar".into());
+    let destructive = req.get::<Option<bool>>("destructive")?.unwrap_or(false);
+    let role = if destructive { ButtonRole::Destructive } else { ButtonRole::Accept };
+    Ok(DialogSpec::new(DialogIcon::Question, title, message)
+        .with_button(DialogButton::new(cancel_label, "", ButtonRole::Neutral))
+        .with_button(DialogButton::new(confirm_label, confirm_action, role))
+        .dismissible(false))
+}
+
 /// Converte um [`Value`] Luau na string que o contexto do motor guarda. Números
 /// inteiros e floats de valor inteiro viram `"3"` (não `"3.0"`); `nil` devolve
 /// `None` para não sobrescrever chaves com valor vazio à toa.
@@ -640,6 +667,29 @@ mod tests {
         .unwrap();
         let data = drive(&comp, "salvar", None, HashMap::new());
         assert_eq!(data.get("via").map(String::as_str), Some("exato"));
+    }
+
+    #[test]
+    fn confirm_abre_dialogo_de_confirmacao() {
+        let comp = LuauComponent::from_source(
+            "function go() confirm({ title='T', message='M', confirm_label='Sim', \
+             confirm_action='fez', destructive=true }) end",
+            "t.xml",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        let mut ctx = Context::new(&mut data);
+        comp.run("go", None, &mut ctx);
+        match &ctx.dialog {
+            Some(crate::component::DialogAction::Show(spec)) => {
+                assert_eq!(spec.buttons.len(), 2, "cancelar + confirmar");
+                assert_eq!(spec.buttons[1].action, "fez");
+                assert_eq!(spec.buttons[1].role, crate::dialogs::ButtonRole::Destructive);
+                assert_eq!(spec.buttons[0].action, "", "cancelar só fecha");
+            }
+            _ => panic!("esperava um diálogo Show"),
+        }
     }
 
     #[test]

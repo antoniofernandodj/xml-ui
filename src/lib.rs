@@ -385,6 +385,17 @@ impl GlacierUI {
                 let value = self.context_data.get(key).cloned().unwrap_or_default();
                 return iced::clipboard::write(value);
             }
+            // Built-in: `open:<alvo>` abre uma URL no navegador padrão do SO, sem
+            // envolver um componente. `<alvo>` é uma chave de contexto (abre o
+            // valor guardado, como o `clipboard:`) ou, se não existir tal chave,
+            // a própria string literal (`open:https://exemplo`). Útil para
+            // fluxos OAuth: o script guarda a URL no contexto e a markup faz
+            // `on_click="open:minha_url"`.
+            if let Some(target) = a.strip_prefix("open:") {
+                let url = self.context_data.get(target).cloned().unwrap_or_else(|| target.to_string());
+                open_url(&url);
+                return iced::Task::none();
+            }
             // Built-in window controls: drive the host window without any
             // component code, so a borderless app can wire its custom titlebar
             // straight from markup — `on_click="window:close"` for the buttons,
@@ -1302,6 +1313,36 @@ fn build_stream(key: &net::StreamKey) -> impl iced::futures::Stream<Item = Engin
         }
     };
     events.map(move |event| EngineMessage::LuauStream { owner: owner.clone(), id, event })
+}
+
+/// Abre `url` no navegador padrão do SO (best-effort, não bloqueante). Usado
+/// pelo built-in de ação `open:<alvo>` (ver [`GlacierUI::dispatch`]). Silencioso
+/// em falha — é uma conveniência, não um caminho crítico.
+fn open_url(url: &str) {
+    let url = url.trim();
+    if url.is_empty() {
+        return;
+    }
+    use std::process::{Command, Stdio};
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "start", "", url]);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg(url);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut c = Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    let _ = cmd.stdout(Stdio::null()).stderr(Stdio::null()).spawn();
 }
 
 fn drag_end_from_event(

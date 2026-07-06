@@ -28,6 +28,23 @@ function sse(url, opts)
     }
 end
 
+-- Diálogo modal de confirmação. NÃO suspende: cede um pedido, o motor mostra o
+-- diálogo (via Context::show_dialog) e retoma na hora. O botão de confirmação
+-- despacha `opts.confirm_action` (nome de uma função) como um clique normal; o
+-- cancelar só fecha. `opts = { title, message, confirm_label?, confirm_action,
+-- cancel_label?, destructive? }`.
+function confirm(opts)
+    return coroutine.yield({
+        __glacier_dialog = true,
+        title = opts.title,
+        message = opts.message,
+        confirm_label = opts.confirm_label,
+        confirm_action = opts.confirm_action,
+        cancel_label = opts.cancel_label,
+        destructive = opts.destructive,
+    })
+end
+
 function websocket(url, opts)
     local id = coroutine.yield({
         __glacier_stream_open = true,
