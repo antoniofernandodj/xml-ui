@@ -1167,6 +1167,81 @@ mod tests {
     }
 
     #[test]
+    fn require_bare_entre_irmaos_em_modulo_aninhado_resolve_pelo_proprio_diretorio() {
+        // <dir>/app.xml (template) -> scripts/app.luau (topo) faz
+        // require("pkg/a"); pkg/a.luau, por sua vez, faz require("b") (NOME
+        // NU, sem prefixo) esperando achar pkg/b.luau — não <dir>/scripts/b.luau.
+        // Antes do fix, a resolução era sempre pelas roots fixas (dir do
+        // script de ENTRADA), então isto teria falhado: o bare "b" só existia
+        // relativo ao pacote pkg/, não à raiz.
+        let dir = std::env::temp_dir().join(format!("glacier_pkg_sib_{}", std::process::id()));
+        let scripts = dir.join("scripts");
+        let pkg = scripts.join("pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(dir.join("app.xml"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
+        std::fs::write(scripts.join("app.luau"), "local A = require(\"pkg/a\")\nfunction go() ctx.v = A.hi end").unwrap();
+        std::fs::write(pkg.join("a.luau"), "local B = require(\"b\")\nreturn { hi = B.msg }").unwrap();
+        std::fs::write(pkg.join("b.luau"), "return { msg = \"irmao-ok\" }").unwrap();
+
+        let comp = LuauComponent::from_file(dir.join("app.xml").to_str().unwrap(), "app").unwrap();
+        let data = drive(&comp, "go", None, HashMap::new());
+        assert_eq!(data.get("v").map(String::as_str), Some("irmao-ok"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn require_com_prefixo_dotdot_sobe_um_nivel() {
+        // scripts/pkg/a.luau faz require("../shared") esperando achar
+        // scripts/shared.luau (um nível acima do próprio pacote) — navegação
+        // explícita estilo Node, sem depender do fallback de roots fixas.
+        let dir = std::env::temp_dir().join(format!("glacier_dotdot_{}", std::process::id()));
+        let scripts = dir.join("scripts");
+        let pkg = scripts.join("pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(dir.join("app.xml"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
+        std::fs::write(scripts.join("app.luau"), "local A = require(\"pkg/a\")\nfunction go() ctx.v = A.hi end").unwrap();
+        std::fs::write(pkg.join("a.luau"), "local S = require(\"../shared\")\nreturn { hi = S.msg }").unwrap();
+        std::fs::write(scripts.join("shared.luau"), "return { msg = \"subiu-ok\" }").unwrap();
+
+        let comp = LuauComponent::from_file(dir.join("app.xml").to_str().unwrap(), "app").unwrap();
+        let data = drive(&comp, "go", None, HashMap::new());
+        assert_eq!(data.get("v").map(String::as_str), Some("subiu-ok"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn require_de_mesmo_nome_em_pacotes_diferentes_nao_colide_no_cache() {
+        // pkg_a/x.luau e pkg_b/x.luau são arquivos DIFERENTES com o MESMO nome
+        // "x". Dois módulos, um em cada pacote, fazem require("x") (bare,
+        // irmão) — cada um deve receber o SEU, não um cacheado por engano por
+        // causa da mesma string "x" (prova a mudança de chave do cache para
+        // caminho resolvido, não string pedida).
+        let dir = std::env::temp_dir().join(format!("glacier_cache_{}", std::process::id()));
+        let scripts = dir.join("scripts");
+        let pa = scripts.join("pkg_a");
+        let pb = scripts.join("pkg_b");
+        std::fs::create_dir_all(&pa).unwrap();
+        std::fs::create_dir_all(&pb).unwrap();
+        std::fs::write(dir.join("app.xml"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
+        std::fs::write(
+            scripts.join("app.luau"),
+            "local A = require(\"pkg_a/user\")\nlocal B = require(\"pkg_b/user\")\n\
+             function go() ctx.a = A.who() ctx.b = B.who() end",
+        )
+        .unwrap();
+        std::fs::write(pa.join("user.luau"), "local X = require(\"x\")\nreturn { who = function() return X.name end }").unwrap();
+        std::fs::write(pb.join("user.luau"), "local X = require(\"x\")\nreturn { who = function() return X.name end }").unwrap();
+        std::fs::write(pa.join("x.luau"), "return { name = \"de-a\" }").unwrap();
+        std::fs::write(pb.join("x.luau"), "return { name = \"de-b\" }").unwrap();
+
+        let comp = LuauComponent::from_file(dir.join("app.xml").to_str().unwrap(), "app").unwrap();
+        let data = drive(&comp, "go", None, HashMap::new());
+        assert_eq!(data.get("a").map(String::as_str), Some("de-a"));
+        assert_eq!(data.get("b").map(String::as_str), Some("de-b"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn exemplo_imports_luau_carrega_e_importa_os_modulos() {
         // Exercita a árvore REAL do exemplo: app.xml -> script.luau, que faz
         // require("net.http_client") e require("util.strings"). Se algum caminho
@@ -1231,10 +1306,33 @@ fn module_roots(base_file: &Path) -> Vec<PathBuf> {
     roots
 }
 
-/// Resolve o nome de módulo `a.b.c` para um arquivo `.luau`, testando
-/// `a/b/c.luau` e depois `a/b/c/init.luau` em cada raiz, na ordem.
+/// Normaliza um `modname` de `require(...)` para uma string de caminho
+/// relativo. Aceita ponto (`"net.http_client"`) OU barra (`"net/http_client"`)
+/// como separador de pacote — como sempre — e agora também um ou mais
+/// prefixos `./`/`../` de navegação explícita (estilo Node.js/Lua padrão), que
+/// NÃO sofrem a conversão ponto→barra (só o restante da string sofre). Nenhum
+/// nome de pacote legítimo começa com `.`, então os dois estilos nunca colidem.
+fn normalize_modname(modname: &str) -> String {
+    let mut prefix = String::new();
+    let mut rest = modname;
+    loop {
+        if let Some(r) = rest.strip_prefix("../") {
+            prefix.push_str("../");
+            rest = r;
+        } else if let Some(r) = rest.strip_prefix("./") {
+            rest = r;
+        } else {
+            break;
+        }
+    }
+    format!("{prefix}{}", rest.replace('.', "/"))
+}
+
+/// Resolve o nome de módulo `a.b.c` (ou `a/b/c`, opcionalmente prefixado por
+/// `./`/`../`) para um arquivo `.luau`, testando `a/b/c.luau` e depois
+/// `a/b/c/init.luau` em cada raiz, na ordem.
 fn resolve_module(modname: &str, roots: &[PathBuf]) -> Option<PathBuf> {
-    let rel = modname.replace('.', "/");
+    let rel = normalize_modname(modname);
     for ext in &["luau", "lua"] {
         for root in roots {
             let file = root.join(format!("{rel}.{ext}"));
@@ -1251,31 +1349,76 @@ fn resolve_module(modname: &str, roots: &[PathBuf]) -> Option<PathBuf> {
     None
 }
 
-/// Instala um `require` próprio no interpretador, resolvendo módulos pelas
-/// `roots` (ver [`module_roots`]). Substitui o `require` padrão do Luau para dar
-/// resolução previsível (relativa ao template, não ao diretório de trabalho),
-/// erros claros e cache por interpretador.
+/// Instala um `require` próprio no interpretador, com resolução **relativa ao
+/// arquivo que chama `require`** (como Node.js/Lua padrão) — não ao diretório
+/// de trabalho nem, para módulos aninhados, ao script de entrada. Isso permite
+/// organizar módulos em pacotes (subpastas que se referenciam entre si por
+/// nome nu, como irmãos) e navegação explícita para fora do pacote atual com
+/// `./`/`../`, exatamente como um type-checker Luau externo (ex.: `luau-lsp`)
+/// já resolve — então os dois concordam sem gambiarra de estrutura de arquivo.
+///
+/// Regras de resolução, para cada `require(modname)`:
+/// - **Prefixo `./`/`../` explícito**: busca **só** relativo ao diretório do
+///   arquivo chamador. Sem fallback — igual a um import relativo em qualquer
+///   outra linguagem, que não existindo é erro, não procura em outro lugar.
+///   Erro se chamado de um contexto sem arquivo de origem (o script de nível
+///   superior do componente, cujo chunk nunca tem nome `@arquivo` — ver
+///   [`LuauComponent::build`]).
+/// - **Nome nu** (sem prefixo): tenta primeiro o diretório do chamador (irmão
+///   no mesmo pacote); se não achar, cai nas `roots` fixas de sempre (ver
+///   [`module_roots`]: diretório do script de entrada, `lib/`,
+///   `GLACIER_LUAU_PATH`) — mantém bibliotecas "globais" alcançáveis de
+///   qualquer módulo aninhado, e é o único caminho disponível para requires
+///   feitos direto do script de nível superior (que nunca tem "diretório do
+///   chamador" próprio).
 ///
 /// Como o módulo roda no **mesmo** interpretador do componente, ele enxerga o
 /// prelúdio (`fetch`) e as globais — um client de rede importado pode chamar
 /// `fetch` e suspender a corrotina da ação como qualquer código inline. Cada
-/// módulo é carregado uma vez; chamadas seguintes a `require` devolvem o valor
-/// cacheado. O valor do módulo é o que seu arquivo `return`a (uma tabela, por
-/// convenção); um módulo sem `return` é cacheado como `true`.
+/// módulo é carregado uma vez — o cache é por **caminho de arquivo resolvido**
+/// (canonicalizado), não pela string pedida: a mesma string (ex.: `"types"`)
+/// pode resolver a arquivos diferentes dependendo de quem chama, então a
+/// identidade do cache tem que ser pelo arquivo, não pelo texto. O valor do
+/// módulo é o que seu arquivo `return`a (uma tabela, por convenção); um módulo
+/// sem `return` é cacheado como `true`.
 fn install_module_system(luau: &Lua, roots: Vec<PathBuf>) -> mlua::Result<()> {
     let cache = luau.create_table()?;
     luau.set_named_registry_value(LOADED_KEY, cache)?;
 
     let require = luau.create_function(move |luau, modname: String| {
-        let cache: Table = luau.named_registry_value(LOADED_KEY)?;
-        // Já carregado? Devolve o mesmo valor (identidade preservada).
-        match cache.get::<Value>(modname.as_str())? {
-            Value::Nil => {}
-            cached => return Ok(cached),
+        let is_explicit_relative = modname.starts_with("./") || modname.starts_with("../");
+
+        // Diretório do chunk que está chamando require() agora (nível 1 acima
+        // desta função nativa). `None` para o script de nível superior (seu
+        // chunk se chama `<script:nome>`, sem prefixo `@`) — nesse caso só as
+        // roots fixas se aplicam.
+        let caller_dir: Option<PathBuf> = luau
+            .inspect_stack(1, |dbg| {
+                dbg.source()
+                    .source
+                    .as_ref()
+                    .and_then(|s| s.strip_prefix('@').map(PathBuf::from))
+            })
+            .flatten()
+            .and_then(|p| p.parent().map(Path::to_path_buf));
+
+        let mut search: Vec<PathBuf> = Vec::new();
+        if let Some(dir) = &caller_dir {
+            search.push(dir.clone());
+        }
+        if is_explicit_relative {
+            if caller_dir.is_none() {
+                return Err(mlua::Error::runtime(format!(
+                    "require('{modname}'): caminho relativo usado fora de um módulo com \
+                     arquivo de origem (ex.: direto do script de nível superior)"
+                )));
+            }
+        } else {
+            search.extend(roots.iter().cloned());
         }
 
-        let path = resolve_module(&modname, &roots).ok_or_else(|| {
-            let procurados = roots
+        let path = resolve_module(&modname, &search).ok_or_else(|| {
+            let procurados = search
                 .iter()
                 .map(|r| r.display().to_string())
                 .collect::<Vec<_>>()
@@ -1283,9 +1426,20 @@ fn install_module_system(luau: &Lua, roots: Vec<PathBuf>) -> mlua::Result<()> {
             mlua::Error::runtime(format!(
                 "módulo Luau '{modname}' não encontrado (procurado como \
                  '{rel}.luau' e '{rel}/init.luau' em: {procurados})",
-                rel = modname.replace('.', "/"),
+                rel = normalize_modname(&modname),
             ))
         })?;
+
+        // Cache por caminho resolvido (canonicalizado), não pela string
+        // pedida — ver docstring da função.
+        let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
+        let cache_key = canon.to_string_lossy().into_owned();
+
+        let cache: Table = luau.named_registry_value(LOADED_KEY)?;
+        match cache.get::<Value>(cache_key.as_str())? {
+            Value::Nil => {}
+            cached => return Ok(cached),
+        }
 
         let src = std::fs::read_to_string(&path).map_err(|e| {
             mlua::Error::runtime(format!(
@@ -1304,7 +1458,7 @@ fn install_module_system(luau: &Lua, roots: Vec<PathBuf>) -> mlua::Result<()> {
             Value::Nil => Value::Boolean(true),
             v => v,
         };
-        cache.set(modname.as_str(), value.clone())?;
+        cache.set(cache_key.as_str(), value.clone())?;
         Ok(value)
     })?;
 
