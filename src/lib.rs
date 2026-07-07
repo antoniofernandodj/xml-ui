@@ -16,6 +16,11 @@ pub mod toasts;
 /// separate dependency.
 pub use iced;
 
+/// Flattened re-exports of the `iced` items a host app's `main`/`App` reach
+/// for most often (window setup, layout, messaging), so they can come from
+/// `glacier_ui::{..}` directly instead of a separate `use iced::{..}`.
+pub use iced::{Element, Font, Point, Size, Subscription, Task, window};
+
 pub use app::GlacierApp;
 pub use parser::{UiNode, NodeType};
 pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_directives, StyleContext};
