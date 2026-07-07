@@ -273,6 +273,8 @@ Disponíveis em **qualquer** tag:
 | `onPress` | `on_press`, `on-press`, `aoPressionar` | ação disparada no **pressionar** (botão do mouse para baixo) sobre o elemento — envolve-o em um `mouse_area`. Diferente do clique de `<Button>` (que dispara ao soltar); a semântica de pressionar é o que viabiliza arrastar a janela (`onPress="window:drag"`). |
 | `onDoubleClick` | `on_double_click`, `on-double-click`, `aoClicarDuplo` | ação disparada no **duplo-clique** sobre o elemento (envolve em `mouse_area`). Ex.: duplo-clique na barra de título para maximizar (`onDoubleClick="window:maximize"`). |
 | `cursor` | `cursorIcon`, `cursor-icon` | ícone do cursor ao pairar sobre o elemento: `pointer`, `text`, `grab`, `grabbing`, `move`, `crosshair`, `wait`, `progress`, `help`, `not-allowed`, `none`, e os de redimensionar janela `resize-h`/`resize-v`/`resize-ne`/`resize-nw` (envolve em `mouse_area` com a `mouse::Interaction`). |
+| `hidden` | `oculto` | `true`/`false` — remove o elemento do layout (não ocupa espaço nem `spacing`), também disponível via classe `.gss` (`hidden: true` / `display: none`). |
+| `disabled` | `desabilitado` | `true`/`false` — desativa a interação de `Button`/`TextInput`/`Checkbox`/`Toggle` (sem handler anexado, o `Status::Disabled` nativo do iced entra em vigor sozinho). Só existe como atributo inline; veja [Pseudo-estados](#pseudo-estados-hover--focus--active--disabled). |
 
 - **Eixos:** o alinhamento do eixo cruzado de uma `Column` é o `alignX`; o de uma `Row` é o `alignY`.
 - **Cores:** hex `#RRGGBB` ou `#RRGGBBAA`.
@@ -819,6 +821,54 @@ da markup e os agrupa em **classes** reutilizáveis. Aplique-as com
 **Propriedades reconhecidas:** `width`/`w`, `height`/`h`, `padding`, `spacing`,
 `align-x`/`align_x`/`alignX`, `align-y`/`align_y`/`alignY`, `background`/`bg`,
 `border-radius`, `border-width`, `border-color`, `color`, `size`, `bold`.
+
+### Pseudo-estados: `:hover` / `:focus` / `:active` / `:disabled`
+
+Além da regra base `.classe { }`, uma classe pode declarar overlays por
+pseudo-estado — a única outra quebra (além de `:root`) da regra "seletor =
+classe":
+
+```gss
+.btn {
+    background: #313244;
+    text-color: #CDD6F4;
+    border-radius: 8;
+}
+.btn:hover    { background: #45475A; }
+.btn:active   { background: #1E1E2E; }
+.btn:disabled { background: #181825; text-color: #6C7086; }
+```
+
+```xml
+<Button class="btn" text="Enviar" onClick="enviar" />
+<Button class="btn" text="Aguarde" disabled="true" />
+```
+
+- Cada bloco `:estado` sobrescreve só os campos que declara (mesma semântica
+  de merge de uma classe normal), por cima da regra base — igual ao CSS.
+- Resolvidos com o mesmo pipeline da regra base: `var(--x)`/tokens de
+  `:root` e `@media` funcionam normalmente dentro de um bloco `:estado`.
+- **Nada de rastrear hover manualmente:** cada pseudo-estado é mapeado para o
+  `Status` nativo do widget do iced (`button::Status::Hovered`,
+  `text_input::Status::Focused`, …), então só reage quando aquele widget
+  realmente suporta o estado.
+- **Cobertura atual:**
+  - **`Button`** — `:hover`/`:active`/`:disabled` completos (`background`,
+    `text-color`, `border-*`). Requer uma `color` base na classe (senão não
+    há closure de estilo customizada para o overlay entrar). Sem overlay
+    declarado, cai no comportamento histórico (±10% de luminância no
+    hover/pressed; 50% de alfa quando `disabled`).
+  - **`TextInput`** — `:hover`/`:focus`/`:disabled` completos, por cima do
+    estilo padrão do tema (só sobrescreve os campos declarados).
+  - **`Select`** — só `:hover` (borda/fundo/texto); o iced não tem um
+    `Status::Disabled` para `pick_list`.
+  - **`Checkbox`/`Toggle`** — só o atributo `disabled` (desliga a
+    interação; usa o visual de desabilitado padrão do tema). Overlay de cor
+    por pseudo-estado ainda não está implementado para esses dois.
+- `disabled="true"` (ou `.gss`-independente, sempre inline) desativa o
+  handler do elemento (`on_press`/`on_input`/`on_toggle`), o que também é o
+  que faz `:disabled` disparar — ao contrário de `hidden`, o elemento
+  continua ocupando espaço e renderizando.
 
 Carregue uma stylesheet **global** por código:
 

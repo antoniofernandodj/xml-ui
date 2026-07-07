@@ -20,7 +20,7 @@ traz problema, benefício, custo estimado, esboço de implementação e status.
 | 4 | **max** width & height (via wrap em container) | Médio-alto | Baixo-médio | 1 | ✅ feito |
 | 5 | **Cor do texto do botão** configurável (desembutir branco) | Médio | Baixo | 1 | ✅ feito |
 | 6 | **Variáveis / design tokens** (`:root` + `var(--x)`) | **Altíssimo** | Médio | 2 | ✅ feito (0.8.0) |
-| 7 | **Pseudo-estados** `:hover` / `:focus` / `:disabled` / `:active` | Alto | Alto | 3 | ⬜ |
+| 7 | **Pseudo-estados** `:hover` / `:focus` / `:disabled` / `:active` | Alto | Alto | 3 | ✅ feito |
 | 8 | **`@media`** (responsivo) | Médio | Alto | 3 | ✅ feito (0.9.0) |
 | 9 | Seletores **compostos/descendentes** + especificidade + `!important` | Médio-baixo | Alto | 4 | ⬜ |
 | 10 | Propriedades extras sob demanda (opacity, shadow, borda por-lado, gradiente radial, transform) | Pontual | Médio | 4 | ⬜ |
@@ -105,19 +105,47 @@ repetidos por `var(--x)` — colapsa a paleta em ~6 tokens. Requer subir a dep p
 
 ## Tier 3 — Alto valor, custo alto (arquitetural)
 
-### 7. Pseudo-estados `:hover` / `:focus` / `:disabled` / `:active`
-**Problema.** O estilo é resolvido **uma vez** (estático). Hover/pressed de botão
-são auto-derivados (±10% de luminância) da única `color`; não há hover/focus/
-disabled reais e configuráveis para nenhum elemento.
-**Fix.** Guardar variantes de estilo por estado (ex.: `StyleRule` + mapa
-`state → StyleRule`) e, na camada `widget.rs`, escolher a variante dentro das
-closures de `Status` do iced (`button::Status::Hovered`, etc.). Exige um
-seletor com sufixo de estado no parser (`.btn:hover { }`) — a primeira quebra
-da regra "só `.classe`", tratada como `classe` + `estado`.
-**Arquivos.** `stylesheet.rs` (parse `:estado`), `eval.rs` (propagar variantes),
-`widget.rs` (aplicar por `Status`). + exemplo interativo.
-**Nota.** Maior item de "polish" de UI. Fazer depois dos tokens (6), que ele
-reaproveita.
+### 7. Pseudo-estados `:hover` / `:focus` / `:disabled` / `:active`  ✅
+**Problema.** O estilo era resolvido **uma vez** (estático). Hover/pressed de
+botão eram auto-derivados (±10% de luminância) da única `color`; não havia
+hover/focus/disabled reais e configuráveis para nenhum elemento.
+**Fix (feito).**
+- `.classe:estado { }` — segunda quebra (com `:root`) da regra "só seletor de
+  classe". `PseudoState` (`Hover`/`Focus`/`Active`/`Disabled`, `pressed` como
+  alias de `active`) parseado em `parse_gss`; guardado à parte em
+  `StyleSheet.states: HashMap<classe, HashMap<PseudoState, StyleRule>>` (nunca
+  em `rules`). Classe duplicada com o mesmo estado faz merge, como a regra
+  base. Threadado também por dentro de `@media` (`MediaQuery.states`).
+- `resolve_state_classes(classes, sheets, viewport) -> StateStyles` — mesmo
+  pipeline classes→sheets→`@media`→`var()` de `resolve_classes`, devolvendo os
+  4 overlays (vazios quando não declarados).
+- `eval.rs` resolve `state_styles` junto da regra base (mesma chamada de
+  `process_template` na lista de classes) e embrulha cada overlay não-vazio em
+  `UiNode::{hover,focus,active,disabled}_style: Option<Box<StyleRule>>` — só
+  aloca quando o `.gss` realmente declara aquele estado.
+- **`disabled`** — novo atributo inline (`disabled`/`desabilitado`, só
+  atributo, sem `.classe { }` equivalente). Sem handler anexado
+  (`on_press`/`on_input`/`on_toggle`), o próprio iced já reporta
+  `Status::Disabled` — o motor não rastreia estado nenhum manualmente, reusa
+  a máquina de estado nativa de cada widget (por isso o pseudo-estado só se
+  aplica a widgets cujo `Status` do iced cobre aquele conceito).
+- **Cobertura por widget** (`widget.rs`): `Button` — `:hover`/`:active`/
+  `:disabled` completos (requer uma `color` base na classe; sem overlay,
+  cai no auto-derive histórico). `TextInput` — `:hover`/`:focus`/`:disabled`
+  completos, por cima de `text_input::default`. `Select`/`pick_list` — só
+  `:hover` (iced não tem `Status::Disabled` para ele). `Checkbox`/`Toggle` —
+  só o atributo `disabled` (visual padrão do tema; overlay de cor por estado
+  ainda não implementado — próximo passo natural, mesma infra).
+**Arquivos.** `stylesheet.rs` (`PseudoState`, `StateStyles`,
+`resolve_state_classes`, parse + 5 testes), `parser.rs` (`UiNode::disabled` +
+4 campos `*_style`), `eval.rs` (resolução), `widget.rs` (Button/TextInput/
+Select/Checkbox/Toggle). README atualizado com seção própria.
+**Exemplo.** `examples/pseudo_estados/` (`main.rs`/`.xml`/`.gss`/`theme.json`) —
+Button hover/active/disabled, TextInput hover/focus/disabled, Select hover,
+Checkbox/Toggle disabled, lado a lado. **Rodado e conferido visualmente**
+(`cargo run --example pseudo_estados`): hover clareia o botão, active escurece,
+foco do TextInput troca a borda pra azul, Select realça a borda no hover e o
+menu abre normalmente, disabled desliga a interação nos 4 widgets.
 
 ### 8. `@media` (responsivo)  ✅ (0.9.0)
 **Problema.** Sem media queries; layout não reage à largura da janela.

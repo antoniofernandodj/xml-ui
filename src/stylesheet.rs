@@ -141,6 +141,59 @@ fn substitute_vars(value: &str, vars: &HashMap<String, String>) -> String {
     out
 }
 
+/// Um pseudo-estado suportado em seletores `.classe:estado { }` — a única
+/// outra quebra (com `:root`) da regra "seletor = classe". Mapeado, na camada
+/// `widget.rs`, para o `Status` nativo de cada widget do iced (ex.:
+/// `button::Status::Hovered`), então o motor não precisa rastrear hover/foco
+/// manualmente — reaproveita a máquina de estado que o iced já tem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PseudoState {
+    Hover,
+    Focus,
+    Active,
+    Disabled,
+}
+
+impl PseudoState {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "hover" => Some(Self::Hover),
+            "focus" => Some(Self::Focus),
+            // `pressed` aceito como alias de `active` (nome que o iced usa
+            // para o mesmo conceito em `button::Status::Pressed`).
+            "active" | "pressed" => Some(Self::Active),
+            "disabled" => Some(Self::Disabled),
+            _ => None,
+        }
+    }
+}
+
+/// Overlays de estilo por pseudo-estado para uma lista de classes, já
+/// mesclados através de classes/sheets/`@media`/`var()` (mesma lógica de
+/// [`resolve_classes`]) — mas sem interpolação de contexto (feita depois, no
+/// `eval.rs`, como o resto dos campos). Cada campo fica em seu default
+/// (`StyleRule::default()`, isto é "nada declarado") quando o `.gss` não tem
+/// um bloco `:estado` para nenhuma das classes. Aplicado por `widget.rs`
+/// dentro da closure de `Status` do widget correspondente.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StateStyles {
+    pub hover: StyleRule,
+    pub focus: StyleRule,
+    pub active: StyleRule,
+    pub disabled: StyleRule,
+}
+
+impl StateStyles {
+    fn get_mut(&mut self, state: PseudoState) -> &mut StyleRule {
+        match state {
+            PseudoState::Hover => &mut self.hover,
+            PseudoState::Focus => &mut self.focus,
+            PseudoState::Active => &mut self.active,
+            PseudoState::Disabled => &mut self.disabled,
+        }
+    }
+}
+
 /// Condição de um bloco `@media` — features `min/max-width` e `min/max-height`
 /// (em px lógicos), combinadas por AND (como no CSS). `None` = sem restrição.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -167,6 +220,9 @@ impl MediaCondition {
 pub struct MediaQuery {
     pub condition: MediaCondition,
     pub rules: HashMap<String, StyleRule>,
+    /// `.classe:estado { }` declarados dentro deste bloco `@media` (ver
+    /// [`StyleSheet::states`] — mesma forma, com escopo de viewport).
+    pub states: HashMap<String, HashMap<PseudoState, StyleRule>>,
 }
 
 /// A parsed `.gss` document: a map from class name (without the leading `.`)
@@ -180,6 +236,10 @@ pub struct StyleSheet {
     pub variables: HashMap<String, String>,
     /// Blocos `@media` — regras condicionais ao viewport (ver [`MediaQuery`]).
     pub media: Vec<MediaQuery>,
+    /// `.classe:estado { }` (`:hover`/`:focus`/`:active`/`:disabled`), por
+    /// classe e depois por estado. Resolvidos separadamente da base via
+    /// [`resolve_state_classes`] — nunca entram em `rules`.
+    pub states: HashMap<String, HashMap<PseudoState, StyleRule>>,
 }
 
 impl StyleSheet {
@@ -239,6 +299,53 @@ pub fn resolve_classes(
     // nenhuma variável, um `var(--x, fallback)` deve cair no fallback.
     merged.resolve_var_refs(&vars);
     merged
+}
+
+/// Mesma lógica de [`resolve_classes`] (classes → sheets → `@media` → `var()`),
+/// mas para os blocos `.classe:estado { }`: devolve os 4 overlays possíveis,
+/// cada um vazio (`StyleRule::default()`) quando nenhuma classe da lista
+/// declara aquele estado em nenhum sheet ativo.
+pub fn resolve_state_classes(
+    classes: &str,
+    sheets: &[&StyleSheet],
+    viewport: Option<(f32, f32)>,
+) -> StateStyles {
+    let mut out = StateStyles::default();
+    for name in classes.split_whitespace() {
+        for sheet in sheets {
+            if let Some(by_state) = sheet.states.get(name) {
+                for (state, rule) in by_state {
+                    out.get_mut(*state).merge_from(rule);
+                }
+            }
+        }
+    }
+    if let Some((w, h)) = viewport {
+        for name in classes.split_whitespace() {
+            for sheet in sheets {
+                for mq in &sheet.media {
+                    if mq.condition.matches(w, h) {
+                        if let Some(by_state) = mq.states.get(name) {
+                            for (state, rule) in by_state {
+                                out.get_mut(*state).merge_from(rule);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut vars: HashMap<String, String> = HashMap::new();
+    for sheet in sheets {
+        for (k, v) in &sheet.variables {
+            vars.insert(k.clone(), v.clone());
+        }
+    }
+    out.hover.resolve_var_refs(&vars);
+    out.focus.resolve_var_refs(&vars);
+    out.active.resolve_var_refs(&vars);
+    out.disabled.resolve_var_refs(&vars);
+    out
 }
 
 /// Removes `//` line comments and `/* ... */` block comments from an `.gss`
@@ -302,6 +409,7 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
     let mut rules: HashMap<String, StyleRule> = HashMap::new();
     let mut variables: HashMap<String, String> = HashMap::new();
     let mut media: Vec<MediaQuery> = Vec::new();
+    let mut states: HashMap<String, HashMap<PseudoState, StyleRule>> = HashMap::new();
     let mut rest = cleaned.as_str();
     while let Some(open) = rest.find('{') {
         let selector = rest[..open].trim();
@@ -310,12 +418,13 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
         // `@media (cond) { .a {…} .b {…} }` — bloco com regras ANINHADAS, então
         // a chave de fechamento precisa ser casada por profundidade (não o
         // primeiro `}`, que fecharia a 1ª regra interna). O corpo é reparseado
-        // como um mini-sheet (só as `rules` interessam).
+        // como um mini-sheet (`rules` e `states` interessam; `variables`
+        // aninhadas num `@media` não são suportadas — `:root` fica de fora).
         if selector.starts_with("@media") {
             let (inner, remainder) = split_balanced_block(after_open)?;
             let condition = parse_media_condition(selector)?;
             let inner_sheet = parse_gss(inner)?;
-            media.push(MediaQuery { condition, rules: inner_sheet.rules });
+            media.push(MediaQuery { condition, rules: inner_sheet.rules, states: inner_sheet.states });
             rest = remainder;
             continue;
         }
@@ -339,10 +448,32 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
                 selector
             ));
         }
-        let name = selector[1..].trim().to_string();
-        if name.is_empty() {
+        let raw = selector[1..].trim();
+        if raw.is_empty() {
             return Err("Empty class selector '.'".to_string());
         }
+
+        // `.classe:estado { }` — pseudo-estado (`:hover`/`:focus`/`:active`/
+        // `:disabled`), guardado à parte em `states` (nunca em `rules`).
+        if let Some((name, state_str)) = raw.split_once(':') {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(format!("Empty class name in pseudo-state selector '.{}'", raw));
+            }
+            let state = PseudoState::parse(state_str.trim()).ok_or_else(|| {
+                format!("Unsupported pseudo-state ':{}' in selector '.{}'", state_str.trim(), raw)
+            })?;
+            let rule = parse_rule_body(body, raw)?;
+            states
+                .entry(name.to_string())
+                .or_default()
+                .entry(state)
+                .or_default()
+                .merge_from(&rule);
+            continue;
+        }
+
+        let name = raw.to_string();
         let rule = parse_rule_body(body, &name)?;
         // Classe duplicada no mesmo arquivo faz *merge* (não clobber): o CSS
         // aplica ambas as regras de mesmo seletor. Sobrescrever a anterior
@@ -356,7 +487,7 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
         return Err(format!("Expected '{{' after selector '{}'", rest.trim()));
     }
 
-    Ok(StyleSheet { rules, variables, media })
+    Ok(StyleSheet { rules, variables, media, states })
 }
 
 /// Dado o texto logo APÓS o `{` de um bloco, devolve `(interior, resto)` onde
@@ -701,6 +832,63 @@ mod tests {
         assert!(!c.matches(500.0, 400.0)); // largura < min
         assert!(!c.matches(1000.0, 400.0)); // largura > max
         assert!(!c.matches(800.0, 600.0)); // altura > max
+    }
+
+    #[test]
+    fn parses_pseudo_state_selectors() {
+        let sheet = parse_gss(
+            ".btn { background: #111111; } \
+             .btn:hover { background: #222222; } \
+             .btn:disabled { background: #333333; text-color: #999999; }",
+        )
+        .unwrap();
+        assert_eq!(sheet.rules["btn"].background.as_deref(), Some("#111111"));
+        let states = resolve_state_classes("btn", &[&sheet], None);
+        assert_eq!(states.hover.background.as_deref(), Some("#222222"));
+        assert_eq!(states.disabled.background.as_deref(), Some("#333333"));
+        assert_eq!(states.disabled.text_color.as_deref(), Some("#999999"));
+        assert_eq!(states.focus.background, None); // não declarado
+        assert_eq!(states.active.background, None);
+    }
+
+    #[test]
+    fn unsupported_pseudo_state_is_an_error() {
+        assert!(parse_gss(".btn:wobble { color: #111111; }").is_err());
+    }
+
+    #[test]
+    fn duplicate_pseudo_state_merges_not_clobbers() {
+        let sheet = parse_gss(
+            ".btn:hover { background: #222222; } .btn:hover { text-color: #ffffff; }",
+        )
+        .unwrap();
+        let states = resolve_state_classes("btn", &[&sheet], None);
+        assert_eq!(states.hover.background.as_deref(), Some("#222222"));
+        assert_eq!(states.hover.text_color.as_deref(), Some("#ffffff"));
+    }
+
+    #[test]
+    fn pseudo_state_vars_resolve() {
+        let sheet = parse_gss(
+            ":root { --hoverbg: #abcdef; } .btn:hover { background: var(--hoverbg); }",
+        )
+        .unwrap();
+        let states = resolve_state_classes("btn", &[&sheet], None);
+        assert_eq!(states.hover.background.as_deref(), Some("#abcdef"));
+    }
+
+    #[test]
+    fn pseudo_state_inside_media_applies_when_matched() {
+        let sheet = parse_gss(
+            "@media (max-width: 500) { .btn:hover { background: #000000; } }",
+        )
+        .unwrap();
+        let narrow = resolve_state_classes("btn", &[&sheet], Some((400.0, 400.0)));
+        assert_eq!(narrow.hover.background.as_deref(), Some("#000000"));
+        let wide = resolve_state_classes("btn", &[&sheet], Some((900.0, 400.0)));
+        assert_eq!(wide.hover.background, None);
+        let no_viewport = resolve_state_classes("btn", &[&sheet], None);
+        assert_eq!(no_viewport.hover.background, None);
     }
 
     #[test]

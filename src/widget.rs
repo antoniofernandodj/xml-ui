@@ -344,15 +344,21 @@ pub fn render_node<'a>(
                 }
             }
             let mut btn = button(t);
-            // Navigation takes priority over the generic on_click.
-            if *navigate_back {
-                btn = btn.on_press(EngineMessage::NavigateBack);
-            } else if let Some(destination) = navigate_to {
-                btn = btn.on_press(EngineMessage::Navigate(destination.clone()));
-            } else if let Some(action) = on_click {
-                btn = btn.on_press(EngineMessage::UiClick(action.clone()));
+            // Um botão `disabled` não recebe handler algum: sem `on_press`, o
+            // próprio iced já reporta `button::Status::Disabled` na closure de
+            // estilo abaixo — não há necessidade de rastrear isso à parte.
+            let is_disabled = node.disabled.unwrap_or(false);
+            if !is_disabled {
+                // Navigation takes priority over the generic on_click.
+                if *navigate_back {
+                    btn = btn.on_press(EngineMessage::NavigateBack);
+                } else if let Some(destination) = navigate_to {
+                    btn = btn.on_press(EngineMessage::Navigate(destination.clone()));
+                } else if let Some(action) = on_click {
+                    btn = btn.on_press(EngineMessage::UiClick(action.clone()));
+                }
             }
-            
+
             if let Some(c_str) = color {
                 if let Some(col) = parse_hex_color(c_str) {
                     let br_radius = node.border_radius.unwrap_or(0.0);
@@ -365,29 +371,57 @@ pub fn render_node<'a>(
                     let label_col = node.text_color.as_deref()
                         .and_then(parse_hex_color)
                         .unwrap_or(Color::WHITE);
+                    // Overlays por pseudo-estado (`.classe:hover/:active/:disabled { }`),
+                    // já resolvidos em `eval.rs`; `None` quando o `.gss` não declara
+                    // aquele estado — nesse caso cai no auto-derive histórico
+                    // (±10% de luminância) ou, para `disabled`, 50% de alfa.
+                    let hover_ov = node.hover_style.as_deref().cloned();
+                    let active_ov = node.active_style.as_deref().cloned();
+                    let disabled_ov = node.disabled_style.as_deref().cloned();
                     btn = btn.style(move |_theme, status| {
-                        let bg = match status {
-                            iced::widget::button::Status::Hovered => Some(Background::Color(Color {
-                                r: (col.r * 1.1).min(1.0),
-                                g: (col.g * 1.1).min(1.0),
-                                b: (col.b * 1.1).min(1.0),
-                                a: col.a,
-                            })),
-                            iced::widget::button::Status::Pressed => Some(Background::Color(Color {
-                                r: (col.r * 0.9).min(1.0),
-                                g: (col.g * 0.9).min(1.0),
-                                b: (col.b * 0.9).min(1.0),
-                                a: col.a,
-                            })),
-                            _ => Some(Background::Color(col)),
+                        use iced::widget::button::Status;
+                        let overlay = match status {
+                            Status::Hovered => hover_ov.as_ref(),
+                            Status::Pressed => active_ov.as_ref(),
+                            Status::Disabled => disabled_ov.as_ref(),
+                            Status::Active => None,
                         };
+                        let bg_color = overlay
+                            .and_then(|r| r.background.as_deref())
+                            .and_then(parse_hex_color)
+                            .unwrap_or_else(|| match status {
+                                Status::Hovered => Color {
+                                    r: (col.r * 1.1).min(1.0),
+                                    g: (col.g * 1.1).min(1.0),
+                                    b: (col.b * 1.1).min(1.0),
+                                    a: col.a,
+                                },
+                                Status::Pressed => Color {
+                                    r: (col.r * 0.9).min(1.0),
+                                    g: (col.g * 0.9).min(1.0),
+                                    b: (col.b * 0.9).min(1.0),
+                                    a: col.a,
+                                },
+                                Status::Disabled => Color { a: col.a * 0.5, ..col },
+                                Status::Active => col,
+                            });
+                        let text_color = overlay
+                            .and_then(|r| r.text_color.as_deref())
+                            .and_then(parse_hex_color)
+                            .unwrap_or(label_col);
+                        let radius = overlay.and_then(|r| r.border_radius).unwrap_or(br_radius);
+                        let width = overlay.and_then(|r| r.border_width).unwrap_or(br_width);
+                        let border_color = overlay
+                            .and_then(|r| r.border_color.as_deref())
+                            .and_then(parse_hex_color)
+                            .unwrap_or(br_color);
                         iced::widget::button::Style {
-                            background: bg,
-                            text_color: label_col,
+                            background: Some(Background::Color(bg_color)),
+                            text_color,
                             border: Border {
-                                radius: iced::border::Radius::new(br_radius),
-                                width: br_width,
-                                color: br_color,
+                                radius: iced::border::Radius::new(radius),
+                                width,
+                                color: border_color,
                             },
                             shadow: iced::Shadow::default(),
                             snap: false,
@@ -395,7 +429,7 @@ pub fn render_node<'a>(
                     });
                 }
             }
-            
+
             btn.width(parse_length(&node.width))
                .height(parse_length(&node.height))
                .padding(parse_padding(&node.padding))
@@ -403,28 +437,36 @@ pub fn render_node<'a>(
         }
         NodeType::TextInput { placeholder, value_var, on_change, secure } => {
             let current_value = context.get(value_var).map(|s| s.as_str()).unwrap_or("");
-            let action_clone = on_change.clone();
+            // Sem `disabled`, sem `.on_input(...)`: o próprio iced reporta
+            // `text_input::Status::Disabled` (não editável, cursor não pisca)
+            // sem o motor precisar rastrear isso à parte — mesmo truque do botão.
+            let is_disabled = node.disabled.unwrap_or(false);
 
-            let mut input = text_input(placeholder.as_str(), current_value)
-                .on_input(move |val| EngineMessage::UiInputChanged {
+            let mut input = text_input(placeholder.as_str(), current_value).secure(*secure);
+            if !is_disabled {
+                let action_clone = on_change.clone();
+                input = input.on_input(move |val| EngineMessage::UiInputChanged {
                     action: action_clone.clone(),
                     value: val,
-                })
-                .secure(*secure);
+                });
+            }
 
             // Wired only once hydrated by an enclosing `<Form>` (`form_scope`
             // set) — a stray `formControl` outside any `<Form>` renders as a
-            // plain input, same as before this feature existed.
-            if let (Some(control), Some(scope), Some(submit_action)) =
-                (&node.form_control, &node.form_scope, &node.form_submit_action)
-            {
-                input = input.id(form_input_id(scope, control));
-                let next_focus = node.form_next_focus.as_ref()
-                    .map(|next| form_input_id(scope, next));
-                input = input.on_submit(EngineMessage::UiSubmit {
-                    action: submit_action.clone(),
-                    next_focus,
-                });
+            // plain input, same as before this feature existed. Skipped when
+            // `disabled` for the same reason as `on_input` above.
+            if !is_disabled {
+                if let (Some(control), Some(scope), Some(submit_action)) =
+                    (&node.form_control, &node.form_scope, &node.form_submit_action)
+                {
+                    input = input.id(form_input_id(scope, control));
+                    let next_focus = node.form_next_focus.as_ref()
+                        .map(|next| form_input_id(scope, next));
+                    input = input.on_submit(EngineMessage::UiSubmit {
+                        action: submit_action.clone(),
+                        next_focus,
+                    });
+                }
             }
 
             // `iced`'s own default for `text_input` is `Length::Fill` (unlike
@@ -441,6 +483,43 @@ pub fn render_node<'a>(
             // of collapsing to `Padding::ZERO` (text flush against the edges).
             if node.padding.is_some() {
                 input = input.padding(parse_padding(&node.padding));
+            }
+
+            // Overlays por pseudo-estado (`:hover`/`:focus`/`:disabled`);
+            // parte do estilo padrão do tema (`text_input::default`) e
+            // sobrescreve só os campos que o `.gss` realmente declarou.
+            if node.hover_style.is_some() || node.focus_style.is_some() || node.disabled_style.is_some() {
+                let hover_ov = node.hover_style.as_deref().cloned();
+                let focus_ov = node.focus_style.as_deref().cloned();
+                let disabled_ov = node.disabled_style.as_deref().cloned();
+                input = input.style(move |theme, status| {
+                    use iced::widget::text_input::Status;
+                    let mut style = iced::widget::text_input::default(theme, status);
+                    let overlay = match status {
+                        Status::Hovered => hover_ov.as_ref(),
+                        Status::Focused { .. } => focus_ov.as_ref(),
+                        Status::Disabled => disabled_ov.as_ref(),
+                        Status::Active => None,
+                    };
+                    if let Some(r) = overlay {
+                        if let Some(bg) = r.background.as_deref().and_then(parse_hex_color) {
+                            style.background = Background::Color(bg);
+                        }
+                        if let Some(bc) = r.border_color.as_deref().and_then(parse_hex_color) {
+                            style.border.color = bc;
+                        }
+                        if let Some(bw) = r.border_width {
+                            style.border.width = bw;
+                        }
+                        if let Some(br) = r.border_radius {
+                            style.border.radius = iced::border::Radius::new(br);
+                        }
+                        if let Some(tc) = r.text_color.as_deref().and_then(parse_hex_color) {
+                            style.value = tc;
+                        }
+                    }
+                    style
+                });
             }
 
             let mut elem: Element<'a, EngineMessage> = input.into();
@@ -544,13 +623,16 @@ pub fn render_node<'a>(
         }
         NodeType::Checkbox { label, checked_var, on_toggle } => {
             let checked = context.get(checked_var).map(|s| is_truthy(s)).unwrap_or(false);
-            let action = on_toggle.clone();
-            let mut c = checkbox(checked)
-                .label(label.as_str())
-                .on_toggle(move |v| EngineMessage::UiInputChanged {
+            let mut c = checkbox(checked).label(label.as_str());
+            // Sem `disabled`, sem `.on_toggle(...)`: o iced já reporta
+            // `checkbox::Status::Disabled` sozinho (mesmo truque do botão).
+            if !node.disabled.unwrap_or(false) {
+                let action = on_toggle.clone();
+                c = c.on_toggle(move |v| EngineMessage::UiInputChanged {
                     action: action.clone(),
                     value: v.to_string(),
                 });
+            }
             if let Some(s) = node.text_align.as_ref().and_then(|_| node.spacing) {
                 c = c.spacing(s);
             }
@@ -558,11 +640,14 @@ pub fn render_node<'a>(
         }
         NodeType::Toggle { label, checked_var, on_toggle } => {
             let checked = context.get(checked_var).map(|s| is_truthy(s)).unwrap_or(false);
-            let action = on_toggle.clone();
-            let mut t = toggler(checked).on_toggle(move |v| EngineMessage::UiInputChanged {
-                action: action.clone(),
-                value: v.to_string(),
-            });
+            let mut t = toggler(checked);
+            if !node.disabled.unwrap_or(false) {
+                let action = on_toggle.clone();
+                t = t.on_toggle(move |v| EngineMessage::UiInputChanged {
+                    action: action.clone(),
+                    value: v.to_string(),
+                });
+            }
             if !label.is_empty() {
                 t = t.label(label.as_str());
             }
@@ -596,9 +681,13 @@ pub fn render_node<'a>(
             let br_color = node.border_color.as_ref().and_then(|c| parse_hex_color(c));
             let txt_color = color.as_ref().and_then(|c| parse_hex_color(c));
 
+            // `Select`/`pick_list` não tem `Status::Disabled` no iced (o handler
+            // é obrigatório), então só o overlay de `:hover` faz sentido aqui.
+            let hover_ov = node.hover_style.as_deref().cloned();
             let style_fn = move |theme: &iced::Theme, status: pick_list::Status| {
                 let pal = theme.extended_palette();
-                let text_color = txt_color.unwrap_or(pal.background.base.text);
+                let mut text_color = txt_color.unwrap_or(pal.background.base.text);
+                let mut background = bg.clone().unwrap_or(Background::Color(pal.background.weak.color));
                 let mut border = Border {
                     radius: iced::border::Radius::new(br_radius.unwrap_or(4.0)),
                     width: br_width.unwrap_or(1.0),
@@ -606,12 +695,29 @@ pub fn render_node<'a>(
                 };
                 if matches!(status, pick_list::Status::Hovered | pick_list::Status::Opened { .. }) {
                     border.color = txt_color.unwrap_or(pal.primary.base.color);
+                    if let Some(r) = hover_ov.as_ref() {
+                        if let Some(bg2) = r.background.as_deref().and_then(parse_hex_color) {
+                            background = Background::Color(bg2);
+                        }
+                        if let Some(bc) = r.border_color.as_deref().and_then(parse_hex_color) {
+                            border.color = bc;
+                        }
+                        if let Some(bw) = r.border_width {
+                            border.width = bw;
+                        }
+                        if let Some(br2) = r.border_radius {
+                            border.radius = iced::border::Radius::new(br2);
+                        }
+                        if let Some(tc) = r.text_color.as_deref().and_then(parse_hex_color) {
+                            text_color = tc;
+                        }
+                    }
                 }
                 pick_list::Style {
                     text_color,
                     placeholder_color: pal.background.strong.color,
                     handle_color: text_color,
-                    background: bg.clone().unwrap_or(Background::Color(pal.background.weak.color)),
+                    background,
                     border,
                 }
             };

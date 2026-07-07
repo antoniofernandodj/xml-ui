@@ -1,0 +1,54 @@
+<!-- Tema da janela (paleta do iced) — também elimina o fundo branco padrão. -->
+<link rel="theme" href="examples/pseudo_estados/theme.json" />
+
+<Container class="card">
+    <Column class="stack">
+        <Text class="title" content="Pseudo-estados: :hover / :focus / :active / :disabled" />
+        <Text
+            class="subtitle"
+            content="Passe o mouse, clique e compare com a versão desabilitada de cada widget."
+        />
+
+        <!-- Button: :hover (passe o mouse) / :active (segure o clique) / :disabled -->
+        <Column class="stack" spacing="8">
+            <Text class="label" content="Button — hover / active / disabled" />
+            <Row class="row">
+                <Button class="btn" text="Enviar" onClick="enviar" />
+                <Button class="btn" text="Desabilitado" disabled="true" />
+            </Row>
+        </Column>
+
+        <!-- TextInput: :hover / :focus (clique para focar) / :disabled -->
+        <Column class="stack" spacing="8">
+            <Text class="label" content="TextInput — hover / focus / disabled" />
+            <Row class="row">
+                <TextInput class="input" width="200" placeholder="Clique aqui" value="texto" onChange="texto" />
+                <TextInput class="input" width="200" placeholder="Desabilitado" disabled="true" />
+            </Row>
+        </Column>
+
+        <!-- Select: só :hover (o iced não expõe Status::Disabled p/ pick_list) -->
+        <Column class="stack" spacing="8">
+            <Text class="label" content="Select — hover" />
+            <Select
+                class="select"
+                width="200"
+                options="cores"
+                value="cor_selecionada"
+                onChange="cor_selecionada"
+                placeholder="Escolha uma cor"
+            />
+        </Column>
+
+        <!-- Checkbox/Toggle: só o atributo `disabled` (visual padrão do tema) -->
+        <Column class="stack" spacing="8">
+            <Text class="label" content="Checkbox / Toggle — disabled" />
+            <Row class="row">
+                <Checkbox label="Ativo" checked="marcado" onToggle="marcado" />
+                <Checkbox label="Desabilitado" checked="marcado_travado" onToggle="marcado_travado" disabled="true" />
+                <Toggle label="Ligado" checked="ligado" onToggle="ligado" />
+                <Toggle label="Desabilitado" checked="ligado_travado" onToggle="ligado_travado" disabled="true" />
+            </Row>
+        </Column>
+    </Column>
+</Container>

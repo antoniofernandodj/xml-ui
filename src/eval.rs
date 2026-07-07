@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::parser::{UiNode, NodeType};
-use crate::stylesheet::{StyleSheet, StyleRule, resolve_classes};
+use crate::stylesheet::{StyleSheet, StyleRule, StateStyles, resolve_classes, resolve_state_classes};
 
 /// Splits a `<script>...</script>` block out of an XML document, returning the
 /// markup with the block removed and the script body (if any).
@@ -529,13 +529,18 @@ fn eval_owned(
 
     // Resolve `class="..."` into a merged style rule that sits *underneath* the
     // node's inline attributes (inline wins, per CSS precedence). Global sheets
-    // apply first, then the current component's scoped sheets.
-    let style: StyleRule = match &node.class {
+    // apply first, then the current component's scoped sheets. Pseudo-state
+    // overlays (`.classe:hover { }` etc.) are resolved alongside the base rule
+    // from the very same class list/sheets/viewport, so they stay consistent.
+    let (style, state_styles): (StyleRule, StateStyles) = match &node.class {
         Some(class) => {
             let active = styles.active(scope);
-            resolve_classes(&process_template(class, context), &active, styles.viewport)
+            let processed = process_template(class, context);
+            let base = resolve_classes(&processed, &active, styles.viewport);
+            let states = resolve_state_classes(&processed, &active, styles.viewport);
+            (base, states)
         }
-        None => StyleRule::default(),
+        None => (StyleRule::default(), StateStyles::default()),
     };
 
     // Evaluate current node attributes
@@ -673,6 +678,19 @@ fn eval_owned(
     // `hidden` resolvido: inline vence a classe/`@media` (mesma precedência dos
     // demais campos). Consumido em `widget::render_node` (pulado no layout).
     let hidden_eval = node.hidden.or(style.hidden);
+    // `disabled` só existe como atributo inline (sem equivalente `.classe { }`),
+    // carregado direto, como `drag_handle`.
+    let disabled_eval = node.disabled;
+    // Overlays por pseudo-estado: só embrulha num `Box` quando o `.gss`
+    // realmente declarou algo para aquele estado, para não pagar uma
+    // alocação por nó no caso comum (nenhum `:hover`/`:focus`/etc. no sheet).
+    let box_state = |r: StyleRule| -> Option<Box<StyleRule>> {
+        if r == StyleRule::default() { None } else { Some(Box::new(r)) }
+    };
+    let hover_style_eval = box_state(state_styles.hover);
+    let focus_style_eval = box_state(state_styles.focus);
+    let active_style_eval = box_state(state_styles.active);
+    let disabled_style_eval = box_state(state_styles.disabled);
 
     // Evaluate children recursively. ForEach/if/else/Import are structural:
     // they are expanded or dropped rather than rendered directly.
@@ -717,6 +735,11 @@ fn eval_owned(
         max_width: max_width_eval,
         max_height: max_height_eval,
         hidden: hidden_eval,
+        disabled: disabled_eval,
+        hover_style: hover_style_eval,
+        focus_style: focus_style_eval,
+        active_style: active_style_eval,
+        disabled_style: disabled_style_eval,
         if_cond: None,
         if_equals: None,
         if_not_equals: None,

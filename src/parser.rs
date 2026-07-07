@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use roxmltree::Node;
+use crate::stylesheet::StyleRule;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
@@ -218,6 +219,26 @@ pub struct UiNode {
     /// remove o elemento do layout sem ocupar espaço nem `spacing`. Uso típico:
     /// `@media` esconder cromo em janelas estreitas (ver [`crate::stylesheet::StyleRule::hidden`]).
     pub hidden: Option<bool>,
+    /// `disabled`/`desabilitado` — desativa a interação (Button/TextInput/
+    /// Checkbox/Toggle deixam de anexar seus handlers `on_press`/`on_input`/
+    /// `on_toggle`, então o `Status::Disabled` nativo do iced entra em vigor
+    /// sozinho, sem o motor precisar rastrear estado). Ao contrário de
+    /// `hidden`, o elemento continua ocupando espaço e renderizando — só perde
+    /// a interatividade. Só existe como atributo inline (sem `.classe { }`
+    /// equivalente, ao contrário de `hidden`).
+    pub disabled: Option<bool>,
+    /// Overlays de estilo por pseudo-estado (`.classe:hover { }`,
+    /// `:focus`, `:active`, `:disabled`), resolvidos em `eval.rs` a partir
+    /// da(s) classe(s) do nó — nunca vêm de atributo inline, sempre `None`
+    /// logo após o parse do XML. `None` quando o `.gss` não declara aquele
+    /// estado para nenhuma classe do nó (custo zero no caso comum). Aplicados
+    /// por `widget.rs` dentro da closure de `Status` do widget correspondente
+    /// (ex.: `button::Status::Hovered`); hoje só `Button` e `TextInput`
+    /// consultam esses campos — `Select` só usa `hover_style` para a borda.
+    pub hover_style: Option<Box<StyleRule>>,
+    pub focus_style: Option<Box<StyleRule>>,
+    pub active_style: Option<Box<StyleRule>>,
+    pub disabled_style: Option<Box<StyleRule>>,
     // Structural directives as attributes (Vue/Angular style)
     pub if_cond: Option<String>,
     pub if_equals: Option<String>,
@@ -319,6 +340,8 @@ impl UiNode {
         let max_width = Self::get_attr_f32(&node, &["maxWidth", "max_width", "max-width", "largura_max"]);
         let max_height = Self::get_attr_f32(&node, &["maxHeight", "max_height", "max-height", "altura_max"]);
         let hidden = Self::get_attr(&node, &["hidden", "oculto"])
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1");
+        let disabled = Self::get_attr(&node, &["disabled", "desabilitado"])
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1");
         let form_control = Self::get_attr(&node, &["formControl", "form_control", "form-control", "controleForm", "controle_form"]);
 
@@ -526,6 +549,11 @@ impl UiNode {
             max_width,
             max_height,
             hidden,
+            disabled,
+            hover_style: None,
+            focus_style: None,
+            active_style: None,
+            disabled_style: None,
             if_cond,
             if_equals,
             if_not_equals,
@@ -617,6 +645,11 @@ pub(crate) fn empty_node(kind: NodeType, children: Vec<UiNode>) -> UiNode {
         max_width: None,
         max_height: None,
         hidden: None,
+        disabled: None,
+        hover_style: None,
+        focus_style: None,
+        active_style: None,
+        disabled_style: None,
         if_cond: None,
         if_equals: None,
         if_not_equals: None,

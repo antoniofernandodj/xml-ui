@@ -1,0 +1,90 @@
+/*
+examples/pseudo_estados/pseudo_estados.gss
+Demonstra os pseudo-estados `:hover` / `:focus` / `:active` / `:disabled`
+(ver PLANO_GSS_LIMITACOES.md, item 7). Cada bloco `.classe:estado { }`
+sobrescreve só os campos que declara, por cima da regra base — igual ao CSS.
+Edite este arquivo com o exemplo rodando: hot-reload aplica na hora.
+*/
+
+.card {
+    padding: 32;
+    width: fill;
+    background: #1E1E2E;
+    border-radius: 16;
+    border-width: 1;
+    border-color: #313244;
+    align-x: Center;
+}
+
+.stack {
+   spacing: 22; align-x: Center;
+}
+
+.row   {
+   spacing: 16; align-y: Center;
+}
+
+
+.title    {
+   size: 24; bold: true; color: #CDD6F4;
+}
+
+.subtitle {
+   size: 13; color: #9399B2;
+}
+
+.label    {
+   size: 13; color: #6C7086;
+}
+
+
+/* --- Button: :hover / :active / :disabled -------------------------------
+   A cor de fundo BASE do botão é a propriedade `color` (não `background`);
+   já os overlays de estado usam `background` — o nome de campo genérico
+   usado pelo resto do `.gss`. Overlay só funciona se a classe já tiver uma
+   `color` base (sem ela não há closure de estilo pra sobrescrever). */
+.btn {
+    padding: 12 22;
+    color: #313244;
+    text-color: #CDD6F4;
+    border-radius: 8;
+}
+.btn:hover    { background: #45475A; }
+.btn:active   { background: #181825; }
+.btn:disabled { background: #11111B; text-color: #6C7086; }
+
+/* --- TextInput: :hover / :focus / :disabled ------------------------------
+   Sem `border-*`/`background` na regra BASE de propósito: declará-los ali
+   também aciona o wrap genérico "envolve em container com borda" (usado por
+   qualquer nó), duplicando a borda que o próprio widget já desenha. Os
+   overlays de estado não têm esse efeito colateral — só mudam a borda que o
+   `text_input` desenha nativamente. */
+
+.input {
+   padding: 10;
+}
+
+.input:hover    {
+   border-color: #585B70;
+}
+
+.input:focus    {
+   border-color: #89B4FA;
+}
+
+.input:disabled {
+   background: #11111B; border-color: #181825;
+}
+
+
+/* --- Select: só :hover -----------------------------------------------
+   O `pick_list` do iced não tem um `Status::Disabled`, então `:disabled`
+   não teria efeito nele (documentado no README).
+   CUIDADO: o hover PADRÃO do `pick_list` (sem overlay nenhum) já pinta a
+   borda de `theme.primary` (widget.rs, `pal.primary.base.color`) — se o
+   overlay usar a MESMA cor do `primary` do tema (`theme.json`), o efeito é
+   invisível (a borda já ia ficar dessa cor de qualquer forma). Por isso
+   aqui vai uma cor bem distinta do `primary` (#89B4FA) do tema, pra dar pra
+   ver a diferença: fundo E borda mudam juntos no hover. */
+
+.select:hover { background: #45475A; border-color: #F5C2E7; }
