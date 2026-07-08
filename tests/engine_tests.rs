@@ -300,6 +300,124 @@ fn test_componente_por_nome() {
 }
 
 #[test]
+fn test_builtin_badge_disponivel_sem_registro() {
+    // O app NÃO registra `Badge` — a lib já o registrou sozinha em `new()`.
+    // Uma tela pode referenciá-lo por tag e ele resolve, com default e com
+    // props sobrescrevendo por instância.
+    let mut motor = GlacierUI::new();
+
+    std::fs::create_dir_all("templates").ok();
+    let tela_path = "templates/test_builtin_badge.xml";
+    std::fs::write(
+        tela_path,
+        r##"
+        <Column>
+            <Badge />
+            <Badge badge_text="Novo" badge_bg="#A6E3A1" />
+        </Column>
+        "##,
+    )
+    .unwrap();
+
+    motor.register_component("tela_badge", tela_path).unwrap();
+
+    let evaluated = motor.evaluated_templates.get("tela_badge").unwrap();
+    assert_eq!(evaluated.kind, NodeType::Column);
+    assert_eq!(evaluated.children.len(), 2);
+
+    // 1º Badge: sem props -> defaults inline (`{prop|default}`), sem estado global.
+    let padrao = &evaluated.children[0];
+    assert_eq!(padrao.kind, NodeType::Container);
+    assert_eq!(padrao.background.as_deref(), Some("#89B4FA"));
+    match &padrao.children[0].kind {
+        NodeType::Text { content, color, size, .. } => {
+            assert_eq!(content, "Badge");
+            assert_eq!(color.as_deref(), Some("#11111B"));
+            assert_eq!(*size, Some(13.0)); // default numérico templado
+        }
+        _ => panic!("Badge padrão deveria conter um Text"),
+    }
+
+    // 2º Badge: props sobrescrevem por instância; a omitida (`badge_fg`) mantém o default.
+    let custom = &evaluated.children[1];
+    assert_eq!(custom.background.as_deref(), Some("#A6E3A1"));
+    match &custom.children[0].kind {
+        NodeType::Text { content, color, .. } => {
+            assert_eq!(content, "Novo");
+            assert_eq!(color.as_deref(), Some("#11111B"));
+        }
+        _ => panic!("Badge custom deveria conter um Text"),
+    }
+
+    // O contexto global NÃO foi poluído com defaults (chaves `badge_*`).
+    assert!(!motor.context_data.contains_key("badge_text"));
+    assert!(!motor.context_data.contains_key("badge_bg"));
+
+    std::fs::remove_file(tela_path).ok();
+}
+
+#[test]
+fn test_template_default_inline() {
+    use glacier_ui::process_template;
+    use std::collections::HashMap;
+
+    let mut ctx = HashMap::new();
+    ctx.insert("nome".to_string(), "Ana".to_string());
+
+    // Chave presente: usa o valor (o default é ignorado).
+    assert_eq!(process_template("Oi {nome|visitante}", &ctx), "Oi Ana");
+    // Chave ausente: cai no default.
+    assert_eq!(process_template("Oi {cargo|visitante}", &ctx), "Oi visitante");
+    // Sem default e ausente: vazio (comportamento antigo, inalterado).
+    assert_eq!(process_template("Oi {cargo}", &ctx), "Oi ");
+    // Espaços em torno da chave e do default são aparados.
+    assert_eq!(process_template("{ cargo | dev }", &ctx), "dev");
+}
+
+#[test]
+fn test_atributo_numerico_templado() {
+    // `size` (numérico) recebe `{prop}` de uma instância de componente e é
+    // resolvido no eval — antes só atributos string aceitavam template.
+    let mut motor = GlacierUI::new();
+    std::fs::create_dir_all("templates").ok();
+
+    let card_path = "templates/test_num_card.xml";
+    let main_path = "templates/test_num_main.xml";
+
+    std::fs::write(
+        card_path,
+        r##"<Text content="oi" size="{s}" />"##,
+    )
+    .unwrap();
+    std::fs::write(
+        main_path,
+        r##"<Column>
+            <NumCard s="28" />
+            <NumCard />
+        </Column>"##,
+    )
+    .unwrap();
+
+    motor.register_component("NumCard", card_path).unwrap();
+    motor.register_component("test_num_main", main_path).unwrap();
+
+    let evaluated = motor.evaluated_templates.get("test_num_main").unwrap();
+    // Com prop: size templado resolve para 28.
+    match &evaluated.children[0].kind {
+        NodeType::Text { size, .. } => assert_eq!(*size, Some(28.0)),
+        _ => panic!("esperava Text"),
+    }
+    // Sem prop: `{s}` resolve vazio -> não parseia -> size fica None.
+    match &evaluated.children[1].kind {
+        NodeType::Text { size, .. } => assert_eq!(*size, None),
+        _ => panic!("esperava Text"),
+    }
+
+    std::fs::remove_file(card_path).ok();
+    std::fs::remove_file(main_path).ok();
+}
+
+#[test]
 fn test_foreach_com_componente() {
     let mut motor = GlacierUI::new();
 

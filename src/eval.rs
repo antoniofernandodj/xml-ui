@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::parser::{UiNode, NodeType};
+use crate::parser::{UiNode, NodeType, NumAttr};
 use crate::stylesheet::{StyleSheet, StyleRule, StateStyles, resolve_classes, resolve_state_classes};
 
 /// Splits a `<script>...</script>` block out of an XML document, returning the
@@ -158,11 +158,21 @@ pub fn process_template(template: &str, context: &HashMap<String, String>) -> St
                 }
             }
             if closed {
-                if let Some(val) = context.get(&key) {
+                // Inline default: `{key|default}` uses `default` (the text after
+                // the first `|`) when `key` is absent from the context. Without a
+                // `|` the behavior is unchanged: a missing key resolves to empty.
+                // This is what lets a component default its own props per instance
+                // without seeding — or polluting — the global context.
+                let (lookup, default) = match key.split_once('|') {
+                    Some((k, d)) => (k.trim(), Some(d.trim())),
+                    None => (key.trim(), None),
+                };
+                if let Some(val) = context.get(lookup) {
                     result.push_str(val);
-                } else {
-                    // Placeholder key not found; we leave it as is or empty. Let's make it empty.
+                } else if let Some(d) = default {
+                    result.push_str(d);
                 }
+                // else: unknown key with no default -> empty (unchanged).
             } else {
                 result.push('{');
                 result.push_str(&key);
@@ -543,6 +553,16 @@ fn eval_owned(
         None => (StyleRule::default(), StateStyles::default()),
     };
 
+    // Resolve a numeric attribute whose XML value was a `{...}` template (see
+    // `NumAttr`): interpolate against the context and parse to f32. `None` if
+    // the node had no template for `attr`, or it resolved to a non-number.
+    let num_template = |attr: NumAttr| -> Option<f32> {
+        node.numeric_templates
+            .iter()
+            .find(|(a, _)| *a == attr)
+            .and_then(|(_, t)| process_template(t, context).trim().parse::<f32>().ok())
+    };
+
     // Evaluate current node attributes
     let kind_eval = match &node.kind {
         NodeType::Container => NodeType::Container,
@@ -551,7 +571,7 @@ fn eval_owned(
         NodeType::Text { content, size, bold, color } => {
             NodeType::Text {
                 content: process_template(content, context),
-                size: size.or(style.size),
+                size: num_template(NumAttr::Size).or(*size).or(style.size),
                 bold: *bold || style.bold.unwrap_or(false),
                 color: color.as_ref()
                     .map(|c| process_template(c, context))
@@ -661,9 +681,9 @@ fn eval_owned(
     let align_y_eval = resolve(&node.align_y, &style.align_y);
     let background_eval = resolve(&node.background, &style.background);
     let border_color_eval = resolve(&node.border_color, &style.border_color);
-    let spacing_eval = node.spacing.or(style.spacing);
-    let border_radius_eval = node.border_radius.or(style.border_radius);
-    let border_width_eval = node.border_width.or(style.border_width);
+    let spacing_eval = num_template(NumAttr::Spacing).or(node.spacing).or(style.spacing);
+    let border_radius_eval = num_template(NumAttr::BorderRadius).or(node.border_radius).or(style.border_radius);
+    let border_width_eval = num_template(NumAttr::BorderWidth).or(node.border_width).or(style.border_width);
     let font_eval = resolve(&node.font, &style.font);
     let gradient_eval = resolve(&node.gradient, &style.gradient);
     let text_align_eval = resolve(&node.text_align, &style.text_align);
@@ -673,8 +693,8 @@ fn eval_owned(
     let on_double_click_eval = node.on_double_click.as_ref().map(|s| process_template(s, context));
     let cursor_eval = resolve(&node.cursor, &style.cursor);
     let text_color_eval = resolve(&node.text_color, &style.text_color);
-    let max_width_eval = node.max_width.or(style.max_width);
-    let max_height_eval = node.max_height.or(style.max_height);
+    let max_width_eval = num_template(NumAttr::MaxWidth).or(node.max_width).or(style.max_width);
+    let max_height_eval = num_template(NumAttr::MaxHeight).or(node.max_height).or(style.max_height);
     // `hidden` resolvido: inline vence a classe/`@media` (mesma precedência dos
     // demais campos). Consumido em `widget::render_node` (pulado no layout).
     let hidden_eval = node.hidden.or(style.hidden);
@@ -713,6 +733,8 @@ fn eval_owned(
     Ok(UiNode {
         kind: kind_eval,
         children: children_eval,
+        // Numeric templates are resolved into the f32 fields below; nothing left.
+        numeric_templates: Vec::new(),
         width: width_eval,
         height: height_eval,
         padding: padding_eval,

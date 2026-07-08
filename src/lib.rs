@@ -1,4 +1,5 @@
 pub mod app;
+pub mod builtins;
 pub mod parser;
 pub mod eval;
 pub mod widget;
@@ -114,6 +115,13 @@ pub struct GlacierUI {
     /// Populated when a stream signals [`net::StreamEvent::Ready`]; used to
     /// deliver `conn:send`/`conn:close` to the connection task.
     stream_senders: HashMap<(String, u64), net::WsSender>,
+    /// Names of the components the lib registers itself in [`GlacierUI::new`]
+    /// (see [`crate::builtins`]). They live in the same name space as app
+    /// components, so this set lets an explicit app `<import>` of the same name
+    /// override the builtin instead of being skipped by the "already loaded"
+    /// guard in [`GlacierUI::load_imports`]. A name is dropped from the set once
+    /// the app overrides it.
+    builtin_component_names: std::collections::HashSet<String>,
 }
 
 /// A [`toasts::ToastSpec`] actually in exhibition: the spec plus the
@@ -147,7 +155,7 @@ struct DragState {
 impl GlacierUI {
     /// Creates a new, empty GlacierUI instance
     pub fn new() -> Self {
-        Self {
+        let mut ui = Self {
             registered_components: HashMap::new(),
             parsed_templates: HashMap::new(),
             evaluated_templates: HashMap::new(),
@@ -171,6 +179,28 @@ impl GlacierUI {
             viewport: (1280.0, 800.0),
             active_streams: HashMap::new(),
             stream_senders: HashMap::new(),
+            builtin_component_names: std::collections::HashSet::new(),
+        };
+        ui.register_builtins();
+        ui
+    }
+
+    /// Registra os componentes que a lib traz embutidos (ver [`crate::builtins`])
+    /// para que fiquem disponíveis por tag em qualquer template, sem o app
+    /// precisar `register`á-los — é o que torna `<Badge/>` "sempre disponível",
+    /// como uma primitiva.
+    ///
+    /// Roda dentro de [`GlacierUI::new`], antes de `self` retornar. Usa
+    /// [`GlacierUI::register_one`] (sem reavaliar a cada um; a reavaliação
+    /// acontece quando o app registra suas telas). Como todo builtin usa
+    /// [`Template::Inline`] — XML compilado na crate — uma falha de parse é bug
+    /// da própria lib, então `expect` mantém `new` infalível.
+    fn register_builtins(&mut self) {
+        for comp in builtins::builtin_components() {
+            let name = comp.name().to_string();
+            self.register_one(comp)
+                .unwrap_or_else(|e| panic!("built-in component '{}' failed to register: {}", name, e));
+            self.builtin_component_names.insert(name);
         }
     }
 
@@ -367,6 +397,10 @@ impl GlacierUI {
         let (ast, _script) = parse_markup(path.as_deref(), &markup)
             .map_err(|e| format!("Failed to parse template for component '{}': {}", name, e))?;
         self.parsed_templates.insert(name.clone(), ast.clone());
+        // An explicit registration of this name means it's no longer a lib
+        // builtin (register_builtins re-adds its own names *after* this call, so
+        // this stays a no-op for the builtins themselves).
+        self.builtin_component_names.remove(&name);
         self.load_imports(&ast)?;
         self.process_links(&name, &ast)?;
 
@@ -883,6 +917,8 @@ impl GlacierUI {
         self.registered_components.insert(name.to_string(), path.to_string());
         self.parsed_templates.insert(name.to_string(), ast.clone());
         self.file_mod_times.insert(name.to_string(), mod_time);
+        // An explicit registration overrides any lib builtin of this name.
+        self.builtin_component_names.remove(name);
 
         // Recursively load components declared with `<import>`.
         self.load_imports(&ast)?;
@@ -1009,9 +1045,15 @@ impl GlacierUI {
     /// Walks a parsed tree and registers every `<import>`ed component not yet loaded.
     fn load_imports(&mut self, node: &UiNode) -> Result<(), String> {
         if let NodeType::Import { name, from } = &node.kind {
-            if !self.parsed_templates.contains_key(name) {
+            // Load if the name is free, or if it currently holds a builtin the
+            // app is deliberately shadowing (an explicit `<import>` wins over a
+            // lib builtin). Once overridden, the name is a normal component and
+            // later imports of it are skipped as before.
+            let is_builtin = self.builtin_component_names.contains(name);
+            if !self.parsed_templates.contains_key(name) || is_builtin {
                 let (name, from) = (name.clone(), from.clone());
                 self.register_component_inner(&name, &from)?;
+                self.builtin_component_names.remove(&name);
             }
         }
         for child in &node.children {

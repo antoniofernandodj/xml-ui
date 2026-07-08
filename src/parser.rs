@@ -171,10 +171,30 @@ pub enum NodeType {
     Fragment,
 }
 
+/// A numeric attribute that normally parses to `f32` at parse time. When its
+/// value carries a `{...}` placeholder it can't be parsed until the context is
+/// known, so the raw string is stashed in [`UiNode::numeric_templates`] under
+/// the matching variant and resolved during evaluation instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NumAttr {
+    Spacing,
+    BorderRadius,
+    BorderWidth,
+    MaxWidth,
+    MaxHeight,
+    /// `size` of a `Text` node.
+    Size,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiNode {
     pub kind: NodeType,
     pub children: Vec<UiNode>,
+    /// Raw, still-templated values of numeric attributes whose XML value held a
+    /// `{...}` placeholder (so they couldn't be parsed to `f32` at parse time).
+    /// Resolved and parsed during evaluation; see [`NumAttr`]. Empty for the
+    /// common case where every numeric attribute was a literal.
+    pub numeric_templates: Vec<(NumAttr, String)>,
     pub width: Option<String>,
     pub height: Option<String>,
     pub padding: Option<String>,
@@ -298,9 +318,24 @@ impl UiNode {
         None
     }
 
-    /// Helper to parse a float attribute
-    fn get_attr_f32(node: &Node, keys: &[&str]) -> Option<f32> {
-        Self::get_attr(node, keys).and_then(|s| s.parse::<f32>().ok())
+    /// Parse a float attribute. If the value carries a `{...}` placeholder it
+    /// can't be parsed yet: the raw string is recorded in `templates` under
+    /// `attr` (resolved at eval time) and `None` is returned so the static field
+    /// stays empty. A literal value parses as before.
+    fn get_attr_num(
+        node: &Node,
+        keys: &[&str],
+        attr: NumAttr,
+        templates: &mut Vec<(NumAttr, String)>,
+    ) -> Option<f32> {
+        match Self::get_attr(node, keys) {
+            Some(s) if s.contains('{') => {
+                templates.push((attr, s));
+                None
+            }
+            Some(s) => s.parse::<f32>().ok(),
+            None => None,
+        }
     }
 
     /// Helper to parse a bool attribute
@@ -324,10 +359,11 @@ impl UiNode {
         let padding = Self::get_attr(&node, &["padding", "espacamento_interno"]);
         let align_x = Self::get_attr(&node, &["alignX", "align_x", "align-x", "alinhamento_x"]);
         let align_y = Self::get_attr(&node, &["alignY", "align_y", "align-y", "alinhamento_y"]);
-        let spacing = Self::get_attr_f32(&node, &["spacing", "espacamento"]);
+        let mut numeric_templates: Vec<(NumAttr, String)> = Vec::new();
+        let spacing = Self::get_attr_num(&node, &["spacing", "espacamento"], NumAttr::Spacing, &mut numeric_templates);
         let background = Self::get_attr(&node, &["background", "bg", "fundo"]);
-        let border_radius = Self::get_attr_f32(&node, &["borderRadius", "border_radius", "border-radius", "raio_borda"]);
-        let border_width = Self::get_attr_f32(&node, &["borderWidth", "border_width", "border-width", "largura_borda"]);
+        let border_radius = Self::get_attr_num(&node, &["borderRadius", "border_radius", "border-radius", "raio_borda"], NumAttr::BorderRadius, &mut numeric_templates);
+        let border_width = Self::get_attr_num(&node, &["borderWidth", "border_width", "border-width", "largura_borda"], NumAttr::BorderWidth, &mut numeric_templates);
         let border_color = Self::get_attr(&node, &["borderColor", "border_color", "border-color", "cor_borda"]);
         let class = Self::get_attr(&node, &["class", "classe"]);
         let font = Self::get_attr(&node, &["font", "fonte", "fontFamily", "font-family"]);
@@ -337,8 +373,8 @@ impl UiNode {
         let on_double_click = Self::get_attr(&node, &["onDoubleClick", "on_double_click", "on-double-click", "aoClicarDuplo"]);
         let cursor = Self::get_attr(&node, &["cursor", "cursor_", "cursorIcon"]);
         let text_color = Self::get_attr(&node, &["textColor", "text_color", "text-color", "cor_texto"]);
-        let max_width = Self::get_attr_f32(&node, &["maxWidth", "max_width", "max-width", "largura_max"]);
-        let max_height = Self::get_attr_f32(&node, &["maxHeight", "max_height", "max-height", "altura_max"]);
+        let max_width = Self::get_attr_num(&node, &["maxWidth", "max_width", "max-width", "largura_max"], NumAttr::MaxWidth, &mut numeric_templates);
+        let max_height = Self::get_attr_num(&node, &["maxHeight", "max_height", "max-height", "altura_max"], NumAttr::MaxHeight, &mut numeric_templates);
         let hidden = Self::get_attr(&node, &["hidden", "oculto"])
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1");
         let disabled = Self::get_attr(&node, &["disabled", "desabilitado"])
@@ -362,7 +398,7 @@ impl UiNode {
             "Row" | "row" => NodeType::Row,
             "Text" | "text" => {
                 let content = Self::get_attr(&node, &["content", "conteudo", "text", "texto"]).unwrap_or_default();
-                let size = Self::get_attr_f32(&node, &["size", "tamanho"]);
+                let size = Self::get_attr_num(&node, &["size", "tamanho"], NumAttr::Size, &mut numeric_templates);
                 let bold = Self::get_attr_bool(&node, &["bold", "negrito"]);
                 let color = Self::get_attr(&node, &["color", "cor"]);
                 NodeType::Text { content, size, bold, color }
@@ -528,6 +564,7 @@ impl UiNode {
         Some(Self {
             kind,
             children,
+            numeric_templates,
             width,
             height,
             padding,
@@ -624,6 +661,7 @@ pub(crate) fn empty_node(kind: NodeType, children: Vec<UiNode>) -> UiNode {
     UiNode {
         kind,
         children,
+        numeric_templates: Vec::new(),
         width: None,
         height: None,
         padding: None,
