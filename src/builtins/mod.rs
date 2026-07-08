@@ -94,4 +94,3 @@ use crate::builtins::badge::Badge;
 pub fn builtin_components() -> Vec<Box<dyn Component>> {
     vec![Box::new(Badge)]
 }
-
