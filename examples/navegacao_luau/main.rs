@@ -7,16 +7,14 @@
 //!
 //! Rode com: `cargo run --example navegacao_luau`
 
-use glacier_ui::{EngineMessage, GlacierUI};
+use glacier_ui::{EngineMessage, GlacierUI, GlacierApp};
 use iced::{widget::text, Color, Element, Subscription, Task};
 use std::time::Duration;
 
-struct App {
-    motor: GlacierUI,
-}
-
-impl App {
-    fn new() -> (Self, Task<EngineMessage>) {
+struct App { motor: GlacierUI }
+impl GlacierApp for App {
+    type Message = EngineMessage;
+    fn init() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
         if let Err(e) = motor
             .register_component("login_luau", "examples/navegacao_luau/login.xml") {
@@ -51,8 +49,7 @@ impl App {
 }
 
 fn main() -> iced::Result {
-    iced::application(App::new, App::update, App::view)
-        .subscription(App::subscription)
+    App::bootstrap()
         .title("Glacier - navegação via script Lua")
         .run()
 }
