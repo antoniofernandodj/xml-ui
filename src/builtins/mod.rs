@@ -80,8 +80,10 @@
 //! Escreva o `impl Component` neste arquivo e inclua-o em [`builtin_components`]
 //! — é o **único** ponto que o motor lê; nada mais precisa mudar. Guia completo,
 //! com checklist e armadilhas, em `BUILTINS.md`.
+mod badge;
 
-use crate::component::{Component, Context, Template};
+use crate::component::Component;
+use crate::builtins::badge::Badge;
 
 /// Todos os componentes embutidos, na ordem em que o motor os registra.
 ///
@@ -93,46 +95,3 @@ pub fn builtin_components() -> Vec<Box<dyn Component>> {
     vec![Box::new(Badge)]
 }
 
-/// Uma "pílula" de rótulo — texto curto sobre um fundo arredondado, o clássico
-/// selo de status/contagem ("Novo", "3", "Beta"). Puramente apresentacional.
-///
-/// Props (todas opcionais; o default vem do próprio template via `{prop|def}`):
-/// - `badge_text`  — o rótulo. Default: `Badge`.
-/// - `badge_bg`    — cor de fundo. Default: `#89B4FA`.
-/// - `badge_fg`    — cor do texto. Default: `#11111B`.
-/// - `badge_size`  — tamanho do texto (numérico, templado). Default: `13`.
-///
-/// ```xml
-/// <Badge badge_text="Novo" badge_bg="#A6E3A1" badge_size="15" />
-/// ```
-struct Badge;
-
-impl Component for Badge {
-    fn name(&self) -> &str {
-        "Badge"
-    }
-
-    fn template(&self) -> Template {
-        // Defaults inline via `{prop|default}` — sem semear o contexto global.
-        // `size` é numérico e ainda assim aceita `{prop}` (resolvido no eval).
-        Template::Inline(
-            r#"<Container
-                    background="{badge_bg|#89B4FA}"
-                    padding="4 10"
-                    border_radius="12"
-                >
-                    <Text
-                        content="{badge_text|Badge}"
-                        color="{badge_fg|#11111B}"
-                        size="{badge_size|13}"
-                        bold="true"
-                    />
-                </Container>"#
-                .to_string(),
-        )
-    }
-
-    fn update(&mut self, _action: &str, _value: Option<&str>, _ctx: &mut Context) {
-        // Apresentacional: sem estado, sem comportamento, sem `init`.
-    }
-}
