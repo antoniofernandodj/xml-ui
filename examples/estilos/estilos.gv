@@ -4,26 +4,24 @@
 <!-- Stylesheet COM ESCOPO: as classes .btn* só valem dentro deste componente. -->
 <link rel="stylesheet" href="examples/estilos/estilos.gss" />
 
-<Container class="card">
-    <Column class="stack">
+<container class="card">
+    <column class="stack">
         <!-- `id` casa `#hero { }` no app.gss: id > classe, então a cor do
              `#hero` vence a de `.title` (mas ainda perde para inline). -->
-        <Text id="hero" class="title" content="Estilos via .gss" />
+        <text id="hero" class="title">Estilos via .gss</text>
 
         <!-- A classe define size/color; nada inline aqui. -->
-        <Text class="subtitle" content="Contador: {valor}" />
+        <text class="subtitle">Contador: {valor}</text>
 
-        <Row class="actions">
+        <row class="actions">
             <!-- `btn` (escopada) dá padding + cor base; `btn-danger` sobrescreve a cor. -->
-            <Button class="btn btn-danger" text="-" on_click="decrementar" />
-            <Button class="btn btn-success" text="+" on_click="incrementar" />
-        </Row>
+            <button class="btn btn-danger" text="-" on_click="decrementar" />
+            <button class="btn btn-success" text="+" on_click="incrementar" />
+        </row>
 
         <!-- Atributo inline vence a classe: cor explícita ganha de `subtitle`. -->
-        <Text
-            class="subtitle"
-            content="(edite examples/estilos/app.gss e veja o hot-reload)"
-            color="#6C7086"
-        />
-    </Column>
-</Container>
+        <text class="subtitle" color="#6C7086">
+            (edite examples/estilos/app.gss e veja o hot-reload)
+        </text>
+    </column>
+</container>
