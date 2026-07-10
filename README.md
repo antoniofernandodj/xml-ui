@@ -730,9 +730,25 @@ da markup e os agrupa em **classes**. Aplique com `class="..."`:
 
 **Precedência (igual à do CSS):**
 
-1. um **atributo inline** no nó sempre vence a classe;
-2. classes aplicam da **esquerda para a direita** (`class="a b"` → `b` sobrepõe `a`);
-3. estilos **globais** primeiro, depois os **com escopo** do componente.
+1. um **atributo inline** no nó sempre vence tudo;
+2. um seletor de **id** (`#nome`) vence a classe (especificidade maior);
+3. classes aplicam da **esquerda para a direita** (`class="a b"` → `b` sobrepõe `a`);
+4. estilos **globais** primeiro, depois os **com escopo** do componente.
+
+**Seletor de id.** Além de `.classe`, um bloco `#nome { }` casa o atributo
+`id="nome"` do nó e é aplicado **por cima** das classes (mas ainda por baixo do
+inline). Bom para estilizar *um* elemento sem inventar uma classe descartável.
+Aceita pseudo-estados (`#salvar:hover { }`) e vale dentro de `@media`. A
+unicidade não é exigida — vários nós podem compartilhar o mesmo `id`.
+
+```gss
+.title  { color: #CDD6F4; }
+#hero   { color: #F38BA8; }   /* vence a .title onde id="hero" */
+```
+
+```xml
+<Text id="hero" class="title" content="Olá" />
+```
 
 **Propriedades reconhecidas:** `width`/`w`, `height`/`h`, `padding`, `spacing`,
 `align-x`/`align-y`, `background`/`bg`, `border-radius`, `border-width`,

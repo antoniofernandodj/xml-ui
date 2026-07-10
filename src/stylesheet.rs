@@ -223,6 +223,11 @@ pub struct MediaQuery {
     /// `.classe:estado { }` declarados dentro deste bloco `@media` (ver
     /// [`StyleSheet::states`] — mesma forma, com escopo de viewport).
     pub states: HashMap<String, HashMap<PseudoState, StyleRule>>,
+    /// `#id { }` declarados dentro deste `@media` (ver [`StyleSheet::ids`]).
+    pub ids: HashMap<String, StyleRule>,
+    /// `#id:estado { }` declarados dentro deste `@media` (ver
+    /// [`StyleSheet::id_states`]).
+    pub id_states: HashMap<String, HashMap<PseudoState, StyleRule>>,
 }
 
 /// A parsed `.gss` document: a map from class name (without the leading `.`)
@@ -240,6 +245,14 @@ pub struct StyleSheet {
     /// classe e depois por estado. Resolvidos separadamente da base via
     /// [`resolve_state_classes`] — nunca entram em `rules`.
     pub states: HashMap<String, HashMap<PseudoState, StyleRule>>,
+    /// Regras de seletor de **id** (`#nome { }`), por id (sem o `#`). Mesma
+    /// mecânica de `rules`, mas casadas pelo atributo `id` do nó em vez da
+    /// `class`, e aplicadas com **especificidade maior** (por cima das classes,
+    /// por baixo dos atributos inline) — ver [`resolve_classes`].
+    pub ids: HashMap<String, StyleRule>,
+    /// `#nome:estado { }` — pseudo-estados de seletor de id (espelho de
+    /// [`StyleSheet::states`] para ids).
+    pub id_states: HashMap<String, HashMap<PseudoState, StyleRule>>,
 }
 
 impl StyleSheet {
@@ -250,19 +263,29 @@ impl StyleSheet {
 }
 
 /// Merges the named classes (a whitespace-separated `class="a b c"` string)
-/// across the given stylesheets into a single [`StyleRule`].
+/// plus the node's optional `id` across the given stylesheets into a single
+/// [`StyleRule`].
 ///
 /// Classes are applied left-to-right (later classes override earlier ones).
 /// For a given class name, later stylesheets in the slice take priority, so
 /// callers can layer files by ascending priority (e.g. global sheets first,
-/// then a component's own scoped sheets).
+/// then a component's own scoped sheets). The `#id` rule (if any) is applied
+/// on top of the classes — a higher specificity tier — but still below the
+/// node's inline attributes (applied by the caller in `eval.rs`).
 pub fn resolve_classes(
     classes: &str,
+    id: Option<&str>,
     sheets: &[&StyleSheet],
     viewport: Option<(f32, f32)>,
 ) -> StyleRule {
     let mut merged = StyleRule::default();
-    // Passo 1 — regras base.
+    // Ordem por **especificidade** (baixa → alta), e dentro de cada tier a
+    // regra base primeiro e o overlay de `@media` por cima: assim classe vence
+    // tag (quando existir), id vence classe, e o inline (aplicado no eval, por
+    // cima de tudo) vence o id — como no CSS. Um `#id` fora de `@media` ainda
+    // vence uma `.classe` dentro de `@media` (tier mais alto ganha).
+
+    // Tier 1 — classes (base, depois `@media`).
     for name in classes.split_whitespace() {
         for sheet in sheets {
             if let Some(rule) = sheet.rules.get(name) {
@@ -270,14 +293,32 @@ pub fn resolve_classes(
             }
         }
     }
-    // Passo 2 — regras de `@media` cuja condição casa com o viewport, POR CIMA
-    // da base (media sempre vence a base, independente da ordem das classes).
     if let Some((w, h)) = viewport {
         for name in classes.split_whitespace() {
             for sheet in sheets {
                 for mq in &sheet.media {
                     if mq.condition.matches(w, h) {
                         if let Some(rule) = mq.rules.get(name) {
+                            merged.merge_from(rule);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Tier 2 — id (base, depois `@media`), POR CIMA das classes.
+    if let Some(id) = id {
+        for sheet in sheets {
+            if let Some(rule) = sheet.ids.get(id) {
+                merged.merge_from(rule);
+            }
+        }
+        if let Some((w, h)) = viewport {
+            for sheet in sheets {
+                for mq in &sheet.media {
+                    if mq.condition.matches(w, h) {
+                        if let Some(rule) = mq.ids.get(id) {
                             merged.merge_from(rule);
                         }
                     }
@@ -301,16 +342,19 @@ pub fn resolve_classes(
     merged
 }
 
-/// Mesma lógica de [`resolve_classes`] (classes → sheets → `@media` → `var()`),
-/// mas para os blocos `.classe:estado { }`: devolve os 4 overlays possíveis,
-/// cada um vazio (`StyleRule::default()`) quando nenhuma classe da lista
-/// declara aquele estado em nenhum sheet ativo.
+/// Mesma lógica de [`resolve_classes`] (classes → id → sheets → `@media` →
+/// `var()`), mas para os blocos `.classe:estado { }` e `#id:estado { }`:
+/// devolve os 4 overlays possíveis, cada um vazio (`StyleRule::default()`)
+/// quando nem classe nem id da lista declara aquele estado em nenhum sheet
+/// ativo. O `#id:estado` sobrepõe o `.classe:estado`.
 pub fn resolve_state_classes(
     classes: &str,
+    id: Option<&str>,
     sheets: &[&StyleSheet],
     viewport: Option<(f32, f32)>,
 ) -> StateStyles {
     let mut out = StateStyles::default();
+    // Tier 1 — classes (base, depois `@media`).
     for name in classes.split_whitespace() {
         for sheet in sheets {
             if let Some(by_state) = sheet.states.get(name) {
@@ -326,6 +370,29 @@ pub fn resolve_state_classes(
                 for mq in &sheet.media {
                     if mq.condition.matches(w, h) {
                         if let Some(by_state) = mq.states.get(name) {
+                            for (state, rule) in by_state {
+                                out.get_mut(*state).merge_from(rule);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Tier 2 — id (base, depois `@media`), POR CIMA das classes.
+    if let Some(id) = id {
+        for sheet in sheets {
+            if let Some(by_state) = sheet.id_states.get(id) {
+                for (state, rule) in by_state {
+                    out.get_mut(*state).merge_from(rule);
+                }
+            }
+        }
+        if let Some((w, h)) = viewport {
+            for sheet in sheets {
+                for mq in &sheet.media {
+                    if mq.condition.matches(w, h) {
+                        if let Some(by_state) = mq.id_states.get(id) {
                             for (state, rule) in by_state {
                                 out.get_mut(*state).merge_from(rule);
                             }
@@ -410,6 +477,8 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
     let mut variables: HashMap<String, String> = HashMap::new();
     let mut media: Vec<MediaQuery> = Vec::new();
     let mut states: HashMap<String, HashMap<PseudoState, StyleRule>> = HashMap::new();
+    let mut ids: HashMap<String, StyleRule> = HashMap::new();
+    let mut id_states: HashMap<String, HashMap<PseudoState, StyleRule>> = HashMap::new();
     let mut rest = cleaned.as_str();
     while let Some(open) = rest.find('{') {
         let selector = rest[..open].trim();
@@ -424,7 +493,13 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
             let (inner, remainder) = split_balanced_block(after_open)?;
             let condition = parse_media_condition(selector)?;
             let inner_sheet = parse_gss(inner)?;
-            media.push(MediaQuery { condition, rules: inner_sheet.rules, states: inner_sheet.states });
+            media.push(MediaQuery {
+                condition,
+                rules: inner_sheet.rules,
+                states: inner_sheet.states,
+                ids: inner_sheet.ids,
+                id_states: inner_sheet.id_states,
+            });
             rest = remainder;
             continue;
         }
@@ -442,9 +517,39 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
             continue;
         }
 
+        // `#nome { }` / `#nome:estado { }` — seletor de id. Guardado à parte em
+        // `ids`/`id_states` (nunca em `rules`/`states`), casado depois pelo
+        // atributo `id` do nó. Mesma mecânica de estado das classes.
+        if let Some(raw) = selector.strip_prefix('#') {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                return Err("Empty id selector '#'".to_string());
+            }
+            if let Some((name, state_str)) = raw.split_once(':') {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(format!("Empty id name in pseudo-state selector '#{}'", raw));
+                }
+                let state = PseudoState::parse(state_str.trim()).ok_or_else(|| {
+                    format!("Unsupported pseudo-state ':{}' in selector '#{}'", state_str.trim(), raw)
+                })?;
+                let rule = parse_rule_body(body, raw)?;
+                id_states
+                    .entry(name.to_string())
+                    .or_default()
+                    .entry(state)
+                    .or_default()
+                    .merge_from(&rule);
+                continue;
+            }
+            let rule = parse_rule_body(body, raw)?;
+            ids.entry(raw.to_string()).or_default().merge_from(&rule);
+            continue;
+        }
+
         if !selector.starts_with('.') {
             return Err(format!(
-                "Selector '{}' must start with '.' (only class selectors and ':root' are supported)",
+                "Selector '{}' must start with '.' or '#' (only class, id and ':root' selectors are supported)",
                 selector
             ));
         }
@@ -487,7 +592,7 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
         return Err(format!("Expected '{{' after selector '{}'", rest.trim()));
     }
 
-    Ok(StyleSheet { rules, variables, media, states })
+    Ok(StyleSheet { rules, variables, media, states, ids, id_states })
 }
 
 /// Dado o texto logo APÓS o `{` de um bloco, devolve `(interior, resto)` onde
@@ -696,7 +801,7 @@ mod tests {
     fn classes_merge_left_to_right_then_files() {
         let base = parse_gss(".a { padding: 4; color: #111; }").unwrap();
         let over = parse_gss(".b { color: #222; } .a { padding: 8; }").unwrap();
-        let merged = resolve_classes("a b", &[&base, &over], None);
+        let merged = resolve_classes("a b", None, &[&base, &over], None);
         // `.a` padding is overridden by the later sheet; `.b` color wins over `.a`.
         assert_eq!(merged.padding.as_deref(), Some("8"));
         assert_eq!(merged.color.as_deref(), Some("#222"));
@@ -745,7 +850,7 @@ mod tests {
         .unwrap();
         assert_eq!(sheet.variables["--bg"].as_str(), "#0D1117");
         // A substituição acontece na resolução (resolve_classes), não no parse.
-        let r = resolve_classes("card", &[&sheet], None);
+        let r = resolve_classes("card", None, &[&sheet], None);
         assert_eq!(r.background.as_deref(), Some("#0D1117"));
         assert_eq!(r.color.as_deref(), Some("#58A6FF"));
     }
@@ -753,7 +858,7 @@ mod tests {
     #[test]
     fn var_fallback_and_undefined() {
         let sheet = parse_gss(".x { color: var(--missing, #FF0000); background: var(--nope); }").unwrap();
-        let r = resolve_classes("x", &[&sheet], None);
+        let r = resolve_classes("x", None, &[&sheet], None);
         assert_eq!(r.color.as_deref(), Some("#FF0000")); // usa o fallback
         assert_eq!(r.background.as_deref(), Some("")); // sem var nem fallback → vazio
     }
@@ -763,7 +868,7 @@ mod tests {
         // Paleta declarada num sheet (global), usada por regra de outro (escopo).
         let global = parse_gss(":root { --ok: #3FB950; }").unwrap();
         let scoped = parse_gss(".state { color: var(--ok); }").unwrap();
-        let r = resolve_classes("state", &[&global, &scoped], None);
+        let r = resolve_classes("state", None, &[&global, &scoped], None);
         assert_eq!(r.color.as_deref(), Some("#3FB950"));
     }
 
@@ -773,7 +878,7 @@ mod tests {
             ":root { --a: #000000; --b: #FFFFFF; } .g { gradient: var(--a) var(--b); }",
         )
         .unwrap();
-        let r = resolve_classes("g", &[&sheet], None);
+        let r = resolve_classes("g", None, &[&sheet], None);
         assert_eq!(r.gradient.as_deref(), Some("#000000 #FFFFFF"));
     }
 
@@ -785,13 +890,13 @@ mod tests {
         .unwrap();
         assert_eq!(sheet.media.len(), 1);
         // Largo (1000 > 800): media inativa → base.
-        let wide = resolve_classes("panel", &[&sheet], Some((1000.0, 700.0)));
+        let wide = resolve_classes("panel", None, &[&sheet], Some((1000.0, 700.0)));
         assert_eq!(wide.width.as_deref(), Some("640"));
         // Estreito (700 <= 800): media ativa → sobrescreve.
-        let narrow = resolve_classes("panel", &[&sheet], Some((700.0, 700.0)));
+        let narrow = resolve_classes("panel", None, &[&sheet], Some((700.0, 700.0)));
         assert_eq!(narrow.width.as_deref(), Some("fill"));
         // Sem viewport: media nunca ativa.
-        let none = resolve_classes("panel", &[&sheet], None);
+        let none = resolve_classes("panel", None, &[&sheet], None);
         assert_eq!(none.width.as_deref(), Some("640"));
     }
 
@@ -814,9 +919,9 @@ mod tests {
             "@media (max-width: 600) { .search { hidden: true; } }",
         )
         .unwrap();
-        let wide = resolve_classes("search", &[&sheet], Some((1000.0, 700.0)));
+        let wide = resolve_classes("search", None, &[&sheet], Some((1000.0, 700.0)));
         assert_eq!(wide.hidden, None); // visível (nada aplicado)
-        let narrow = resolve_classes("search", &[&sheet], Some((500.0, 700.0)));
+        let narrow = resolve_classes("search", None, &[&sheet], Some((500.0, 700.0)));
         assert_eq!(narrow.hidden, Some(true)); // escondido
     }
 
@@ -843,7 +948,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sheet.rules["btn"].background.as_deref(), Some("#111111"));
-        let states = resolve_state_classes("btn", &[&sheet], None);
+        let states = resolve_state_classes("btn", None, &[&sheet], None);
         assert_eq!(states.hover.background.as_deref(), Some("#222222"));
         assert_eq!(states.disabled.background.as_deref(), Some("#333333"));
         assert_eq!(states.disabled.text_color.as_deref(), Some("#999999"));
@@ -862,7 +967,7 @@ mod tests {
             ".btn:hover { background: #222222; } .btn:hover { text-color: #ffffff; }",
         )
         .unwrap();
-        let states = resolve_state_classes("btn", &[&sheet], None);
+        let states = resolve_state_classes("btn", None, &[&sheet], None);
         assert_eq!(states.hover.background.as_deref(), Some("#222222"));
         assert_eq!(states.hover.text_color.as_deref(), Some("#ffffff"));
     }
@@ -873,7 +978,7 @@ mod tests {
             ":root { --hoverbg: #abcdef; } .btn:hover { background: var(--hoverbg); }",
         )
         .unwrap();
-        let states = resolve_state_classes("btn", &[&sheet], None);
+        let states = resolve_state_classes("btn", None, &[&sheet], None);
         assert_eq!(states.hover.background.as_deref(), Some("#abcdef"));
     }
 
@@ -883,11 +988,11 @@ mod tests {
             "@media (max-width: 500) { .btn:hover { background: #000000; } }",
         )
         .unwrap();
-        let narrow = resolve_state_classes("btn", &[&sheet], Some((400.0, 400.0)));
+        let narrow = resolve_state_classes("btn", None, &[&sheet], Some((400.0, 400.0)));
         assert_eq!(narrow.hover.background.as_deref(), Some("#000000"));
-        let wide = resolve_state_classes("btn", &[&sheet], Some((900.0, 400.0)));
+        let wide = resolve_state_classes("btn", None, &[&sheet], Some((900.0, 400.0)));
         assert_eq!(wide.hover.background, None);
-        let no_viewport = resolve_state_classes("btn", &[&sheet], None);
+        let no_viewport = resolve_state_classes("btn", None, &[&sheet], None);
         assert_eq!(no_viewport.hover.background, None);
     }
 
@@ -903,9 +1008,97 @@ mod tests {
         .unwrap();
         assert_eq!(sheet.rules.len(), 2); // .a e .c fora do media
         assert_eq!(sheet.media[0].rules.len(), 2); // .a e .b dentro
-        let narrow = resolve_classes("a", &[&sheet], Some((400.0, 400.0)));
+        let narrow = resolve_classes("a", None, &[&sheet], Some((400.0, 400.0)));
         assert_eq!(narrow.color.as_deref(), Some("#222"));
-        let wide = resolve_classes("a", &[&sheet], Some((900.0, 400.0)));
+        let wide = resolve_classes("a", None, &[&sheet], Some((900.0, 400.0)));
         assert_eq!(wide.color.as_deref(), Some("#111"));
+    }
+
+    #[test]
+    fn parses_id_selector() {
+        let sheet = parse_gss("#save { background: #2E3440; padding: 8; }").unwrap();
+        assert!(sheet.rules.is_empty()); // id não entra em `rules`
+        let save = sheet.ids.get("save").unwrap();
+        assert_eq!(save.background.as_deref(), Some("#2E3440"));
+        assert_eq!(save.padding.as_deref(), Some("8"));
+    }
+
+    #[test]
+    fn empty_id_selector_is_an_error() {
+        assert!(parse_gss("# { padding: 1; }").is_err());
+    }
+
+    #[test]
+    fn id_resolves_when_matched_and_not_otherwise() {
+        let sheet = parse_gss("#save { color: #111111; }").unwrap();
+        let hit = resolve_classes("", Some("save"), &[&sheet], None);
+        assert_eq!(hit.color.as_deref(), Some("#111111"));
+        // id diferente não casa; sem id também não.
+        assert_eq!(resolve_classes("", Some("other"), &[&sheet], None).color, None);
+        assert_eq!(resolve_classes("", None, &[&sheet], None).color, None);
+    }
+
+    #[test]
+    fn id_wins_over_class_specificity() {
+        // id é tier mais alto: sobrepõe a classe, inclusive uma classe dentro de
+        // `@media` (id fora de media ainda vence).
+        let sheet = parse_gss(
+            ".panel { color: #aaaaaa; background: #000000; } \
+             #hero { color: #ffffff; } \
+             @media (max-width: 800) { .panel { color: #cccccc; } }",
+        )
+        .unwrap();
+        let r = resolve_classes("panel", Some("hero"), &[&sheet], Some((400.0, 400.0)));
+        assert_eq!(r.color.as_deref(), Some("#ffffff")); // id vence a classe (e a classe em @media)
+        assert_eq!(r.background.as_deref(), Some("#000000")); // campo só na classe, preservado
+    }
+
+    #[test]
+    fn id_duplicate_merges_and_is_cross_sheet() {
+        let global = parse_gss(":root { --ok: #3FB950; }").unwrap();
+        let a = parse_gss("#x { padding: 4; color: var(--ok); }").unwrap();
+        let b = parse_gss("#x { color: #222222; }").unwrap();
+        let r = resolve_classes("", Some("x"), &[&global, &a, &b], None);
+        assert_eq!(r.padding.as_deref(), Some("4")); // preservado do 1º sheet
+        assert_eq!(r.color.as_deref(), Some("#222222")); // sheet posterior vence
+    }
+
+    #[test]
+    fn id_pseudo_states_resolve() {
+        let sheet = parse_gss(
+            "#save { background: #111111; } \
+             #save:hover { background: #222222; } \
+             #save:disabled { background: #333333; }",
+        )
+        .unwrap();
+        assert_eq!(sheet.ids["save"].background.as_deref(), Some("#111111"));
+        let states = resolve_state_classes("", Some("save"), &[&sheet], None);
+        assert_eq!(states.hover.background.as_deref(), Some("#222222"));
+        assert_eq!(states.disabled.background.as_deref(), Some("#333333"));
+        assert_eq!(states.focus.background, None);
+    }
+
+    #[test]
+    fn id_state_overrides_class_state() {
+        // `#id:hover` (tier alto) vence `.classe:hover` (tier baixo).
+        let sheet = parse_gss(
+            ".btn:hover { background: #aaaaaa; } #go:hover { background: #ffffff; }",
+        )
+        .unwrap();
+        let states = resolve_state_classes("btn", Some("go"), &[&sheet], None);
+        assert_eq!(states.hover.background.as_deref(), Some("#ffffff"));
+    }
+
+    #[test]
+    fn id_inside_media_overrides_when_matched() {
+        let sheet = parse_gss(
+            "#panel { width: 640; } @media (max-width: 800) { #panel { width: fill; } }",
+        )
+        .unwrap();
+        assert_eq!(sheet.media[0].ids.len(), 1);
+        let wide = resolve_classes("", Some("panel"), &[&sheet], Some((1000.0, 700.0)));
+        assert_eq!(wide.width.as_deref(), Some("640"));
+        let narrow = resolve_classes("", Some("panel"), &[&sheet], Some((700.0, 700.0)));
+        assert_eq!(narrow.width.as_deref(), Some("fill"));
     }
 }

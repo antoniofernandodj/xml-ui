@@ -208,6 +208,11 @@ pub struct UiNode {
     /// Space-separated stylesheet classes (`class="card centered"`), resolved
     /// against the loaded `.gss` stylesheets during evaluation.
     pub class: Option<String>,
+    /// Element id (`id="save"`), matched against `#id { }` GSS selectors during
+    /// evaluation. Higher specificity than `class` (applied on top of it, still
+    /// under inline attributes). Uniqueness isn't enforced — several nodes may
+    /// share an id and all pick up the same `#id` rule.
+    pub id: Option<String>,
     /// Font family hint for text-bearing nodes: `mono`/`monospace` selects the
     /// monospaced font; anything else (or `None`) uses the default.
     pub font: Option<String>,
@@ -409,6 +414,7 @@ impl UiNode {
         let border_width = Self::get_attr_num(&node, &["borderWidth", "border_width", "border-width", "largura_borda"], NumAttr::BorderWidth, &mut numeric_templates);
         let border_color = Self::get_attr(&node, &["borderColor", "border_color", "border-color", "cor_borda"]);
         let class = Self::get_attr(&node, &["class", "classe"]);
+        let id = Self::get_attr(&node, &["id", "identificador"]);
         let font = Self::get_attr(&node, &["font", "fonte", "fontFamily", "font-family"]);
         let gradient = Self::get_attr(&node, &["gradient", "gradiente"]);
         let text_align = Self::get_attr(&node, &["textAlign", "text_align", "text-align", "alinhamento_texto"]);
@@ -643,6 +649,7 @@ impl UiNode {
             border_width,
             border_color,
             class,
+            id,
             font,
             gradient,
             text_align,
@@ -819,6 +826,7 @@ pub(crate) fn empty_node(kind: NodeType, children: Vec<UiNode>) -> UiNode {
         border_width: None,
         border_color: None,
         class: None,
+        id: None,
         font: None,
         gradient: None,
         text_align: None,

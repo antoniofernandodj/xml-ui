@@ -4,10 +4,15 @@
     "body": [".${1:name} {", "\t$0", "}"],
     "description": "A GSS class rule"
   },
+  "Id rule": {
+    "prefix": "id",
+    "body": ["#${1:name} {", "\t$0", "}"],
+    "description": "A GSS id rule (higher specificity than a class)"
+  },
   "Pseudo-state rule": {
     "prefix": "hover",
-    "body": [".${1:name}:${2|hover,focus,active,pressed,disabled|} {", "\t$0", "}"],
-    "description": "A GSS pseudo-state rule"
+    "body": ["${1|.,#|}${2:name}:${3|hover,focus,active,pressed,disabled|} {", "\t$0", "}"],
+    "description": "A GSS pseudo-state rule (class or id)"
   },
   "Root variables": {
     "prefix": "root",

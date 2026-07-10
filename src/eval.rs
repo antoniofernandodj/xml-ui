@@ -554,16 +554,21 @@ fn eval_owned(
     // apply first, then the current component's scoped sheets. Pseudo-state
     // overlays (`.classe:hover { }` etc.) are resolved alongside the base rule
     // from the very same class list/sheets/viewport, so they stay consistent.
-    let (style, state_styles): (StyleRule, StateStyles) = match &node.class {
-        Some(class) => {
+    // Resolved when the node carries a `class` and/or an `id`; both are
+    // interpolated (`id="item-{i}"` works) and matched against the sheets.
+    let (style, state_styles): (StyleRule, StateStyles) =
+        if node.class.is_some() || node.id.is_some() {
             let active = styles.active(scope);
-            let processed = process_template(class, context);
-            let base = resolve_classes(&processed, &active, styles.viewport);
-            let states = resolve_state_classes(&processed, &active, styles.viewport);
+            let processed = node.class.as_deref()
+                .map(|c| process_template(c, context))
+                .unwrap_or_default();
+            let id = node.id.as_deref().map(|i| process_template(i, context));
+            let base = resolve_classes(&processed, id.as_deref(), &active, styles.viewport);
+            let states = resolve_state_classes(&processed, id.as_deref(), &active, styles.viewport);
             (base, states)
-        }
-        None => (StyleRule::default(), StateStyles::default()),
-    };
+        } else {
+            (StyleRule::default(), StateStyles::default())
+        };
 
     // Resolve a numeric attribute whose XML value was a `{...}` template (see
     // `NumAttr`): interpolate against the context and parse to f32. `None` if
@@ -757,8 +762,10 @@ fn eval_owned(
         border_radius: border_radius_eval,
         border_width: border_width_eval,
         border_color: border_color_eval,
-        // Classes are fully resolved into the fields above; nothing to carry on.
+        // Classes and id are fully resolved into the fields above; nothing to
+        // carry on.
         class: None,
+        id: None,
         font: font_eval,
         gradient: gradient_eval,
         text_align: text_align_eval,

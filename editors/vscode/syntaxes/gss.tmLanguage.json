@@ -88,7 +88,7 @@
       "patterns": [
         {
           "name": "meta.selector.gss",
-          "begin": "(?=\\.)",
+          "begin": "(?=[.#])",
           "end": "(?=\\{|\\})",
           "patterns": [
             { "include": "#comments" },
@@ -97,6 +97,13 @@
               "captures": {
                 "1": { "name": "punctuation.definition.entity.class.gss" },
                 "2": { "name": "entity.other.attribute-name.class.gss" }
+              }
+            },
+            {
+              "match": "(#)([A-Za-z_][A-Za-z0-9_-]*)",
+              "captures": {
+                "1": { "name": "punctuation.definition.entity.id.gss" },
+                "2": { "name": "entity.other.attribute-name.id.gss" }
               }
             },
             {

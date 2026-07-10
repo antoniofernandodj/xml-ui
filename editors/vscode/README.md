@@ -6,8 +6,9 @@ format used by `glacier-ui`.
 ## Features
 
 - **Syntax highlighting** tuned to the GSS grammar:
-  - Class selectors (`.card`) and pseudo-states (`:hover`, `:focus`,
-    `:active`, `:pressed`, `:disabled`) — unknown pseudo-states are flagged.
+  - Class selectors (`.card`), id selectors (`#save`, higher specificity than
+    a class), and pseudo-states (`:hover`, `:focus`, `:active`, `:pressed`,
+    `:disabled`) on either — unknown pseudo-states are flagged.
   - `:root { --token: value; }` design tokens and `var(--token, fallback)`
     references.
   - `@media (min-width: 600) and (max-width: 900) { … }` responsive blocks.
@@ -16,7 +17,7 @@ format used by `glacier-ui`.
   - Hex colors (`#RRGGBB`/`#RRGGBBAA`), numbers with optional `px`, and value
     keywords (`fill`, `Center`, `none`, `true`, …).
   - `//` line comments and `/* … */` block comments.
-- **Snippets**: `class`, `hover`, `root`, `media`, `var`, `card`.
+- **Snippets**: `class`, `id`, `hover`, `root`, `media`, `var`, `card`.
 - **A CSS-style file icon** so `.gss` files read as stylesheets in the explorer.
 
 ## Install (local / development)

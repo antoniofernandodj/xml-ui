@@ -40,3 +40,9 @@ Edite este arquivo com o exemplo rodando: o hot-reload aplica na hora.
     size: 14;
     color: #9399B2;
 }
+
+/* Seletor de id: casa `id="hero"` no template. Especificidade maior que a
+   classe — esta cor vence a `.title`. Um `#hero:hover { }` também funcionaria. */
+#hero {
+    color: #F38BA8;
+}

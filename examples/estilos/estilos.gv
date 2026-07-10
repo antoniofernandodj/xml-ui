@@ -6,7 +6,9 @@
 
 <Container class="card">
     <Column class="stack">
-        <Text class="title" content="Estilos via .gss" />
+        <!-- `id` casa `#hero { }` no app.gss: id > classe, então a cor do
+             `#hero` vence a de `.title` (mas ainda perde para inline). -->
+        <Text id="hero" class="title" content="Estilos via .gss" />
 
         <!-- A classe define size/color; nada inline aqui. -->
         <Text class="subtitle" content="Contador: {valor}" />

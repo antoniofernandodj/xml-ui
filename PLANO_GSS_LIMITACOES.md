@@ -24,10 +24,21 @@ traz problema, benefício, custo estimado, esboço de implementação e status.
 | 8 | **`@media`** (responsivo) | Médio | Alto | 3 | ✅ feito (0.9.0) |
 | 9 | Seletores **compostos/descendentes** + especificidade + `!important` | Médio-baixo | Alto | 4 | ⬜ |
 | 10 | Propriedades extras sob demanda (opacity, shadow, borda por-lado, gradiente radial, transform) | Pontual | Médio | 4 | ⬜ |
+| 11 | Seletor de **id** (`#nome`) + `#nome:estado` | Alto | Baixo | 2 | ✅ feito |
+| 12 | Seletor de **tag** (`Button {}`, incl. minúsculo) | Baixo | Baixo-médio | 4 | ⬜ |
 
-Fora de escopo: `margin` (o iced usa `padding`+`spacing`, não há caixa de margem);
-seletor de **tag** puro (`Column {}`) — conflita com o modelo de componentes e o
-ganho é baixo; manter o modelo só-classe.
+Fora de escopo: `margin` (o iced usa `padding`+`spacing`, não há caixa de margem).
+
+> **Nota sobre seletor de tag (#12).** Revisado: **é factível** (a tag já é
+> conhecida no parse), mas o valor é baixo e há duas armadilhas — (a) o namespace
+> de tag é compartilhado entre **builtins** e **componentes do usuário**
+> (`parser.rs:594` transforma tag desconhecida em `Component`), e como componentes
+> são **inlinados antes da resolução de estilo**, `Card {}` nunca casaria (só tipos
+> builtin); (b) um `Button {}` global fura a **encapsulação** de todo componente.
+> Se for feito: só builtins, especificidade mais baixa (tag < classe < id < inline),
+> tag normalizada para minúsculo (`Button {}` == `button {}`), documentar o raio
+> de alcance. O caso desejado ("estilizar um componente pelo nome") fica com
+> **id/classe**, não com tag.
 
 ---
 
@@ -182,6 +193,28 @@ ganho limitado dado o modelo de componentes. Avaliar só se a dor aparecer.
 `gradient` **radial/cônico** (hoje só linear), `transform`/`rotate`,
 `line-height`/`letter-spacing`. Adicionar item a item quando um caso real pedir;
 cada um é um campo novo em `StyleRule` + aplicação no `widget.rs`.
+
+### 11. Seletor de id (`#nome`) + `#nome:estado`  ✅
+**Problema.** Só havia seletor de classe. Estilizar *um* elemento específico
+exigia inventar uma classe descartável, e não havia nível de especificidade
+acima da classe.
+**Fix (feito).**
+- `#nome { }` e `#nome:estado { }` parseados em `parse_gss` (novo ramo, espelho
+  do de classe), guardados em `StyleSheet.ids` / `StyleSheet.id_states` (e nos
+  mesmos mapas dentro de `MediaQuery`) — nunca em `rules`/`states`.
+- `UiNode.id: Option<String>` (attr `id`/`identificador`), interpolado no eval
+  (`id="item-{i}"` funciona) e passado a `resolve_classes`/`resolve_state_classes`,
+  que ganharam o parâmetro `id`. Resolução agora é **por tier de especificidade**:
+  classe (base→`@media`) e depois id (base→`@media`) por cima — então um `#id`
+  fora de `@media` vence uma `.classe` dentro de `@media`. Inline (no eval) vence
+  o id. Cross-sheet e `var()` como as classes.
+- `widget.rs` intacto: os overlays `#id:estado` entram no mesmo `StateStyles` que
+  os widgets já consomem.
+**Arquivos.** `stylesheet.rs` (ids/id_states + parse + resolve + 8 testes),
+`parser.rs` (`UiNode.id` + attr), `eval.rs` (resolve quando `class` OU `id`).
+Extensão VS Code (`gss.tmLanguage.json`/snippets/README) e exemplo `estilos`
+(`#hero` vence `.title`) atualizados. **Exemplo rodado sem erro** (`cargo run
+--example estilos`; render visual não conferido headless, como os demais).
 
 ---
 
