@@ -1,6 +1,4 @@
-use glacier_ui::{GlacierUI, EngineMessage, Component, Context, Template};
-use iced::{Element, Task, widget::text, Color, Subscription};
-use std::time::Duration;
+use glacier_ui::{Component, Context, GlacierDaemon, Template};
 
 /// Componente que encapsula UI (template XML) + comportamento + estado.
 struct Contador {
@@ -36,42 +34,14 @@ impl Component for Contador {
     }
 }
 
-struct AppContador {
-    motor: GlacierUI,
-}
-
-impl AppContador {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register(Box::new(Contador::new())) {
-            eprintln!("Error registering component: {}", e);
-        }
-        motor.set_initial_screen("contador");
-
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        match self.motor.render_current() {
-            Ok(elem) => elem,
-            Err(e) => text(format!("Error rendering UI: {}", e))
-                .color(Color::from_rgb(1.0, 0.0, 0.0))
-                .into(),
-        }
-    }
-
-    fn subscription(&self) -> Subscription<EngineMessage> {
-        GlacierUI::reload_subscription(Duration::from_millis(500))
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(|| AppContador::new(), AppContador::update, AppContador::view)
-        .subscription(AppContador::subscription)
+    GlacierDaemon::new()
         .title("Glacier - Contador")
+        .main(|motor| {
+            if let Err(e) = motor.register(Box::new(Contador::new())) {
+                eprintln!("Error registering component: {}", e);
+            }
+            motor.set_initial_screen("contador");
+        })
         .run()
 }

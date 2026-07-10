@@ -1,0 +1,49 @@
+<Container
+    padding="30"
+    alignX="Center"
+    alignY="Center"
+    width="fill"
+    height="fill"
+    background="#11111B"
+>
+    <Column spacing="20" alignX="Center">
+        <Text content="Detalhe (XML + Lua)" size="24" bold="true" color="#F5E0DC" />
+        <Text content="Cliques nesta janela: {n}" size="16" color="#89B4FA" />
+
+        <Button
+            text="Contar"
+            on_click="contar"
+            color="#89B4FA"
+            width="240"
+            padding="10"
+        />
+        <Button
+            text="Abrir outra (Lua)"
+            on_click="abrir_outra"
+            color="#A6E3A1"
+            width="240"
+            padding="10"
+        />
+    </Column>
+</Container>
+
+<script>
+-- Semeia o estado inicial desta janela (contador próprio, isolado das demais).
+function init()
+    ctx.n = ctx.n or "0"
+end
+
+function contar()
+    ctx.n = tostring((tonumber(ctx.n) or 0) + 1)
+end
+
+-- Caminho Lua puro: abre MAIS uma janela carregando este mesmo XML.
+function abrir_outra()
+    open_window({
+        file = "examples/janelas_glacier/detalhe.gv",
+        title = "Detalhe (Lua)",
+        width = 420,
+        height = 320,
+    })
+end
+</script>

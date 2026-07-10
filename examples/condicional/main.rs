@@ -1,6 +1,4 @@
-use glacier_ui::{GlacierUI, EngineMessage, Component, Context, Template};
-use iced::{Element, Task};
-use std::time::Duration;
+use glacier_ui::{Component, Context, GlacierDaemon, Template};
 
 /// Demonstra renderização condicional com `<if>` / `<else>`.
 /// O componente encapsula UI + comportamento: o botão alterna `logado`.
@@ -29,41 +27,14 @@ impl Component for Condicional {
     }
 }
 
-struct AppCond {
-    motor: GlacierUI,
-}
-
-impl AppCond {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register(Box::new(Condicional)) {
-            eprintln!("Erro ao registrar 'condicional': {}", e);
-        }
-        motor.set_initial_screen("condicional");
-
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        self.motor.render_current().unwrap_or_else(|e| {
-            iced::widget::text(format!("Erro ao renderizar: {}", e))
-                .color(iced::Color::from_rgb(1.0, 0.0, 0.0))
-                .into()
-        })
-    }
-
-    fn subscription(&self) -> iced::Subscription<EngineMessage> {
-        GlacierUI::reload_subscription(Duration::from_millis(500))
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(|| AppCond::new(), AppCond::update, AppCond::view)
-        .subscription(AppCond::subscription)
+    GlacierDaemon::new()
         .title("Glacier - Condicional")
+        .main(|motor| {
+            if let Err(e) = motor.register(Box::new(Condicional)) {
+                eprintln!("Erro ao registrar 'condicional': {}", e);
+            }
+            motor.set_initial_screen("condicional");
+        })
         .run()
 }

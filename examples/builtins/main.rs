@@ -4,8 +4,7 @@
 //! o registrou sozinha em `GlacierUI::new()`, então a tag fica disponível em
 //! qualquer template, como uma primitiva. Veja `src/builtins.rs`.
 
-use glacier_ui::{Component, Context, EngineMessage, GlacierUI, Template};
-use iced::{widget::text, Color, Element, Task};
+use glacier_ui::{Component, Context, GlacierDaemon, Template};
 
 struct Home;
 
@@ -36,34 +35,13 @@ impl Component for Home {
     fn update(&mut self, _action: &str, _value: Option<&str>, _ctx: &mut Context) {}
 }
 
-struct App {
-    motor: GlacierUI,
-}
-
-impl App {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-        // Só a tela. `Badge` já está disponível — não é registrado aqui.
-        motor.register(Box::new(Home)).expect("registrar 'home'");
-        motor.set_initial_screen("home");
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        self.motor.render_current().unwrap_or_else(|e| {
-            text(format!("Erro ao renderizar: {}", e))
-                .color(Color::from_rgb(1.0, 0.0, 0.0))
-                .into()
-        })
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(|| App::new(), App::update, App::view)
+    GlacierDaemon::new()
         .title("Glacier - Widgets embutidos")
+        .main(|motor| {
+            // Só a tela. `Badge` já está disponível — não é registrado aqui.
+            motor.register(Box::new(Home)).expect("registrar 'home'");
+            motor.set_initial_screen("home");
+        })
         .run()
 }

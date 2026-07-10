@@ -1,6 +1,4 @@
-use glacier_ui::{GlacierUI, EngineMessage, Component, Context, Template};
-use iced::{Element, Task};
-use std::time::Duration;
+use glacier_ui::{Component, Context, GlacierDaemon, Template};
 
 /// Demonstra navegação entre telas: cada tela é um componente registrado, e os
 /// botões declaram o destino no próprio XML via `navigateTo`/`navigateBack` — a
@@ -32,56 +30,28 @@ impl Component for Tela {
     }
 }
 
-struct AppNav {
-    motor: GlacierUI,
-}
-
-impl AppNav {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-
-        let telas: [Tela; 3] = [
-            Tela { nome: "home", template: "examples/navegacao/nav_home.gv" },
-            Tela { nome: "perfil", template: "examples/navegacao/nav_perfil.gv" },
-            Tela { nome: "config", template: "examples/navegacao/nav_config.gv" },
-        ];
-        for tela in telas {
-            let nome = tela.nome;
-            if let Err(e) = motor.register(Box::new(tela)) {
-                eprintln!("Erro ao registrar '{}': {}", nome, e);
-            }
-        }
-
-        // Estado compartilhado entre as telas (não pertence a uma tela só).
-        motor.define_data("user_name", "Clara Silva");
-        motor.define_data("user_role", "Engenheira de Software");
-
-        // Tela inicial.
-        motor.set_initial_screen("home");
-
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        self.motor.render_current().unwrap_or_else(|e| {
-            iced::widget::text(format!("Erro ao render: {}", e))
-                .color(iced::Color::from_rgb(1.0, 0.0, 0.0))
-                .into()
-        })
-    }
-
-    fn subscription(&self) -> iced::Subscription<EngineMessage> {
-        GlacierUI::reload_subscription(Duration::from_millis(500))
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(|| AppNav::new(), AppNav::update, AppNav::view)
-        .subscription(AppNav::subscription)
+    GlacierDaemon::new()
         .title("Glacier - Navegação")
+        .main(|motor| {
+            let telas: [Tela; 3] = [
+                Tela { nome: "home", template: "examples/navegacao/nav_home.gv" },
+                Tela { nome: "perfil", template: "examples/navegacao/nav_perfil.gv" },
+                Tela { nome: "config", template: "examples/navegacao/nav_config.gv" },
+            ];
+            for tela in telas {
+                let nome = tela.nome;
+                if let Err(e) = motor.register(Box::new(tela)) {
+                    eprintln!("Erro ao registrar '{}': {}", nome, e);
+                }
+            }
+
+            // Estado compartilhado entre as telas (não pertence a uma tela só).
+            motor.define_data("user_name", "Clara Silva");
+            motor.define_data("user_role", "Engenheira de Software");
+
+            // Tela inicial.
+            motor.set_initial_screen("home");
+        })
         .run()
 }

@@ -236,6 +236,81 @@ pub enum DialogAction {
     Close,
 }
 
+/// De onde vem a UI de uma janela nova pedida por [`Context::open_window`].
+///
+/// O motor de origem (que atendeu o `update`) usa isto para materializar um
+/// **novo** [`crate::GlacierUI`] independente para a janela — cada janela tem
+/// seu próprio motor, sem estado compartilhado com a de origem.
+pub enum WindowSource {
+    /// Uma instância Rust de [`Component`] já pronta, registrada como tela
+    /// inicial da nova janela. Caminho da API Rust
+    /// ([`Context::open_window_component`]).
+    Component(Box<dyn Component>),
+    /// Um arquivo de template (`.gv`/`.xml`/`.kdl`) carregado como tela inicial
+    /// da nova janela. Caminho principal da API Lua (`open_window{ file = ... }`).
+    File(String),
+    /// O **nome** de um componente já registrado no motor de origem. Resolvido
+    /// para o caminho do arquivo (via `registered_components`) na hora da
+    /// drenagem, de modo que a nova janela o carregue do zero, isolada.
+    Named(String),
+}
+
+/// Pedido de abrir uma nova janela, acumulado em [`Context`] durante o `update`
+/// e aplicado pelo motor/daemon depois — mesmo padrão de [`Nav`]/[`DialogAction`].
+///
+/// Não deriva `Clone`/`Debug` porque [`WindowSource::Component`] carrega um
+/// `Box<dyn Component>`; por isso o pedido nunca vira uma mensagem do iced —
+/// vive no motor (`pending_windows`) até o daemon consumi-lo.
+pub struct WindowSpec {
+    /// A fonte da UI da nova janela.
+    pub source: WindowSource,
+    /// Título da janela (barra de título). `None` cai num default do daemon.
+    pub title: Option<String>,
+    /// Tamanho inicial `(largura, altura)` em px lógicos. `None` usa o default.
+    pub size: Option<(f32, f32)>,
+    /// Se a janela é redimensionável. Default `true`.
+    pub resizable: bool,
+}
+
+impl WindowSpec {
+    /// Nova janela mostrando uma instância Rust de [`Component`].
+    pub fn component(comp: Box<dyn Component>) -> Self {
+        Self::from_source(WindowSource::Component(comp))
+    }
+
+    /// Nova janela carregando um arquivo de template.
+    pub fn file(path: impl Into<String>) -> Self {
+        Self::from_source(WindowSource::File(path.into()))
+    }
+
+    /// Nova janela carregando um componente já registrado, pelo nome.
+    pub fn named(name: impl Into<String>) -> Self {
+        Self::from_source(WindowSource::Named(name.into()))
+    }
+
+    fn from_source(source: WindowSource) -> Self {
+        Self { source, title: None, size: None, resizable: true }
+    }
+
+    /// Define o título da janela (encadeável).
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Define o tamanho inicial `(largura, altura)` (encadeável).
+    pub fn size(mut self, width: f32, height: f32) -> Self {
+        self.size = Some((width, height));
+        self
+    }
+
+    /// Define se a janela é redimensionável (encadeável).
+    pub fn resizable(mut self, resizable: bool) -> Self {
+        self.resizable = resizable;
+        self
+    }
+}
+
 /// Uma variável de contexto nomeada: agrupa a chave e o valor num único valor,
 /// aplicado de uma vez com [`Context::set_var`]. Útil para declarar defaults de
 /// forma legível em vez de repetir a chave string solta.
@@ -282,6 +357,9 @@ pub struct Context<'a> {
     /// Temporizadores (`after`) pedidos pela camada Lua; o motor os agenda
     /// como efeitos assíncronos após o `update`.
     pub(crate) timers: Vec<PendingTimer>,
+    /// Novas janelas pedidas via [`Context::open_window`]; o motor as drena para
+    /// `pending_windows` e o daemon as abre após o `update`.
+    pub(crate) windows: Vec<WindowSpec>,
     /// Viewport atual `(largura, altura)` em px lógicos, lido por
     /// `Context::viewport` (a camada Lua expõe isto via `viewport()`). Só o
     /// motor escreve aqui (ver [`Context::set_viewport`]); um componente lê.
@@ -303,6 +381,7 @@ impl<'a> Context<'a> {
             streams: Vec::new(),
             stream_cmds: Vec::new(),
             timers: Vec::new(),
+            windows: Vec::new(),
             viewport: (0.0, 0.0),
         }
     }
@@ -350,6 +429,24 @@ impl<'a> Context<'a> {
     /// `update`, sem despachar nenhuma ação de botão.
     pub fn close_dialog(&mut self) {
         self.dialog = Some(DialogAction::Close);
+    }
+
+    /// Pede ao motor/daemon para abrir uma **nova janela** após o `update`,
+    /// descrita por [`WindowSpec`]. A janela é atendida por um [`crate::GlacierUI`]
+    /// novo e independente (contexto/estado isolados da janela de origem).
+    ///
+    /// ```ignore
+    /// // arquivo de template numa janela de 400x300 intitulada "Detalhe"
+    /// ctx.open_window(WindowSpec::file("telas/detalhe.gv").title("Detalhe").size(400.0, 300.0));
+    /// ```
+    pub fn open_window(&mut self, spec: WindowSpec) {
+        self.windows.push(spec);
+    }
+
+    /// Atalho de [`Context::open_window`] para abrir uma janela mostrando uma
+    /// instância Rust de [`Component`] — o caminho da API Rust.
+    pub fn open_window_component(&mut self, comp: Box<dyn Component>) {
+        self.windows.push(WindowSpec::component(comp));
     }
 
     /// Pede ao motor para mostrar um toast (ver [`crate::toasts`]) após o

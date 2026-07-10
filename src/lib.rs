@@ -1,5 +1,6 @@
 pub mod app;
 pub mod builtins;
+pub mod daemon;
 pub mod parser;
 pub mod eval;
 pub mod widget;
@@ -26,7 +27,8 @@ pub use app::GlacierApp;
 pub use parser::{UiNode, NodeType};
 pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_directives, StyleContext};
 pub use widget::{render_node, EngineMessage};
-pub use component::{Component, Context, ContextVar, DialogAction, Effect, EffectOutcome, FetchResult, Nav, Template};
+pub use component::{Component, Context, ContextVar, DialogAction, Effect, EffectOutcome, FetchResult, Nav, Template, WindowSource, WindowSpec};
+pub use daemon::{DaemonMessage, GlacierDaemon};
 pub use luau::LuauComponent;
 pub use stylesheet::{StyleSheet, StyleRule};
 pub use forms::{Form, FormBuilder, FormControl, Validator};
@@ -122,7 +124,21 @@ pub struct GlacierUI {
     /// guard in [`GlacierUI::load_imports`]. A name is dropped from the set once
     /// the app overrides it.
     builtin_component_names: std::collections::HashSet<String>,
+    /// Identidade única deste motor entre todos os motores do processo (um por
+    /// janela no modelo daemon). Dobrada na [`net::StreamKey`] para que streams
+    /// de janelas distintas não colidam como o mesmo recipe do iced. Ver
+    /// [`GlacierUI::subscription`].
+    engine_id: u64,
+    /// Janelas novas pedidas por componentes deste motor (via
+    /// [`component::Context::open_window`]), já resolvidas de
+    /// [`component::WindowSource::Named`] para `File`. O daemon as consome com
+    /// [`GlacierUI::take_pending_windows`] após cada `dispatch` e as abre.
+    pending_windows: Vec<component::WindowSpec>,
 }
+
+/// Contador global que dá a cada [`GlacierUI::new`] um `engine_id` único no
+/// processo (ver [`GlacierUI::engine_id`]).
+static NEXT_ENGINE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// A [`toasts::ToastSpec`] actually in exhibition: the spec plus the
 /// engine-assigned identity and the instant it was shown, needed to dismiss
@@ -180,6 +196,8 @@ impl GlacierUI {
             active_streams: HashMap::new(),
             stream_senders: HashMap::new(),
             builtin_component_names: std::collections::HashSet::new(),
+            engine_id: NEXT_ENGINE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            pending_windows: Vec::new(),
         };
         ui.register_builtins();
         ui
@@ -776,14 +794,30 @@ impl GlacierUI {
     ) -> iced::Task<EngineMessage> {
         // Disjoint per-field borrows (`components` vs `context_data`) are
         // accepted by the borrow checker when done inline like this.
-        let (nav, effects, dialog, toasts, fetches, streams, stream_cmds, timers) = if let Some(comp) = self.components.get_mut(owner) {
+        let (nav, effects, dialog, toasts, fetches, streams, stream_cmds, timers, windows) = if let Some(comp) = self.components.get_mut(owner) {
             let mut ctx = component::Context::new(&mut self.context_data);
             ctx.set_viewport(self.viewport);
             run(comp.as_mut(), &mut ctx);
-            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts, ctx.fetches, ctx.streams, ctx.stream_cmds, ctx.timers)
+            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts, ctx.fetches, ctx.streams, ctx.stream_cmds, ctx.timers, ctx.windows)
         } else {
             return iced::Task::none();
         };
+
+        // Novas janelas pedidas pelo componente: resolve `Named` para o caminho
+        // do arquivo (a nova janela sobe um motor independente que o carrega do
+        // zero) e enfileira em `pending_windows` para o daemon abrir.
+        for mut spec in windows {
+            if let component::WindowSource::Named(name) = &spec.source {
+                match self.registered_components.get(name) {
+                    Some(path) => spec.source = component::WindowSource::File(path.clone()),
+                    None => {
+                        eprintln!("open_window: componente '{name}' não registrado; ignorando");
+                        continue;
+                    }
+                }
+            }
+            self.pending_windows.push(spec);
+        }
 
         match nav {
             Some(component::Nav::To(s)) => self.navigate_to(&s),
@@ -871,6 +905,14 @@ impl GlacierUI {
         iced::Task::batch(tasks)
     }
 
+    /// Retira e devolve as janelas que os componentes deste motor pediram para
+    /// abrir desde a última chamada (ver [`component::Context::open_window`]). O
+    /// runner [`daemon::GlacierDaemon`] chama isto após cada `dispatch` e
+    /// transforma cada [`component::WindowSpec`] numa janela real do iced.
+    pub fn take_pending_windows(&mut self) -> Vec<component::WindowSpec> {
+        std::mem::take(&mut self.pending_windows)
+    }
+
     /// Aggregates the [`Component::subscription`] of every registered component
     /// into a single `iced::Subscription`. Wire it into your app's
     /// `subscription(&self)` so component-owned event sources (sockets, timers)
@@ -878,19 +920,19 @@ impl GlacierUI {
     /// forwarded to [`GlacierUI::dispatch`].
     pub fn subscription(&self) -> iced::Subscription<EngineMessage> {
         let mut subs: Vec<_> = self.components.values().map(|c| c.subscription()).collect();
-        // Global mouse-release listener: ends a reorder drag no matter where
-        // the button comes up (even outside any `mouse_area`, or over a widget
-        // that "captured" the event) — `dispatch` just no-ops if `self.drag` is
-        // `None`, so this is always safe to keep active.
-        subs.push(iced::event::listen_with(drag_end_from_event));
-        subs.push(iced::event::listen_with(tab_focus_from_event));
-        // Window resizes → EngineMessage::Viewport, so `@media` blocks re-resolve.
-        subs.push(iced::event::listen_with(viewport_from_event));
+        // Nota: os listeners globais de evento (drag-end, Tab, resize→viewport)
+        // NÃO ficam aqui. No modelo daemon eles são registrados uma única vez no
+        // nível do daemon (ver [`daemon`]), usando o `window::Id` que o callback
+        // recebe para rotear ao motor certo — se cada motor os registrasse, o
+        // iced fundiria os recipes idênticos num só.
+        //
         // Long-lived streams opened by components' Lua (`sse`/`websocket`): one
         // subscription each, keyed by `StreamKey` so the runtime keeps it alive
-        // while it's in `active_streams` and drops it once removed.
+        // while it's in `active_streams` and drops it once removed. `engine_id`
+        // isola os streams desta janela dos de outra rodando o mesmo componente.
         for ((owner, id), req) in &self.active_streams {
             let key = net::StreamKey {
+                engine_id: self.engine_id,
                 owner: owner.clone(),
                 id: *id,
                 kind: req.kind,

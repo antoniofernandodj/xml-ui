@@ -474,6 +474,12 @@ impl LuauComponent {
                 continue;
             }
 
+            if req.get::<bool>("__glacier_window").unwrap_or(false) {
+                ctx.open_window(build_window_spec(&req)?);
+                args = MultiValue::new();
+                continue;
+            }
+
             if req.get::<bool>("__glacier_after").unwrap_or(false) {
                 let id = self.alloc_id();
                 let ms: u64 = req.get("ms")?;
@@ -699,6 +705,33 @@ fn build_dialog(req: &Table) -> mlua::Result<crate::dialogs::DialogSpec> {
         .with_button(DialogButton::new(cancel_label, "", ButtonRole::Neutral))
         .with_button(DialogButton::new(confirm_label, confirm_action, role))
         .dismissible(false))
+}
+
+/// Constrói o [`WindowSpec`] a partir do pedido `open_window(opts)` do prelúdio.
+/// A fonte é `file` (caminho de template) ou `component` (nome já registrado no
+/// motor de origem, resolvido para o arquivo em `run_on_owner`). `title`,
+/// `width`/`height` e `resizable` são opcionais.
+fn build_window_spec(req: &Table) -> mlua::Result<crate::component::WindowSpec> {
+    use crate::component::WindowSpec;
+    let mut spec = match (req.get::<Option<String>>("file")?, req.get::<Option<String>>("component")?) {
+        (Some(file), _) => WindowSpec::file(file),
+        (None, Some(name)) => WindowSpec::named(name),
+        (None, None) => {
+            return Err(mlua::Error::RuntimeError(
+                "open_window: informe `file` (caminho) ou `component` (nome registrado)".into(),
+            ));
+        }
+    };
+    if let Some(title) = req.get::<Option<String>>("title")? {
+        spec = spec.title(title);
+    }
+    if let (Some(w), Some(h)) = (req.get::<Option<f32>>("width")?, req.get::<Option<f32>>("height")?) {
+        spec = spec.size(w, h);
+    }
+    if let Some(resizable) = req.get::<Option<bool>>("resizable")? {
+        spec = spec.resizable(resizable);
+    }
+    Ok(spec)
 }
 
 /// Constrói o [`ToastSpec`] a partir do pedido `toast(opts)` do prelúdio.
@@ -1442,6 +1475,59 @@ mod tests {
         let mut ctx = Context::new(&mut data);
         comp.run("voltar", None, &mut ctx);
         assert!(matches!(ctx.nav, Some(crate::component::Nav::Back)));
+    }
+
+    #[test]
+    fn open_window_pede_janela_ao_motor() {
+        // Forma tabela: fonte `file` + título + tamanho.
+        let comp = LuauComponent::from_source(
+            "function abrir() open_window({ file = 'telas/detalhe.gv', title = 'Detalhe', width = 400, height = 300 }) end",
+            "t.gv",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        let mut ctx = Context::new(&mut data);
+        comp.run("abrir", None, &mut ctx);
+        assert_eq!(ctx.windows.len(), 1, "open_window deveria enfileirar uma janela");
+        let spec = &ctx.windows[0];
+        match &spec.source {
+            crate::component::WindowSource::File(p) => assert_eq!(p, "telas/detalhe.gv"),
+            _ => panic!("esperava WindowSource::File"),
+        }
+        assert_eq!(spec.title.as_deref(), Some("Detalhe"));
+        assert_eq!(spec.size, Some((400.0, 300.0)));
+    }
+
+    #[test]
+    fn open_window_string_vira_arquivo() {
+        // Forma string curta: `open_window("...")` = `{ file = "..." }`.
+        let comp = LuauComponent::from_source(
+            "function abrir() open_window('telas/x.gv') end",
+            "t.gv",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        let mut ctx = Context::new(&mut data);
+        comp.run("abrir", None, &mut ctx);
+        assert_eq!(ctx.windows.len(), 1);
+        assert!(matches!(&ctx.windows[0].source, crate::component::WindowSource::File(p) if p == "telas/x.gv"));
+    }
+
+    #[test]
+    fn open_window_component_vira_named() {
+        let comp = LuauComponent::from_source(
+            "function abrir() open_window({ component = 'perfil' }) end",
+            "t.gv",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        let mut ctx = Context::new(&mut data);
+        comp.run("abrir", None, &mut ctx);
+        assert_eq!(ctx.windows.len(), 1);
+        assert!(matches!(&ctx.windows[0].source, crate::component::WindowSource::Named(n) if n == "perfil"));
     }
 
     #[test]

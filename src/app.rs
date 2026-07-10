@@ -2,6 +2,11 @@
 //! app's `main` doesn't need to name `App::init`/`App::update`/`App::view`
 //! by hand (and, combined with the `iced` re-export at the crate root,
 //! doesn't need `iced` as a direct dependency just to call `.run()`).
+//!
+//! **Nota:** este é o atalho para apps de **janela única** (`iced::application`).
+//! Para o modelo multi-janela (abrir componentes/XML em novas janelas via
+//! [`crate::Context::open_window`] / `open_window(...)` na Lua), use o runner
+//! [`crate::GlacierDaemon`], que é o caminho recomendado para novos apps.
 
 use iced::{Element, Subscription, Task};
 

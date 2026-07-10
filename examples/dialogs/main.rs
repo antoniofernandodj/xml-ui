@@ -5,11 +5,7 @@
 //!
 //! Rode com: `cargo run --example dialogs`
 
-use glacier_ui::{
-    Component, Context, DialogButton, DialogSpec, EngineMessage, GlacierUI, Template,
-};
-use iced::{widget::text, Color, Element, Subscription, Task};
-use std::time::Duration;
+use glacier_ui::{Component, Context, DialogButton, DialogSpec, GlacierDaemon, Template};
 
 struct Dialogs;
 
@@ -61,42 +57,14 @@ impl Component for Dialogs {
     }
 }
 
-struct App {
-    motor: GlacierUI,
-}
-
-impl App {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register(Box::new(Dialogs)) {
-            eprintln!("Error registering component: {}", e);
-        }
-        motor.set_initial_screen("dialogs");
-
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        match self.motor.render_current() {
-            Ok(elem) => elem,
-            Err(e) => text(format!("Error rendering UI: {}", e))
-                .color(Color::from_rgb(1.0, 0.0, 0.0))
-                .into(),
-        }
-    }
-
-    fn subscription(&self) -> Subscription<EngineMessage> {
-        GlacierUI::reload_subscription(Duration::from_millis(500))
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(App::new, App::update, App::view)
-        .subscription(App::subscription)
+    GlacierDaemon::new()
         .title("Glacier - Diálogos")
+        .main(|motor| {
+            if let Err(e) = motor.register(Box::new(Dialogs)) {
+                eprintln!("Error registering component: {}", e);
+            }
+            motor.set_initial_screen("dialogs");
+        })
         .run()
 }

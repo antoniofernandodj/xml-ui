@@ -7,49 +7,19 @@
 //!
 //! Rode com: `cargo run --example navegacao_luau`
 
-use glacier_ui::{EngineMessage, GlacierUI, GlacierApp};
-use iced::{widget::text, Color, Element, Subscription, Task};
-use std::time::Duration;
-
-struct App { motor: GlacierUI }
-impl GlacierApp for App {
-    type Message = EngineMessage;
-    fn init() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-        if let Err(e) = motor
-            .register_component("login_luau", "examples/navegacao_luau/login.gv") {
-                eprintln!("Erro ao registrar 'login_luau': {}", e);
-            }
-
-        if let Err(e) = motor
-            .register_component("dashboard_luau", "examples/navegacao_luau/dashboard.gv") {
-                eprintln!("Erro ao registrar 'dashboard_luau': {}", e);
-            }
-
-        motor.set_initial_screen("login_luau");
-
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        self.motor.render_current().unwrap_or_else(|e| {
-            text(format!("Erro ao renderizar: {}", e))
-                .color(Color::from_rgb(1.0, 0.0, 0.0))
-                .into()
-        })
-    }
-
-    fn subscription(&self) -> Subscription<EngineMessage> {
-        GlacierUI::reload_subscription(Duration::from_millis(500))
-    }
-}
+use glacier_ui::GlacierDaemon;
 
 fn main() -> iced::Result {
-    App::bootstrap()
+    GlacierDaemon::new()
         .title("Glacier - navegação via script Lua")
+        .main(|motor| {
+            if let Err(e) = motor.register_component("login_luau", "examples/navegacao_luau/login.gv") {
+                eprintln!("Erro ao registrar 'login_luau': {}", e);
+            }
+            if let Err(e) = motor.register_component("dashboard_luau", "examples/navegacao_luau/dashboard.gv") {
+                eprintln!("Erro ao registrar 'dashboard_luau': {}", e);
+            }
+            motor.set_initial_screen("login_luau");
+        })
         .run()
 }

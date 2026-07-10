@@ -1,6 +1,4 @@
-use glacier_ui::{GlacierUI, EngineMessage, Component, Context, Template};
-use iced::{Element, Task};
-use std::time::Duration;
+use glacier_ui::{Component, Context, GlacierDaemon, Template};
 
 /// Demonstra os pseudo-estados de `.gss` (`:hover` / `:focus` / `:active` /
 /// `:disabled`, ver PLANO_GSS_LIMITACOES.md item 7):
@@ -57,49 +55,17 @@ impl Component for PseudoEstados {
     }
 }
 
-struct AppPseudoEstados {
-    motor: GlacierUI,
-}
-
-impl AppPseudoEstados {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register(Box::new(PseudoEstados)) {
-            eprintln!("Erro ao registrar 'pseudo_estados': {}", e);
-        }
-        if let Err(e) = motor.load_stylesheet("examples/pseudo_estados/pseudo_estados.gss") {
-            eprintln!("Erro ao carregar stylesheet: {}", e);
-        }
-        motor.set_initial_screen("pseudo_estados");
-
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        self.motor.render_current().unwrap_or_else(|e| {
-            iced::widget::text(format!("Erro ao renderizar: {}", e))
-                .color(iced::Color::from_rgb(1.0, 0.0, 0.0))
-                .into()
-        })
-    }
-
-    fn subscription(&self) -> iced::Subscription<EngineMessage> {
-        GlacierUI::reload_subscription(Duration::from_millis(500))
-    }
-
-    fn theme(&self) -> iced::Theme {
-        self.motor.theme()
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(|| AppPseudoEstados::new(), AppPseudoEstados::update, AppPseudoEstados::view)
-        .subscription(AppPseudoEstados::subscription)
-        .theme(AppPseudoEstados::theme)
+    GlacierDaemon::new()
         .title("Glacier - Pseudo-estados (:hover/:focus/:active/:disabled)")
+        .main(|motor| {
+            if let Err(e) = motor.register(Box::new(PseudoEstados)) {
+                eprintln!("Erro ao registrar 'pseudo_estados': {}", e);
+            }
+            if let Err(e) = motor.load_stylesheet("examples/pseudo_estados/pseudo_estados.gss") {
+                eprintln!("Erro ao carregar stylesheet: {}", e);
+            }
+            motor.set_initial_screen("pseudo_estados");
+        })
         .run()
 }

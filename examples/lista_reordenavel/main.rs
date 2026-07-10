@@ -6,10 +6,8 @@
 //!
 //! Rode com: `cargo run --example lista_reordenavel`
 
-use glacier_ui::{Component, Context, EngineMessage, GlacierUI, Template};
-use iced::{widget::text, Color, Element, Subscription, Task};
+use glacier_ui::{Component, Context, GlacierDaemon, Template};
 use std::collections::HashMap;
-use std::time::Duration;
 
 struct Tarefa {
     id: String,
@@ -67,54 +65,22 @@ impl Component for ListaReordenavel {
     }
 }
 
-struct AppLista {
-    motor: GlacierUI,
-}
-
-impl AppLista {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-
-        let tarefas = vec![
-            Tarefa { id: "1".into(), nome: "Revisar PR".into() },
-            Tarefa { id: "2".into(), nome: "Escrever changelog".into() },
-            Tarefa { id: "3".into(), nome: "Publicar release".into() },
-        ];
-
-        if let Err(e) = motor.register(Box::new(ListaReordenavel { tarefas })) {
-            eprintln!("Erro ao registrar 'lista_reordenavel': {}", e);
-        }
-        motor.set_initial_screen("lista_reordenavel");
-
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        match self.motor.render_current() {
-            Ok(elem) => elem,
-            Err(e) => text(format!("Erro ao renderizar: {}", e))
-                .color(Color::from_rgb(1.0, 0.0, 0.0))
-                .into(),
-        }
-    }
-
-    fn subscription(&self) -> Subscription<EngineMessage> {
-        // `motor.subscription()` carrega o listener global de "soltar o
-        // mouse" que encerra o drag — sem ele, arrastar nunca soltaria.
-        Subscription::batch([
-            self.motor.subscription(),
-            GlacierUI::reload_subscription(Duration::from_millis(500)),
-        ])
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(|| AppLista::new(), AppLista::update, AppLista::view)
-        .subscription(AppLista::subscription)
+    // O `GlacierDaemon` já registra o listener global de "soltar o mouse" (que
+    // encerra o drag) e o hot-reload — sem wiring manual de subscription.
+    GlacierDaemon::new()
         .title("Glacier - Lista Reordenável (drag-and-drop)")
+        .main(|motor| {
+            let tarefas = vec![
+                Tarefa { id: "1".into(), nome: "Revisar PR".into() },
+                Tarefa { id: "2".into(), nome: "Escrever changelog".into() },
+                Tarefa { id: "3".into(), nome: "Publicar release".into() },
+            ];
+
+            if let Err(e) = motor.register(Box::new(ListaReordenavel { tarefas })) {
+                eprintln!("Erro ao registrar 'lista_reordenavel': {}", e);
+            }
+            motor.set_initial_screen("lista_reordenavel");
+        })
         .run()
 }

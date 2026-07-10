@@ -115,6 +115,10 @@ pub enum StreamEvent {
 /// subscription pela sua chave. Ver [`crate::GlacierUI::subscription`].
 #[derive(Debug, Clone, Hash)]
 pub struct StreamKey {
+    /// Identidade do motor dono do stream. Duas janelas rodando o mesmo
+    /// componente têm motores distintos (`engine_id` distintos), então incluí-lo
+    /// na chave impede que o iced funda os dois streams num só recipe.
+    pub engine_id: u64,
     pub owner: String,
     pub id: u64,
     pub kind: StreamKind,

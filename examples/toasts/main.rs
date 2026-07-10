@@ -4,8 +4,7 @@
 //!
 //! Rode com: `cargo run --example toasts`
 
-use glacier_ui::{Component, Context, EngineMessage, GlacierUI, Template, ToastSpec};
-use iced::{widget::text, Color, Element, Subscription, Task};
+use glacier_ui::{Component, Context, GlacierDaemon, Template, ToastSpec};
 use std::time::Duration;
 
 struct Toasts {
@@ -54,47 +53,16 @@ impl Component for Toasts {
     }
 }
 
-struct App {
-    motor: GlacierUI,
-}
-
-impl App {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register(Box::new(Toasts { disparados: 0 })) {
-            eprintln!("Error registering component: {}", e);
-        }
-        motor.set_initial_screen("toasts");
-
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        match self.motor.render_current() {
-            Ok(elem) => elem,
-            Err(e) => text(format!("Error rendering UI: {}", e))
-                .color(Color::from_rgb(1.0, 0.0, 0.0))
-                .into(),
-        }
-    }
-
-    fn subscription(&self) -> Subscription<EngineMessage> {
-        // `toast_subscription` é o que faz cada toast desaparecer sozinho
-        // depois da sua `duration` — sem ele eles só fecham pelo "×".
-        Subscription::batch([
-            GlacierUI::reload_subscription(Duration::from_millis(500)),
-            GlacierUI::toast_subscription(Duration::from_millis(250)),
-        ])
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(App::new, App::update, App::view)
-        .subscription(App::subscription)
+    // O `GlacierDaemon` já liga a expiração automática dos toasts (e o
+    // hot-reload); sem ele os toasts só fechariam pelo "×".
+    GlacierDaemon::new()
         .title("Glacier - Toasts")
+        .main(|motor| {
+            if let Err(e) = motor.register(Box::new(Toasts { disparados: 0 })) {
+                eprintln!("Error registering component: {}", e);
+            }
+            motor.set_initial_screen("toasts");
+        })
         .run()
 }

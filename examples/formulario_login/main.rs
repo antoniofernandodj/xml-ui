@@ -6,9 +6,7 @@
 //!
 //! Rode com: `cargo run --example formulario_login`
 
-use glacier_ui::{Component, Context, EngineMessage, Form, FormBuilder, FormControl, GlacierUI, Template};
-use iced::{widget::text, Color, Element, Subscription, Task};
-use std::time::Duration;
+use glacier_ui::{Component, Context, Form, FormBuilder, FormControl, GlacierDaemon, Template};
 
 struct Login { form: Form }
 
@@ -76,40 +74,14 @@ impl Component for Login {
     }
 }
 
-struct AppLogin { motor: GlacierUI }
-impl AppLogin {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register(Box::new(Login::new())) {
-            eprintln!("Erro ao registrar 'login': {}", e);
-        }
-        motor.set_initial_screen("login");
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        match self.motor.render_current() {
-            Ok(elem) => elem,
-            Err(e) => text(format!("Erro ao renderizar: {}", e))
-                .color(Color::from_rgb(1.0, 0.0, 0.0))
-                .into(),
-        }
-    }
-
-    fn subscription(&self) -> Subscription<EngineMessage> {
-        GlacierUI::reload_subscription(Duration::from_millis(500))
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(
-        || AppLogin::new(), AppLogin::update, AppLogin::view
-    )
-        .subscription(AppLogin::subscription)
+    GlacierDaemon::new()
         .title("Glacier - Formulário (Reactive Forms)")
+        .main(|motor| {
+            if let Err(e) = motor.register(Box::new(Login::new())) {
+                eprintln!("Erro ao registrar 'login': {}", e);
+            }
+            motor.set_initial_screen("login");
+        })
         .run()
 }

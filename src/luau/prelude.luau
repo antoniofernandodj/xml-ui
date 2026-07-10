@@ -76,6 +76,18 @@ function navigate_back()
     })
 end
 
+-- Abre uma NOVA JANELA. NÃO suspende: cede um pedido, o daemon sobe um motor
+-- independente para a janela e retoma na hora. `opts` é uma string (caminho do
+-- arquivo) ou uma tabela:
+--   open_window("telas/detalhe.gv")
+--   open_window({ file = "telas/detalhe.gv", title = "Detalhe", width = 400, height = 300 })
+--   open_window({ component = "perfil", title = "Perfil" })  -- componente já registrado
+function open_window(opts)
+    local t = type(opts) == "table" and opts or { file = opts }
+    t.__glacier_window = true
+    return coroutine.yield(t)
+end
+
 -- Temporizador de disparo único (equivalente a setTimeout). NÃO suspende: cede
 -- um pedido, o motor agenda `fn` (função ou nome de função global) para daqui
 -- a `ms` milissegundos e retoma na hora devolvendo um handle cancelável.

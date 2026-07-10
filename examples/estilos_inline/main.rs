@@ -8,9 +8,7 @@
 //!
 //! Rode com: `cargo run --example estilos_inline`
 
-use glacier_ui::{GlacierUI, EngineMessage, Component, Context, Template};
-use iced::{Element, Task};
-use std::time::Duration;
+use glacier_ui::{Component, Context, GlacierDaemon, Template};
 
 struct Estilos {
     valor: i32,
@@ -37,45 +35,14 @@ impl Component for Estilos {
     }
 }
 
-struct App {
-    motor: GlacierUI,
-}
-
-impl App {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register(Box::new(Estilos { valor: 0 })) {
-            eprintln!("Erro ao registrar 'estilos_inline': {}", e);
-        }
-        motor.set_initial_screen("estilos_inline");
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        self.motor.render_current().unwrap_or_else(|e| {
-            iced::widget::text(format!("Erro ao renderizar: {}", e))
-                .color(iced::Color::from_rgb(1.0, 0.0, 0.0))
-                .into()
-        })
-    }
-
-    fn subscription(&self) -> iced::Subscription<EngineMessage> {
-        GlacierUI::reload_subscription(Duration::from_millis(500))
-    }
-
-    fn theme(&self) -> iced::Theme {
-        self.motor.theme()
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(|| App::new(), App::update, App::view)
-        .subscription(App::subscription)
-        .theme(App::theme)
+    GlacierDaemon::new()
         .title("Glacier - Estilos inline (XML)")
+        .main(|motor| {
+            if let Err(e) = motor.register(Box::new(Estilos { valor: 0 })) {
+                eprintln!("Erro ao registrar 'estilos_inline': {}", e);
+            }
+            motor.set_initial_screen("estilos_inline");
+        })
         .run()
 }

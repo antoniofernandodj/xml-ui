@@ -1,6 +1,4 @@
-use glacier_ui::{GlacierUI, EngineMessage, Component, Context, Template};
-use iced::{Element, Task};
-use std::time::Duration;
+use glacier_ui::{Component, Context, GlacierDaemon, Template};
 
 struct Membro {
     nome: String,
@@ -80,48 +78,19 @@ impl Component for Lista {
     }
 }
 
-struct AppLista {
-    motor: GlacierUI,
-}
-
-impl AppLista {
-    fn new() -> (Self, Task<EngineMessage>) {
-        let mut motor = GlacierUI::new();
-
-        let membros = vec![
-            Membro { nome: "Clara Silva".into(), cargo: "Engenheira de Software".into(), cor: PALETA[0].into() },
-            Membro { nome: "Sophia Martins".into(), cargo: "Designer UI/UX".into(), cor: PALETA[1].into() },
-        ];
-
-        if let Err(e) = motor.register(Box::new(Lista { membros, proximo: 0 })) {
-            eprintln!("Erro ao registrar 'lista': {}", e);
-        }
-        motor.set_initial_screen("lista");
-
-        (Self { motor }, Task::none())
-    }
-
-    fn update(&mut self, message: EngineMessage) -> Task<EngineMessage> {
-        self.motor.dispatch(&message)
-    }
-
-    fn view(&self) -> Element<'_, EngineMessage> {
-        match self.motor.render_current() {
-            Ok(elem) => elem,
-            Err(e) => iced::widget::text(format!("Erro ao render: {}", e))
-                .color(iced::Color::from_rgb(1.0, 0.0, 0.0))
-                .into(),
-        }
-    }
-
-    fn subscription(&self) -> iced::Subscription<EngineMessage> {
-        GlacierUI::reload_subscription(Duration::from_millis(500))
-    }
-}
-
 fn main() -> iced::Result {
-    iced::application(|| AppLista::new(), AppLista::update, AppLista::view)
-        .subscription(AppLista::subscription)
+    GlacierDaemon::new()
         .title("Glacier - Lista de Membros")
+        .main(|motor| {
+            let membros = vec![
+                Membro { nome: "Clara Silva".into(), cargo: "Engenheira de Software".into(), cor: PALETA[0].into() },
+                Membro { nome: "Sophia Martins".into(), cargo: "Designer UI/UX".into(), cor: PALETA[1].into() },
+            ];
+
+            if let Err(e) = motor.register(Box::new(Lista { membros, proximo: 0 })) {
+                eprintln!("Erro ao registrar 'lista': {}", e);
+            }
+            motor.set_initial_screen("lista");
+        })
         .run()
 }
