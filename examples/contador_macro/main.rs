@@ -3,7 +3,7 @@ use iced::{Element, Task, widget::text, Color, Subscription};
 use std::time::Duration;
 
 /// UI + comportamento no MESMO arquivo: a markup e as funções (`incrementar`/
-/// `decrementar`) vivem em `examples/contador_macro/contador_macro.xml`, dentro de `<script>`.
+/// `decrementar`) vivem em `examples/contador_macro/contador_macro.gv`, dentro de `<script>`.
 ///
 /// O `<script>` agora é **Lua**, interpretado em tempo de execução (sem
 /// compilar): `register_component` lê o arquivo, carrega o script e roteia cada ação
@@ -16,7 +16,7 @@ struct App {
 impl App {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register_component("contador", "examples/contador_macro/contador_macro.xml") {
+        if let Err(e) = motor.register_component("contador", "examples/contador_macro/contador_macro.gv") {
             eprintln!("Erro ao registrar: {}", e);
         }
         motor.set_initial_screen("contador");

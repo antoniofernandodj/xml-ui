@@ -40,10 +40,10 @@ impl AppNav {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
 
-        let telas = [
-            Tela { nome: "home", template: "examples/navegacao/nav_home.xml" },
-            Tela { nome: "perfil", template: "examples/navegacao/nav_perfil.xml" },
-            Tela { nome: "config", template: "examples/navegacao/nav_config.xml" },
+        let telas: [Tela; 3] = [
+            Tela { nome: "home", template: "examples/navegacao/nav_home.gv" },
+            Tela { nome: "perfil", template: "examples/navegacao/nav_perfil.gv" },
+            Tela { nome: "config", template: "examples/navegacao/nav_config.gv" },
         ];
         for tela in telas {
             let nome = tela.nome;

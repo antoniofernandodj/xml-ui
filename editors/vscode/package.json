@@ -1,0 +1,66 @@
+{
+  "name": "glacier-gss",
+  "displayName": "Glacier GSS",
+  "description": "Syntax highlighting and language support for Glacier Stylesheets (.gss) — the CSS-like styling format for glacier-ui.",
+  "version": "0.1.0",
+  "publisher": "antoniofernandodj",
+  "license": "MIT",
+  "author": {
+    "name": "Antonio Fernando"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/antoniofernandodj/xml-ui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/antoniofernandodj/xml-ui/issues"
+  },
+  "homepage": "https://github.com/antoniofernandodj/xml-ui#readme",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "gss",
+    "glacier",
+    "glacier-ui",
+    "stylesheet",
+    "css"
+  ],
+  "icon": "icons/marketplace.png",
+  "contributes": {
+    "languages": [
+      {
+        "id": "gss",
+        "aliases": [
+          "Glacier Stylesheet",
+          "GSS",
+          "gss"
+        ],
+        "extensions": [
+          ".gss"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/gss-file.svg",
+          "dark": "./icons/gss-file.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "gss",
+        "scopeName": "source.gss",
+        "path": "./syntaxes/gss.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "gss",
+        "path": "./snippets/gss.code-snippets"
+      }
+    ]
+  }
+}

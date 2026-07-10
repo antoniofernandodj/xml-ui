@@ -19,7 +19,7 @@ impl Component for Estilos {
     fn name(&self) -> &str { "estilos" }
 
     fn template(&self) -> Template {
-        Template::File("examples/estilos/estilos.xml".into())
+        Template::File("examples/estilos/estilos.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

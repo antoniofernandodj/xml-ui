@@ -52,7 +52,7 @@ impl Component for Login {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/formulario_login/formulario_login.xml".into())
+        Template::File("examples/formulario_login/formulario_login.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

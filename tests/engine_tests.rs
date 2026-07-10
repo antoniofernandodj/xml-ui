@@ -47,7 +47,7 @@ fn test_parser_basic() {
 fn test_interpolation() {
     let mut motor = GlacierUI::new();
     
-    let temp_xml_path = "templates/test_temp.xml";
+    let temp_xml_path = "templates/test_temp.gv";
     std::fs::create_dir_all("templates").ok();
     std::fs::write(
         temp_xml_path,
@@ -75,8 +75,8 @@ fn test_includes() {
     
     std::fs::create_dir_all("templates").ok();
     
-    let main_path = "templates/test_main.xml";
-    let card_path = "templates/test_card.xml";
+    let main_path = "templates/test_main.gv";
+    let card_path = "templates/test_card.gv";
 
     std::fs::write(
         card_path,
@@ -124,7 +124,7 @@ fn test_if_else() {
     let mut motor = GlacierUI::new();
 
     std::fs::create_dir_all("templates").ok();
-    let path = "templates/test_if.xml";
+    let path = "templates/test_if.gv";
     std::fs::write(
         path,
         r##"
@@ -183,9 +183,9 @@ fn test_import_recursivo() {
 
     std::fs::create_dir_all("templates").ok();
 
-    let main_path = "templates/test_imp_main.xml";
-    let card_path = "templates/test_imp_card.xml";
-    let badge_path = "templates/test_imp_badge.xml";
+    let main_path = "templates/test_imp_main.gv";
+    let card_path = "templates/test_imp_card.gv";
+    let badge_path = "templates/test_imp_badge.gv";
 
     // badge: folha, sem imports.
     std::fs::write(
@@ -196,7 +196,7 @@ fn test_import_recursivo() {
     // card: importa badge e o usa pelo nome.
     std::fs::write(
         card_path,
-        r##"<import name="Badge" from="templates/test_imp_badge.xml" />
+        r##"<import name="Badge" from="templates/test_imp_badge.gv" />
         <Container background="#222">
             <Column>
                 <Text content="User: {name}" />
@@ -208,7 +208,7 @@ fn test_import_recursivo() {
     // main: importa card (que por sua vez importa badge — recursivo).
     std::fs::write(
         main_path,
-        r##"<import name="Card" from="templates/test_imp_card.xml" />
+        r##"<import name="Card" from="templates/test_imp_card.gv" />
         <Column>
             <Card name="Alice" />
         </Column>"##
@@ -254,8 +254,8 @@ fn test_componente_por_nome() {
 
     std::fs::create_dir_all("templates").ok();
 
-    let main_path = "templates/test_main_comp.xml";
-    let card_path = "templates/test_card_comp.xml";
+    let main_path = "templates/test_main_comp.gv";
+    let card_path = "templates/test_card_comp.gv";
 
     std::fs::write(
         card_path,
@@ -307,7 +307,7 @@ fn test_builtin_badge_disponivel_sem_registro() {
     let mut motor = GlacierUI::new();
 
     std::fs::create_dir_all("templates").ok();
-    let tela_path = "templates/test_builtin_badge.xml";
+    let tela_path = "templates/test_builtin_badge.gv";
     std::fs::write(
         tela_path,
         r##"
@@ -381,8 +381,8 @@ fn test_atributo_numerico_templado() {
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
 
-    let card_path = "templates/test_num_card.xml";
-    let main_path = "templates/test_num_main.xml";
+    let card_path = "templates/test_num_card.gv";
+    let main_path = "templates/test_num_main.gv";
 
     std::fs::write(
         card_path,
@@ -423,8 +423,8 @@ fn test_foreach_com_componente() {
 
     std::fs::create_dir_all("templates").ok();
 
-    let main_path = "templates/test_lista.xml";
-    let card_path = "templates/test_cartao.xml";
+    let main_path = "templates/test_lista.gv";
+    let card_path = "templates/test_cartao.gv";
 
     // Componente reutilizável que recebe props.
     std::fs::write(
@@ -508,7 +508,7 @@ fn test_navegacao_historico() {
 fn test_foreach() {
     let mut motor = GlacierUI::new();
     
-    let path = "templates/test_foreach.xml";
+    let path = "templates/test_foreach.gv";
     std::fs::create_dir_all("templates").ok();
     std::fs::write(
         path,
@@ -716,7 +716,7 @@ fn test_gss_fill_and_max_width_resolve_from_class() {
     let gss = "templates/test_maxw.gss";
     std::fs::write(gss, ".panel { width: fill; max-width: 640; }").unwrap();
 
-    let path = "templates/test_maxw.xml";
+    let path = "templates/test_maxw.gv";
     std::fs::write(path, r##"<Container class="panel" />"##).unwrap();
 
     motor.load_stylesheet(gss).unwrap();
@@ -755,7 +755,7 @@ fn test_link_stylesheet_is_global() {
 
     // A links the sheet (as a top-level sibling, before its root, to
     // exercise the <link> hoisting in parse_xml).
-    let a_path = "templates/test_scoped_a.xml";
+    let a_path = "templates/test_scoped_a.gv";
     std::fs::write(
         a_path,
         r##"
@@ -765,7 +765,7 @@ fn test_link_stylesheet_is_global() {
     ).unwrap();
 
     // B doesn't declare the <link> itself, but should see its effect anyway.
-    let b_path = "templates/test_scoped_b.xml";
+    let b_path = "templates/test_scoped_b.gv";
     std::fs::write(b_path, r##"<Text class="box linked" content="B" />"##).unwrap();
 
     motor.load_stylesheet(global_gss).unwrap();
@@ -798,7 +798,7 @@ fn test_inline_style_block_default_is_global() {
 
     // A declares a plain (unscoped) inline <style>, which is global by
     // default — it overrides `.box` and adds `.inlined` for every component.
-    let a_path = "templates/test_istyle_a.xml";
+    let a_path = "templates/test_istyle_a.gv";
     std::fs::write(
         a_path,
         r##"
@@ -811,7 +811,7 @@ fn test_inline_style_block_default_is_global() {
     ).unwrap();
 
     // B declares nothing, but should see A's plain <style> anyway.
-    let b_path = "templates/test_istyle_b.xml";
+    let b_path = "templates/test_istyle_b.gv";
     std::fs::write(b_path, r##"<Text class="box inlined" content="B" />"##).unwrap();
 
     motor.load_stylesheet(global_gss).unwrap();
@@ -844,7 +844,7 @@ fn test_inline_style_block_scoped_true_is_scoped() {
 
     // A declares an inline <style scoped="true">, which overrides `.box` and
     // adds `.scoped` only within A's own subtree.
-    let a_path = "templates/test_istyle_scoped_a.xml";
+    let a_path = "templates/test_istyle_scoped_a.gv";
     std::fs::write(
         a_path,
         r##"
@@ -857,7 +857,7 @@ fn test_inline_style_block_scoped_true_is_scoped() {
     ).unwrap();
 
     // B declares nothing: it only sees the global sheet.
-    let b_path = "templates/test_istyle_scoped_b.xml";
+    let b_path = "templates/test_istyle_scoped_b.gv";
     std::fs::write(b_path, r##"<Text class="box scoped" content="B" />"##).unwrap();
 
     motor.load_stylesheet(global_gss).unwrap();
@@ -891,7 +891,7 @@ fn test_inline_style_overrides_linked_by_document_order() {
     let linked = "templates/test_istyle_order.gss";
     std::fs::write(linked, ".tag { color: #aaaaaa; padding: 3; }").unwrap();
 
-    let path = "templates/test_istyle_order.xml";
+    let path = "templates/test_istyle_order.gv";
     std::fs::write(
         path,
         r##"
@@ -916,7 +916,7 @@ fn test_inline_style_reloads_with_template() {
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
 
-    let path = "templates/test_istyle_reload.xml";
+    let path = "templates/test_istyle_reload.gv";
     std::fs::write(
         path,
         r##"<style>.t { color: #010101; }</style><Text class="t" content="x" />"##,
@@ -956,7 +956,7 @@ fn test_inline_attribute_wins_over_class() {
     let gss = "templates/test_inline.gss";
     std::fs::write(gss, ".tag { color: #aaaaaa; padding: 3; }").unwrap();
 
-    let path = "templates/test_inline.xml";
+    let path = "templates/test_inline.gv";
     // Inline color overrides the class; padding falls back to the class.
     std::fs::write(path, r##"<Text class="tag" content="x" color="#ff0000" />"##).unwrap();
 
@@ -976,15 +976,15 @@ fn test_link_rel_import() {
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
 
-    let child = "templates/test_li_child.xml";
+    let child = "templates/test_li_child.gv";
     std::fs::write(child, r##"<Text content="child:{x}" />"##).unwrap();
 
-    let parent = "templates/test_li_parent.xml";
+    let parent = "templates/test_li_parent.gv";
     // Declarative import via <link>; the component is then referenced by name.
     std::fs::write(
         parent,
         r##"
-        <link rel="import" href="templates/test_li_child.xml" as="ChildLink" />
+        <link rel="import" href="templates/test_li_child.gv" as="ChildLink" />
         <Column>
             <ChildLink x="42" />
         </Column>
@@ -1024,7 +1024,7 @@ fn test_textarea_parses_and_syncs() {
 
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
-    let tpl = "templates/test_textarea.xml";
+    let tpl = "templates/test_textarea.gv";
     std::fs::write(tpl, xml).unwrap();
     motor.register_component("tacomp", tpl).unwrap();
     motor.define_data("dotenv", "FOO=1\nBAR=2");
@@ -1055,7 +1055,7 @@ fn test_select_parses_and_renders() {
 
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
-    let tpl = "templates/test_select.xml";
+    let tpl = "templates/test_select.gv";
     std::fs::write(tpl, xml).unwrap();
     motor.register_component("selcomp", tpl).unwrap();
     motor.define_data(
@@ -1084,7 +1084,7 @@ fn test_if_else_inside_foreach() {
     )
     .unwrap();
 
-    let tpl = "templates/test_ifforeach.xml";
+    let tpl = "templates/test_ifforeach.gv";
     std::fs::write(
         tpl,
         r##"
@@ -1132,7 +1132,7 @@ fn test_link_rel_data() {
     let data = "templates/test_data.json";
     std::fs::write(data, r##"{ "title": "Olá", "users": [ {"name": "Ana"}, {"name": "Bob"} ] }"##).unwrap();
 
-    let tpl = "templates/test_data.xml";
+    let tpl = "templates/test_data.gv";
     std::fs::write(
         tpl,
         r##"
@@ -1174,7 +1174,7 @@ fn test_link_rel_theme() {
         r##"{ "name": "test", "background": "#102030", "text": "#FFFFFF", "primary": "#A0B0C0", "success": "#00FF00", "danger": "#FF0000" }"##,
     ).unwrap();
 
-    let tpl = "templates/test_theme.xml";
+    let tpl = "templates/test_theme.gv";
     std::fs::write(
         tpl,
         r##"
@@ -1263,7 +1263,7 @@ fn test_directives_as_attributes() {
     let mut motor = GlacierUI::new();
 
     std::fs::create_dir_all("templates").ok();
-    let path = "templates/test_directives_attr.xml";
+    let path = "templates/test_directives_attr.gv";
     std::fs::write(
         path,
         r##"
@@ -1325,7 +1325,7 @@ fn test_precedence_foreach_if_attributes() {
     let mut motor = GlacierUI::new();
 
     std::fs::create_dir_all("templates").ok();
-    let path = "templates/test_precedence.xml";
+    let path = "templates/test_precedence.gv";
     std::fs::write(
         path,
         r##"
@@ -1544,7 +1544,7 @@ fn test_form_control_respects_explicit_value_and_on_change() {
 fn test_formulario_login_example_template_parses_and_evaluates() {
     let mut motor = GlacierUI::new();
     motor
-        .register_component("formulario_login_smoke", "examples/formulario_login/formulario_login.xml")
+        .register_component("formulario_login_smoke", "examples/formulario_login/formulario_login.gv")
         .expect("o template do exemplo formulario_login deve parsear e avaliar sem erro");
 
     let evaluated = motor.evaluated_templates.get("formulario_login_smoke").unwrap();
@@ -1567,8 +1567,8 @@ fn test_formulario_login_example_template_parses_and_evaluates() {
 fn test_fragment_component_splices_if_else_branch() {
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
-    let card = "templates/test_frag_card.xml";
-    let main = "templates/test_frag_main.xml";
+    let card = "templates/test_frag_card.gv";
+    let main = "templates/test_frag_main.gv";
     std::fs::write(
         card,
         r#"
@@ -1582,7 +1582,7 @@ fn test_fragment_component_splices_if_else_branch() {
     std::fs::write(
         main,
         r#"
-        <import name="FragCard" from="templates/test_frag_card.xml" />
+        <import name="FragCard" from="templates/test_frag_card.gv" />
         <Column class="grid">
           <FragCard filler="0" name="Alice" />
           <FragCard filler="1" name="Zzz" />
@@ -1628,7 +1628,7 @@ fn test_fragment_component_splices_if_else_branch() {
 fn test_register_component_wires_luau_when_script_present() {
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
-    let path = "templates/test_scripted_unified.xml";
+    let path = "templates/test_scripted_unified.gv";
     std::fs::write(
         path,
         r#"
@@ -1664,7 +1664,7 @@ function inc() ctx.n = ctx.n + 1 end
 fn test_register_component_ui_only_when_no_script() {
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
-    let path = "templates/test_uionly_unified.xml";
+    let path = "templates/test_uionly_unified.gv";
     std::fs::write(
         path,
         r#"<Container><Button text="x" onClick="nada" /></Container>"#,

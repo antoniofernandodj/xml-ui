@@ -1,5 +1,5 @@
 
--- `require` resolve relativo ao diretório DESTE template (app.xml):
+-- `require` resolve relativo ao diretório DESTE template (app.gv):
 --   net.http_client -> examples/imports_luau/net/http_client.luau
 --   util.strings    -> examples/imports_luau/util/strings.luau
 -- Os módulos são carregados uma vez; `api` persiste entre as ações.

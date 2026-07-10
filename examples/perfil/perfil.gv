@@ -1,4 +1,4 @@
-<import name="PerfilCard" from="examples/perfil/perfil_card.xml" />
+<import name="PerfilCard" from="examples/perfil/perfil_card.gv" />
 
 <Container
     padding="30"

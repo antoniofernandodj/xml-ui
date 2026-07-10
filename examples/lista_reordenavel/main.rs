@@ -42,7 +42,7 @@ impl Component for ListaReordenavel {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/lista_reordenavel/lista_reordenavel.xml".into())
+        Template::File("examples/lista_reordenavel/lista_reordenavel.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

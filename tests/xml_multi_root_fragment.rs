@@ -17,14 +17,14 @@ fn write_tmp(name: &str, content: &str) -> String {
 #[test]
 fn navitem_if_else_por_atributo_em_componente_multi_raiz() {
     let nav_item = write_tmp(
-        "nav_item.xml",
+        "nav_item.gv",
         r#"
 <Button class="nav_item_on" if="{view}" equals="{target}" on_click="{action}" text="ON {label}" />
 <Button class="nav_item" else on_click="{action}" text="OFF {label}" />
 "#,
     );
     let shell = write_tmp(
-        "shell.xml",
+        "shell.gv",
         &format!(
             r#"
 <link rel="import" href="{nav_item}" as="NavItem" />

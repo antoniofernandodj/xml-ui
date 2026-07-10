@@ -82,7 +82,7 @@ componente dono da tela ativa, exatamente como um `UiClick` comum.
 
 ## Exemplo
 
-`examples/dialogs/main.rs` + `examples/dialogs/dialogs.xml` — um painel com um botão por
+`examples/dialogs/main.rs` + `examples/dialogs/dialogs.gv` — um painel com um botão por
 variante (`Information`/`Warning`/`Error`/`Question`/`Confirm com detalhe`).
 Rodar com `cargo run --example dialogs`.
 

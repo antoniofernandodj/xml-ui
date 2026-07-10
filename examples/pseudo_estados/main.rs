@@ -29,7 +29,7 @@ impl Component for PseudoEstados {
     fn name(&self) -> &str { "pseudo_estados" }
 
     fn template(&self) -> Template {
-        Template::File("examples/pseudo_estados/pseudo_estados.xml".into())
+        Template::File("examples/pseudo_estados/pseudo_estados.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

@@ -1,0 +1,209 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Glacier Stylesheet",
+  "scopeName": "source.gss",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#at-media" },
+    { "include": "#root-block" },
+    { "include": "#rule" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.gss",
+          "begin": "//",
+          "end": "$"
+        },
+        {
+          "name": "comment.block.gss",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+
+    "at-media": {
+      "name": "meta.at-rule.media.gss",
+      "begin": "(@media)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.at-rule.media.gss" }
+      },
+      "end": "(?=\\{)",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "name": "keyword.operator.logical.gss",
+          "match": "\\b(and|only|screen|all)\\b"
+        },
+        {
+          "name": "meta.media-feature.gss",
+          "begin": "\\(",
+          "beginCaptures": { "0": { "name": "punctuation.section.parens.begin.gss" } },
+          "end": "\\)",
+          "endCaptures": { "0": { "name": "punctuation.section.parens.end.gss" } },
+          "patterns": [
+            {
+              "name": "support.type.media-feature.gss",
+              "match": "\\b(min-width|max-width|min-height|max-height)\\b"
+            },
+            { "name": "punctuation.separator.key-value.gss", "match": ":" },
+            { "include": "#numbers" }
+          ]
+        }
+      ]
+    },
+
+    "root-block": {
+      "name": "meta.selector.root.gss",
+      "begin": "(:root)\\s*(?=\\{)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.tag.reference.root.gss" }
+      },
+      "end": "(?<=\\})",
+      "patterns": [
+        {
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.gss" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.section.block.end.gss" } },
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#custom-property-declaration" }
+          ]
+        }
+      ]
+    },
+
+    "custom-property-declaration": {
+      "match": "(--[A-Za-z0-9_-]+)\\s*(:)?",
+      "captures": {
+        "1": { "name": "variable.other.custom-property.gss" },
+        "2": { "name": "punctuation.separator.key-value.gss" }
+      }
+    },
+
+    "rule": {
+      "patterns": [
+        {
+          "name": "meta.selector.gss",
+          "begin": "(?=\\.)",
+          "end": "(?=\\{|\\})",
+          "patterns": [
+            { "include": "#comments" },
+            {
+              "match": "(\\.)([A-Za-z_][A-Za-z0-9_-]*)",
+              "captures": {
+                "1": { "name": "punctuation.definition.entity.class.gss" },
+                "2": { "name": "entity.other.attribute-name.class.gss" }
+              }
+            },
+            {
+              "match": "(:)(hover|focus|active|pressed|disabled)\\b",
+              "captures": {
+                "1": { "name": "punctuation.definition.entity.pseudo.gss" },
+                "2": { "name": "entity.other.attribute-name.pseudo-class.gss" }
+              }
+            },
+            {
+              "match": ":([A-Za-z-]+)\\b",
+              "name": "invalid.illegal.unknown-pseudo-class.gss"
+            }
+          ]
+        },
+        {
+          "name": "meta.block.gss",
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.gss" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.section.block.end.gss" } },
+          "patterns": [
+            { "include": "#declaration" }
+          ]
+        }
+      ]
+    },
+
+    "declaration": {
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b(width|w|height|h|padding|spacing|align-x|align_x|alignX|align-y|align_y|alignY|background|bg|border-radius|border_radius|border-width|border_width|border-color|border_color|color|size|bold|font|font-family|font_family|gradient|text-align|text_align|textAlign|cursor|cursor-icon|cursorIcon|text-color|text_color|textColor|max-width|max_width|maxWidth|max-height|max_height|maxHeight|hidden|display)\\b(?=\\s*:)",
+          "name": "support.type.property-name.gss"
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_-]*)\\b(?=\\s*:)",
+          "name": "invalid.deprecated.unknown-property.gss"
+        },
+        {
+          "begin": "(:)",
+          "beginCaptures": { "1": { "name": "punctuation.separator.key-value.gss" } },
+          "end": "(;)|(?=\\})",
+          "endCaptures": { "1": { "name": "punctuation.terminator.rule.gss" } },
+          "patterns": [
+            { "include": "#values" }
+          ]
+        }
+      ]
+    },
+
+    "values": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#var-function" },
+        { "include": "#colors" },
+        { "include": "#numbers" },
+        {
+          "name": "support.constant.property-value.gss",
+          "match": "\\b(fill|shrink|fill-portion|none|flex|block|true|false|auto)\\b"
+        },
+        {
+          "name": "support.constant.alignment.gss",
+          "match": "\\b(Center|Start|End|Left|Right|Top|Bottom|center|start|end|left|right|top|bottom)\\b"
+        },
+        {
+          "name": "variable.other.custom-property.gss",
+          "match": "--[A-Za-z0-9_-]+"
+        }
+      ]
+    },
+
+    "var-function": {
+      "name": "meta.function.var.gss",
+      "begin": "\\b(var)\\s*(\\()",
+      "beginCaptures": {
+        "1": { "name": "support.function.var.gss" },
+        "2": { "name": "punctuation.section.parens.begin.gss" }
+      },
+      "end": "\\)",
+      "endCaptures": { "0": { "name": "punctuation.section.parens.end.gss" } },
+      "patterns": [
+        {
+          "name": "variable.other.custom-property.gss",
+          "match": "--[A-Za-z0-9_-]+"
+        },
+        { "name": "punctuation.separator.comma.gss", "match": "," },
+        { "include": "#colors" },
+        { "include": "#numbers" },
+        {
+          "name": "support.constant.property-value.gss",
+          "match": "\\b(fill|shrink|none|flex|block|true|false|auto)\\b"
+        }
+      ]
+    },
+
+    "colors": {
+      "name": "constant.other.color.rgb-value.hex.gss",
+      "match": "#([0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{3,4})\\b"
+    },
+
+    "numbers": {
+      "name": "constant.numeric.gss",
+      "match": "-?(?:\\d+\\.\\d+|\\.\\d+|\\d+)(px)?\\b",
+      "captures": {
+        "1": { "name": "keyword.other.unit.gss" }
+      }
+    }
+  }
+}

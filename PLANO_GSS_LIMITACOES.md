@@ -140,7 +140,7 @@ hover/focus/disabled reais e configuráveis para nenhum elemento.
 `resolve_state_classes`, parse + 5 testes), `parser.rs` (`UiNode::disabled` +
 4 campos `*_style`), `eval.rs` (resolução), `widget.rs` (Button/TextInput/
 Select/Checkbox/Toggle). README atualizado com seção própria.
-**Exemplo.** `examples/pseudo_estados/` (`main.rs`/`.xml`/`.gss`/`theme.json`) —
+**Exemplo.** `examples/pseudo_estados/` (`main.rs`/`.gv`/`.gss`/`theme.json`) —
 Button hover/active/disabled, TextInput hover/focus/disabled, Select hover,
 Checkbox/Toggle disabled, lado a lado. **Rodado e conferido visualmente**
 (`cargo run --example pseudo_estados`): hover clareia o botão, active escurece,

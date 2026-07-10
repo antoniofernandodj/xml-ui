@@ -194,7 +194,7 @@ tag e verifique a árvore em `motor.evaluated_templates`:
 fn test_divider_disponivel_sem_registro() {
     let mut motor = GlacierUI::new();
     std::fs::create_dir_all("templates").ok();
-    let tela = "templates/test_divider.xml";
+    let tela = "templates/test_divider.gv";
     std::fs::write(tela, r##"<Column><Divider divider_color="#f00" /></Column>"##).unwrap();
 
     motor.register_component("tela", tela).unwrap(); // NÃO registra Divider

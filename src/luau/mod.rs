@@ -764,7 +764,7 @@ mod tests {
     fn incrementa_lendo_e_escrevendo_o_contexto() {
         let comp = LuauComponent::from_source(
             "function incrementar() ctx.contador = ctx.contador + 1 end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -779,7 +779,7 @@ mod tests {
     fn onchange_recebe_o_valor() {
         let comp = LuauComponent::from_source(
             "function set_nome(v) ctx.nome = v end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -791,7 +791,7 @@ mod tests {
     fn atribuir_nil_remove_a_chave_no_contexto() {
         let comp = LuauComponent::from_source(
             "function limpar() ctx.temp = nil end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -806,7 +806,7 @@ mod tests {
 
     #[test]
     fn acao_sem_funcao_e_ignorada() {
-        let comp = LuauComponent::from_source("function a() end", "t.xml", "c").unwrap();
+        let comp = LuauComponent::from_source("function a() end", "t.gv", "c").unwrap();
         let mut data = HashMap::new();
         data.insert("x".into(), "keep".into());
         let data = drive(&comp, "inexistente", None, data);
@@ -819,7 +819,7 @@ mod tests {
         // uma função com o nome exato "open_service:abc".
         let comp = LuauComponent::from_source(
             "function open_service(id) ctx.aberto = id end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -833,7 +833,7 @@ mod tests {
         // valor do input em seguida.
         let comp = LuauComponent::from_source(
             "function field(k, v) ctx[k] = v end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -848,7 +848,7 @@ mod tests {
         let comp = LuauComponent::from_source(
             "function salvar(v) ctx.via = 'exato' end \
              function salvar_x() ctx.via = 'split' end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -860,7 +860,7 @@ mod tests {
     fn toast_empilha_no_contexto() {
         let comp = LuauComponent::from_source(
             "function go() toast({ message='falhou', kind='error', title='Erro' }) end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -875,7 +875,7 @@ mod tests {
     #[test]
     fn toast_aceita_string_curta() {
         let comp = LuauComponent::from_source(
-            "function go() toast('oi') end", "t.xml", "c",
+            "function go() toast('oi') end", "t.gv", "c",
         )
         .unwrap();
         let mut data = HashMap::new();
@@ -890,7 +890,7 @@ mod tests {
         let comp = LuauComponent::from_source(
             "function go() confirm({ title='T', message='M', confirm_label='Sim', \
              confirm_action='fez', destructive=true }) end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -921,7 +921,7 @@ mod tests {
                -- não deve erro: gsub num campo null-que-virou-nil guardado com fallback\n\
                ctx.safe = (t.d or 'vazio')\n\
              end",
-            "t.xml", "c",
+            "t.gv", "c",
         )
         .unwrap();
         let d = drive(&comp, "go", None, HashMap::new());
@@ -938,7 +938,7 @@ mod tests {
                ctx.arr = json.encode(json.array({}))\n\
                ctx.nested = json.encode({ ws = json.array({}), name = 'x' })\n\
              end",
-            "t.xml", "c",
+            "t.gv", "c",
         )
         .unwrap();
         let d = drive(&comp, "go", None, HashMap::new());
@@ -952,7 +952,7 @@ mod tests {
         // Um `formControl="url"` (onChange implícito = "url") sem função `url`
         // no script deve gravar ctx.url com o texto digitado — o loop que o
         // Form do Rust fechava, agora nativo para componentes Luau.
-        let comp = LuauComponent::from_source("function init() end", "t.xml", "c").unwrap();
+        let comp = LuauComponent::from_source("function init() end", "t.gv", "c").unwrap();
         let data = drive(&comp, "url", Some("https://x.tech"), HashMap::new());
         assert_eq!(data.get("url").map(String::as_str), Some("https://x.tech"));
     }
@@ -960,7 +960,7 @@ mod tests {
     #[test]
     fn acao_simples_sem_value_e_sem_funcao_e_ignorada() {
         // Sem função e sem value, nada acontece (não cria chave espúria).
-        let comp = LuauComponent::from_source("function a() end", "t.xml", "c").unwrap();
+        let comp = LuauComponent::from_source("function a() end", "t.gv", "c").unwrap();
         let data = drive(&comp, "inexistente", None, HashMap::new());
         assert_eq!(data.get("inexistente"), None);
     }
@@ -969,7 +969,7 @@ mod tests {
     fn init_semea_default() {
         let comp = LuauComponent::from_source(
             "function init() ctx.contador = ctx.contador or 5 end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -981,7 +981,7 @@ mod tests {
     fn json_decode_le_campos_de_um_objeto() {
         let comp = LuauComponent::from_source(
             "function go() local t = json.decode(ctx.raw) ctx.nome = t.nome ctx.n = t.n end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -997,7 +997,7 @@ mod tests {
     fn json_encode_de_array_preserva_ordem() {
         let comp = LuauComponent::from_source(
             "function go() ctx.out = json.encode({ 'a', 'b', 'c' }) end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1017,7 +1017,7 @@ mod tests {
                for i, s in ipairs(svcs) do out[i] = { name = s.name, up = s.running } end\n\
                ctx.services = json.encode(out)\n\
              end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1045,7 +1045,7 @@ mod tests {
                 if res.ok then ctx.dados = res.body else ctx.erro = res.error end
             end
             "#,
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1079,7 +1079,7 @@ mod tests {
             "function init() sse('http://ex/stream', { on_message = 'on_ev', on_close = 'on_fim' }) end\n\
              function on_ev(d) ctx.ultima = d end\n\
              function on_fim() ctx.fim = 'sim' end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1122,7 +1122,7 @@ mod tests {
                c:send('ola')\n\
              end\n\
              function on_ev(d) ctx.ultima = d end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1159,7 +1159,7 @@ mod tests {
         // é resolvido relativo ao diretório do template.
         let dir = std::env::temp_dir().join(format!("glacier_lua_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let tpl = dir.join("t.xml");
+        let tpl = dir.join("t.gv");
         let luau = dir.join("beh.luau");
         std::fs::write(&luau, "function incrementar() ctx.n = ctx.n + 1 end").unwrap();
         std::fs::write(&tpl, r#"<Text/><script src="beh.luau"></script>"#).unwrap();
@@ -1195,7 +1195,7 @@ mod tests {
         let comp = LuauComponent::from_source(
             "local strings = require('util.strings')\n\
              function grita() ctx.msg = strings.shout(ctx.msg) end",
-            dir.join("t.xml").to_str().unwrap(),
+            dir.join("t.gv").to_str().unwrap(),
             "c",
         )
         .unwrap();
@@ -1219,7 +1219,7 @@ mod tests {
         let comp = LuauComponent::from_source(
             "local a = require('once')\nlocal b = require('once')\n\
              function checar() ctx.cargas = a.n ctx.mesmo = tostring(a == b) end",
-            dir.join("t.xml").to_str().unwrap(),
+            dir.join("t.gv").to_str().unwrap(),
             "c",
         )
         .unwrap();
@@ -1245,7 +1245,7 @@ mod tests {
         let comp = LuauComponent::from_source(
             "local http = require('net.client')\nlocal api = http.new('http://ex')\n\
              function carregar() local r = api:get('/x') if r.ok then ctx.dados = r.body end end",
-            dir.join("t.xml").to_str().unwrap(),
+            dir.join("t.gv").to_str().unwrap(),
             "c",
         )
         .unwrap();
@@ -1275,7 +1275,7 @@ mod tests {
         let dir = temp_dir("require_missing");
         let comp = LuauComponent::from_source(
             "function usar() require('nao.existe') end",
-            dir.join("t.xml").to_str().unwrap(),
+            dir.join("t.gv").to_str().unwrap(),
             "c",
         )
         .unwrap();
@@ -1283,20 +1283,20 @@ mod tests {
         let data = drive(&comp, "usar", None, HashMap::new());
         assert!(data.is_empty());
         // A resolução em si devolve None para um módulo ausente.
-        assert!(resolve_module("nao.existe", &module_roots(&dir.join("t.xml"))).is_none());
+        assert!(resolve_module("nao.existe", &module_roots(&dir.join("t.gv"))).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn require_de_script_externo_resolve_relativo_ao_script() {
-        // Template em <dir>/app.xml com `<script src="scripts/app.luau">`; o
+        // Template em <dir>/app.gv com `<script src="scripts/app.luau">`; o
         // script faz `require("m")` que deve resolver <dir>/scripts/m.luau
         // (relativo ao SCRIPT, não ao template) — permite separar views/scripts.
         let dir = std::env::temp_dir().join(format!("glacier_ext_{}", std::process::id()));
         let scripts = dir.join("scripts");
         std::fs::create_dir_all(&scripts).unwrap();
         std::fs::write(
-            dir.join("app.xml"),
+            dir.join("app.gv"),
             "<Column></Column>\n<script src=\"scripts/app.luau\"></script>",
         )
         .unwrap();
@@ -1308,7 +1308,7 @@ mod tests {
         std::fs::write(scripts.join("m.luau"), "return { hi = \"ok\" }").unwrap();
 
         let comp =
-            LuauComponent::from_file(dir.join("app.xml").to_str().unwrap(), "app").unwrap();
+            LuauComponent::from_file(dir.join("app.gv").to_str().unwrap(), "app").unwrap();
         let data = drive(&comp, "go", None, HashMap::new());
         assert_eq!(data.get("v").map(String::as_str), Some("ok"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1316,7 +1316,7 @@ mod tests {
 
     #[test]
     fn require_bare_entre_irmaos_em_modulo_aninhado_resolve_pelo_proprio_diretorio() {
-        // <dir>/app.xml (template) -> scripts/app.luau (topo) faz
+        // <dir>/app.gv (template) -> scripts/app.luau (topo) faz
         // require("pkg/a"); pkg/a.luau, por sua vez, faz require("b") (NOME
         // NU, sem prefixo) esperando achar pkg/b.luau — não <dir>/scripts/b.luau.
         // Antes do fix, a resolução era sempre pelas roots fixas (dir do
@@ -1326,12 +1326,12 @@ mod tests {
         let scripts = dir.join("scripts");
         let pkg = scripts.join("pkg");
         std::fs::create_dir_all(&pkg).unwrap();
-        std::fs::write(dir.join("app.xml"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
+        std::fs::write(dir.join("app.gv"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
         std::fs::write(scripts.join("app.luau"), "local A = require(\"pkg/a\")\nfunction go() ctx.v = A.hi end").unwrap();
         std::fs::write(pkg.join("a.luau"), "local B = require(\"b\")\nreturn { hi = B.msg }").unwrap();
         std::fs::write(pkg.join("b.luau"), "return { msg = \"irmao-ok\" }").unwrap();
 
-        let comp = LuauComponent::from_file(dir.join("app.xml").to_str().unwrap(), "app").unwrap();
+        let comp = LuauComponent::from_file(dir.join("app.gv").to_str().unwrap(), "app").unwrap();
         let data = drive(&comp, "go", None, HashMap::new());
         assert_eq!(data.get("v").map(String::as_str), Some("irmao-ok"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1346,12 +1346,12 @@ mod tests {
         let scripts = dir.join("scripts");
         let pkg = scripts.join("pkg");
         std::fs::create_dir_all(&pkg).unwrap();
-        std::fs::write(dir.join("app.xml"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
+        std::fs::write(dir.join("app.gv"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
         std::fs::write(scripts.join("app.luau"), "local A = require(\"pkg/a\")\nfunction go() ctx.v = A.hi end").unwrap();
         std::fs::write(pkg.join("a.luau"), "local S = require(\"../shared\")\nreturn { hi = S.msg }").unwrap();
         std::fs::write(scripts.join("shared.luau"), "return { msg = \"subiu-ok\" }").unwrap();
 
-        let comp = LuauComponent::from_file(dir.join("app.xml").to_str().unwrap(), "app").unwrap();
+        let comp = LuauComponent::from_file(dir.join("app.gv").to_str().unwrap(), "app").unwrap();
         let data = drive(&comp, "go", None, HashMap::new());
         assert_eq!(data.get("v").map(String::as_str), Some("subiu-ok"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1370,7 +1370,7 @@ mod tests {
         let pb = scripts.join("pkg_b");
         std::fs::create_dir_all(&pa).unwrap();
         std::fs::create_dir_all(&pb).unwrap();
-        std::fs::write(dir.join("app.xml"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
+        std::fs::write(dir.join("app.gv"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
         std::fs::write(
             scripts.join("app.luau"),
             "local A = require(\"pkg_a/user\")\nlocal B = require(\"pkg_b/user\")\n\
@@ -1382,7 +1382,7 @@ mod tests {
         std::fs::write(pa.join("x.luau"), "return { name = \"de-a\" }").unwrap();
         std::fs::write(pb.join("x.luau"), "return { name = \"de-b\" }").unwrap();
 
-        let comp = LuauComponent::from_file(dir.join("app.xml").to_str().unwrap(), "app").unwrap();
+        let comp = LuauComponent::from_file(dir.join("app.gv").to_str().unwrap(), "app").unwrap();
         let data = drive(&comp, "go", None, HashMap::new());
         assert_eq!(data.get("a").map(String::as_str), Some("de-a"));
         assert_eq!(data.get("b").map(String::as_str), Some("de-b"));
@@ -1391,10 +1391,10 @@ mod tests {
 
     #[test]
     fn exemplo_imports_luau_carrega_e_importa_os_modulos() {
-        // Exercita a árvore REAL do exemplo: app.xml -> script.luau, que faz
+        // Exercita a árvore REAL do exemplo: app.gv -> script.luau, que faz
         // require("net.http_client") e require("util.strings"). Se algum caminho
         // quebrar, `from_file` (que roda o script no load) falha aqui.
-        let comp = LuauComponent::from_file("examples/imports_luau/app.xml", "app").unwrap();
+        let comp = LuauComponent::from_file("examples/imports_luau/app.gv", "app").unwrap();
         // init() não usa rede; só semeia o estado — prova que os módulos
         // resolveram e o script rodou.
         let data = drive(&comp, "init", None, HashMap::new());
@@ -1425,7 +1425,7 @@ mod tests {
 
     #[test]
     fn navigate_pede_navegacao_ao_motor() {
-        let comp = LuauComponent::from_source("function ir() navigate('perfil') end", "t.xml", "c").unwrap();
+        let comp = LuauComponent::from_source("function ir() navigate('perfil') end", "t.gv", "c").unwrap();
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
         comp.run("ir", None, &mut ctx);
@@ -1437,7 +1437,7 @@ mod tests {
 
     #[test]
     fn navigate_back_pede_volta_ao_motor() {
-        let comp = LuauComponent::from_source("function voltar() navigate_back() end", "t.xml", "c").unwrap();
+        let comp = LuauComponent::from_source("function voltar() navigate_back() end", "t.gv", "c").unwrap();
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
         comp.run("voltar", None, &mut ctx);
@@ -1449,7 +1449,7 @@ mod tests {
         let comp = LuauComponent::from_source(
             "function iniciar() after(50, 'disparou') end\n\
              function disparou() ctx.tocou = 'sim' end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1475,7 +1475,7 @@ mod tests {
         let comp = LuauComponent::from_source(
             "function iniciar() local t = after(50, 'disparou') t:cancel() end\n\
              function disparou() ctx.tocou = 'sim' end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1499,7 +1499,7 @@ mod tests {
         let comp = LuauComponent::from_source(
             "function iniciar() ctx.contador = 0 every(50, 'tique') end\n\
              function tique() ctx.contador = ctx.contador + 1 end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1536,7 +1536,7 @@ mod tests {
             "function iniciar() ctx.contador = 0 handle = every(50, 'tique') end\n\
              function tique() ctx.contador = ctx.contador + 1 end\n\
              function parar() handle:cancel() end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1567,7 +1567,7 @@ mod tests {
         let comp = LuauComponent::from_source(
             "function quebra() error('deu ruim') end\n\
              function on_error(msg) ctx.capturado = msg end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1585,7 +1585,7 @@ mod tests {
 
     #[test]
     fn erro_sem_on_error_e_promovido_a_toast() {
-        let comp = LuauComponent::from_source("function quebra() error('deu ruim') end", "t.xml", "c").unwrap();
+        let comp = LuauComponent::from_source("function quebra() error('deu ruim') end", "t.gv", "c").unwrap();
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
         comp.run("quebra", None, &mut ctx);
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[test]
     fn ctx_aceita_tabela_serializando_via_json() {
-        let comp = LuauComponent::from_source("function ir() ctx.obj = { a = 1, b = 'x' } end", "t.xml", "c").unwrap();
+        let comp = LuauComponent::from_source("function ir() ctx.obj = { a = 1, b = 'x' } end", "t.gv", "c").unwrap();
         let data = drive(&comp, "ir", None, HashMap::new());
         let raw = data.get("obj").expect("ctx.obj deveria ter sido gravado (serializado como JSON)");
         let v: serde_json::Value = serde_json::from_str(raw).unwrap();
@@ -1607,7 +1607,7 @@ mod tests {
     fn ctx_com_funcao_dentro_da_tabela_e_descartado_sem_afetar_o_resto() {
         let comp = LuauComponent::from_source(
             "function ir() ctx.ruim = { f = function() end } ctx.bom = 'ok' end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1620,7 +1620,7 @@ mod tests {
     fn viewport_reflete_o_tamanho_atual_do_motor() {
         let comp = LuauComponent::from_source(
             "function ler() local v = viewport() ctx.w = v.width ctx.h = v.height end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1637,7 +1637,7 @@ mod tests {
     #[test]
     fn storage_persiste_entre_instancias_do_componente() {
         let dir = temp_dir("storage");
-        let path = dir.join("t.xml");
+        let path = dir.join("t.gv");
         let script = "function salvar() storage.set('contador', ctx.contador) end\n\
                       function carregar() ctx.contador = storage.get('contador') end";
 
@@ -1658,7 +1658,7 @@ mod tests {
     #[test]
     fn storage_remove_apaga_a_chave() {
         let dir = temp_dir("storage_remove");
-        let path = dir.join("t.xml");
+        let path = dir.join("t.gv");
         let comp = LuauComponent::from_source(
             "function fluxo()\n\
                storage.set('k', 'v')\n\
@@ -1686,7 +1686,7 @@ mod tests {
                local ok = pcall(function() return os.execute('echo oi') end)\n\
                ctx.os_execute_ok = tostring(ok)\n\
              end",
-            "t.xml",
+            "t.gv",
             "c",
         )
         .unwrap();
@@ -1701,7 +1701,7 @@ mod tests {
 
     #[test]
     fn exemplo_navegacao_luau_login_correto_navega_para_o_dashboard() {
-        let comp = LuauComponent::from_file("examples/navegacao_luau/login.xml", "login_luau").unwrap();
+        let comp = LuauComponent::from_file("examples/navegacao_luau/login.gv", "login_luau").unwrap();
         let mut data = HashMap::new();
         data.insert("usuario".into(), "admin".into());
         data.insert("senha".into(), "123".into());
@@ -1715,7 +1715,7 @@ mod tests {
 
     #[test]
     fn exemplo_navegacao_luau_login_errado_nao_navega_e_seta_erro() {
-        let comp = LuauComponent::from_file("examples/navegacao_luau/login.xml", "login_luau").unwrap();
+        let comp = LuauComponent::from_file("examples/navegacao_luau/login.gv", "login_luau").unwrap();
         let mut data = HashMap::new();
         data.insert("usuario".into(), "quemquer".into());
         data.insert("senha".into(), "errada".into());
@@ -1730,7 +1730,7 @@ mod tests {
     #[test]
     fn exemplo_navegacao_luau_dashboard_sai_volta_e_limpa_senha() {
         let comp =
-            LuauComponent::from_file("examples/navegacao_luau/dashboard.xml", "dashboard_luau").unwrap();
+            LuauComponent::from_file("examples/navegacao_luau/dashboard.gv", "dashboard_luau").unwrap();
         let mut data = HashMap::new();
         data.insert("senha".into(), "123".into());
         {
@@ -1748,7 +1748,7 @@ mod tests {
         let _ = std::fs::remove_file(&storage_file);
 
         let comp =
-            LuauComponent::from_file("examples/robustez_luau/robustez.xml", "robustez").unwrap();
+            LuauComponent::from_file("examples/robustez_luau/robustez.gv", "robustez").unwrap();
         let mut data = HashMap::new();
 
         // init() lê o storage (vazio na primeira vez) e semeia os defaults.
@@ -1804,7 +1804,7 @@ mod tests {
             comp.run("salvar_rascunho", None, &mut ctx);
         }
         let comp2 =
-            LuauComponent::from_file("examples/robustez_luau/robustez.xml", "robustez").unwrap();
+            LuauComponent::from_file("examples/robustez_luau/robustez.gv", "robustez").unwrap();
         let mut data2 = HashMap::new();
         {
             let mut ctx2 = Context::new(&mut data2);

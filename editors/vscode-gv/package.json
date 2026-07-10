@@ -1,0 +1,61 @@
+{
+  "name": "glacier-view",
+  "displayName": "Glacier View",
+  "description": "Language support for Glacier View (.gv) markup — syntax highlighting plus go-to-definition from on_click/onChange actions to their Lua/Rust handlers and from component tags to their declarations.",
+  "version": "0.1.0",
+  "publisher": "antoniofernandodj",
+  "license": "MIT",
+  "author": {
+    "name": "Antonio Fernando"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/antoniofernandodj/xml-ui.git"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "main": "./extension.js",
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "glacier",
+    "glacier-ui",
+    "gv",
+    "glacier view"
+  ],
+  "icon": "icons/marketplace.png",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "glacier-view",
+        "aliases": [
+          "Glacier View",
+          "GlacierView",
+          "gv"
+        ],
+        "extensions": [
+          ".gv"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/gv-file.svg",
+          "dark": "./icons/gv-file.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "glacier-view",
+        "scopeName": "text.glacier-view",
+        "path": "./syntaxes/glacier-view.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.lua": "lua",
+          "meta.embedded.block.gss": "gss"
+        }
+      }
+    ]
+  }
+}

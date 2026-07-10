@@ -1,4 +1,4 @@
-<import name="CartaoUsuario" from="examples/lista/cartao_usuario.xml" />
+<import name="CartaoUsuario" from="examples/lista/cartao_usuario.gv" />
 
 <Container
     padding="30"

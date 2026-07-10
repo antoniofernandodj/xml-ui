@@ -1,7 +1,7 @@
 //! Estilos `.gss` COM ESCOPO escritos INLINE no template, via bloco `<style>`.
 //!
 //! Diferente de `examples/estilos.rs` (que carrega `.gss` de arquivo, global e
-//! por `<link>`), aqui as classes vivem no próprio `examples/estilos_inline/estilos_inline.xml`,
+//! por `<link>`), aqui as classes vivem no próprio `examples/estilos_inline/estilos_inline.gv`,
 //! dentro de um `<style>`. O corpo é GSS e fica escopado a este componente —
 //! nenhum arquivo `.gss` separado. Tudo com hot-reload: edite o `<style>` com a
 //! app rodando.
@@ -20,7 +20,7 @@ impl Component for Estilos {
     fn name(&self) -> &str { "estilos_inline" }
 
     fn template(&self) -> Template {
-        Template::File("examples/estilos_inline/estilos_inline.xml".into())
+        Template::File("examples/estilos_inline/estilos_inline.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

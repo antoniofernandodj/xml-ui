@@ -1316,7 +1316,7 @@ fn collect_textarea_bindings(node: &UiNode, out: &mut Vec<String>) {
     }
 }
 
-/// The file stem of a path (`templates/perfil_card.xml` -> `perfil_card`),
+/// The file stem of a path (`templates/perfil_card.gv` -> `perfil_card`),
 /// used as the default component name for `<link rel="import">`.
 fn file_stem(path: &str) -> String {
     std::path::Path::new(path)

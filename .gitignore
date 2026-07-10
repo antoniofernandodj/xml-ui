@@ -1,2 +1,5 @@
 /target
 /.claude
+
+# Pacotes de extensão VS Code gerados
+editors/**/*.vsix

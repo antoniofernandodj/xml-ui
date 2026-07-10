@@ -1,0 +1,154 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Glacier View",
+  "scopeName": "text.glacier-view",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#script-embed" },
+    { "include": "#style-embed" },
+    { "include": "#tag" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.block.glacier-view",
+      "begin": "<!--",
+      "end": "-->"
+    },
+
+    "script-embed": {
+      "comment": "Inline <script> body is Lua. <script src=...> is handled as a normal tag.",
+      "begin": "(<)(script)(?![^>]*\\bsrc\\s*=)((?:\\s+[^>]*)?)(>)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.glacier-view" },
+        "2": { "name": "entity.name.tag.script.glacier-view" },
+        "3": { "patterns": [{ "include": "#tag-attributes" }] },
+        "4": { "name": "punctuation.definition.tag.end.glacier-view" }
+      },
+      "end": "(</)(script)(\\s*>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.glacier-view" },
+        "2": { "name": "entity.name.tag.script.glacier-view" },
+        "3": { "name": "punctuation.definition.tag.end.glacier-view" }
+      },
+      "contentName": "meta.embedded.block.lua",
+      "patterns": [{ "include": "source.lua" }]
+    },
+
+    "style-embed": {
+      "comment": "Bodied <style> without href is inline GSS source.",
+      "begin": "(<)(style)(?![^>]*\\b(?:href|src)\\s*=)((?:\\s+[^>]*)?)(>)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.glacier-view" },
+        "2": { "name": "entity.name.tag.style.glacier-view" },
+        "3": { "patterns": [{ "include": "#tag-attributes" }] },
+        "4": { "name": "punctuation.definition.tag.end.glacier-view" }
+      },
+      "end": "(</)(style)(\\s*>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.glacier-view" },
+        "2": { "name": "entity.name.tag.style.glacier-view" },
+        "3": { "name": "punctuation.definition.tag.end.glacier-view" }
+      },
+      "contentName": "meta.embedded.block.gss",
+      "patterns": [{ "include": "source.gss" }]
+    },
+
+    "tag": {
+      "patterns": [
+        {
+          "comment": "Closing tag </Name>",
+          "match": "(</)([A-Za-z_][\\w.-]*)(\\s*>)",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.begin.glacier-view" },
+            "2": { "name": "entity.name.tag.glacier-view" },
+            "3": { "name": "punctuation.definition.tag.end.glacier-view" }
+          }
+        },
+        {
+          "comment": "Opening / self-closing tag: capture name, then attributes until > or />",
+          "begin": "(<)([A-Z][\\w.-]*)|(<)([a-z_][\\w.-]*)",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.tag.begin.glacier-view" },
+            "2": { "name": "entity.name.tag.component.glacier-view" },
+            "3": { "name": "punctuation.definition.tag.begin.glacier-view" },
+            "4": { "name": "entity.name.tag.glacier-view" }
+          },
+          "end": "(/?>)",
+          "endCaptures": {
+            "1": { "name": "punctuation.definition.tag.end.glacier-view" }
+          },
+          "patterns": [{ "include": "#tag-attributes" }]
+        }
+      ]
+    },
+
+    "tag-attributes": {
+      "patterns": [
+        { "include": "#comment" },
+        {
+          "comment": "Action attributes (on_click, onChange, on-toggle, aoClicar, ...) — value is a handler name",
+          "begin": "\\b(on[_-]?[A-Za-z]+|ao[A-Z][A-Za-z]*|ao_[a-z_]+)\\s*(=)\\s*(\")",
+          "beginCaptures": {
+            "1": { "name": "entity.other.attribute-name.action.glacier-view" },
+            "2": { "name": "punctuation.separator.key-value.glacier-view" },
+            "3": { "name": "punctuation.definition.string.begin.glacier-view" }
+          },
+          "end": "(\")",
+          "endCaptures": {
+            "1": { "name": "punctuation.definition.string.end.glacier-view" }
+          },
+          "contentName": "string.quoted.double.glacier-view",
+          "patterns": [
+            { "include": "#interpolation" },
+            {
+              "match": "[A-Za-z_]\\w*",
+              "name": "entity.name.function.action.glacier-view"
+            }
+          ]
+        },
+        {
+          "comment": "Generic attribute name = \"value\"",
+          "begin": "\\b([A-Za-z_][\\w.-]*)\\s*(=)\\s*(\")",
+          "beginCaptures": {
+            "1": { "name": "entity.other.attribute-name.glacier-view" },
+            "2": { "name": "punctuation.separator.key-value.glacier-view" },
+            "3": { "name": "punctuation.definition.string.begin.glacier-view" }
+          },
+          "end": "(\")",
+          "endCaptures": {
+            "1": { "name": "punctuation.definition.string.end.glacier-view" }
+          },
+          "contentName": "string.quoted.double.glacier-view",
+          "patterns": [
+            { "include": "#interpolation" },
+            { "include": "#color" }
+          ]
+        },
+        {
+          "comment": "Boolean/bare attribute name",
+          "match": "\\b([A-Za-z_][\\w.-]*)\\b",
+          "name": "entity.other.attribute-name.glacier-view"
+        }
+      ]
+    },
+
+    "interpolation": {
+      "comment": "{context_var} template interpolation inside attribute values",
+      "name": "meta.interpolation.glacier-view",
+      "begin": "\\{",
+      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.glacier-view" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.glacier-view" } },
+      "patterns": [
+        { "name": "punctuation.separator.default.glacier-view", "match": "\\|" },
+        { "include": "#color" },
+        { "name": "variable.other.interpolation.glacier-view", "match": "[A-Za-z_][\\w.]*" }
+      ]
+    },
+
+    "color": {
+      "name": "constant.other.color.rgb-value.hex.glacier-view",
+      "match": "#([0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{3,4})\\b"
+    }
+  }
+}

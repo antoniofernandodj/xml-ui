@@ -57,8 +57,8 @@ impl Component for Lista {
     }
 
     fn template(&self) -> Template {
-        // CartaoUsuario é carregado pelo <import> no topo de lista_usuarios.xml.
-        Template::File("examples/lista/lista_usuarios.xml".into())
+        // CartaoUsuario é carregado pelo <import> no topo de lista_usuarios.gv.
+        Template::File("examples/lista/lista_usuarios.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

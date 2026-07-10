@@ -21,8 +21,8 @@ impl Component for Perfil {
 
     fn template(&self) -> Template {
         // Só o componente de entrada precisa ser declarado; PerfilCard é puxado
-        // pelo <import> no topo de perfil.xml.
-        Template::File("examples/perfil/perfil.xml".into())
+        // pelo <import> no topo de perfil.gv.
+        Template::File("examples/perfil/perfil.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

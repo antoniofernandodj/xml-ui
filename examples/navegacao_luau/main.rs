@@ -17,12 +17,12 @@ impl GlacierApp for App {
     fn init() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
         if let Err(e) = motor
-            .register_component("login_luau", "examples/navegacao_luau/login.xml") {
+            .register_component("login_luau", "examples/navegacao_luau/login.gv") {
                 eprintln!("Erro ao registrar 'login_luau': {}", e);
             }
 
         if let Err(e) = motor
-            .register_component("dashboard_luau", "examples/navegacao_luau/dashboard.xml") {
+            .register_component("dashboard_luau", "examples/navegacao_luau/dashboard.gv") {
                 eprintln!("Erro ao registrar 'dashboard_luau': {}", e);
             }
 

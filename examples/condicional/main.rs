@@ -12,7 +12,7 @@ impl Component for Condicional {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/condicional/condicional.xml".into())
+        Template::File("examples/condicional/condicional.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

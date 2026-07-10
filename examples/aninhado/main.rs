@@ -23,7 +23,7 @@ impl Component for CartaoContador {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/aninhado/cartao_contador.xml".into())
+        Template::File("examples/aninhado/cartao_contador.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {
@@ -65,7 +65,7 @@ impl Component for Painel {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/aninhado/painel.xml".into())
+        Template::File("examples/aninhado/painel.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

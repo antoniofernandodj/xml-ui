@@ -20,7 +20,7 @@ impl App {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
         if let Err(e) =
-            motor.register_component("robustez", "examples/robustez_luau/robustez.xml")
+            motor.register_component("robustez", "examples/robustez_luau/robustez.gv")
         {
             eprintln!("Erro ao registrar: {}", e);
         }

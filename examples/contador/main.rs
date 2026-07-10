@@ -19,7 +19,7 @@ impl Component for Contador {
     }
 
     fn template(&self) -> Template {
-        Template::File("examples/contador/contador.xml".into())
+        Template::File("examples/contador/contador.gv".into())
     }
 
     fn init(&mut self, ctx: &mut Context) {

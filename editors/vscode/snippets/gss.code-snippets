@@ -1,0 +1,40 @@
+{
+  "Class rule": {
+    "prefix": "class",
+    "body": [".${1:name} {", "\t$0", "}"],
+    "description": "A GSS class rule"
+  },
+  "Pseudo-state rule": {
+    "prefix": "hover",
+    "body": [".${1:name}:${2|hover,focus,active,pressed,disabled|} {", "\t$0", "}"],
+    "description": "A GSS pseudo-state rule"
+  },
+  "Root variables": {
+    "prefix": "root",
+    "body": [":root {", "\t--${1:name}: ${2:#0D1117};$0", "}"],
+    "description": "Design tokens block"
+  },
+  "Media query": {
+    "prefix": "media",
+    "body": ["@media (${1|min-width,max-width,min-height,max-height|}: ${2:600}) {", "\t.${3:name} {", "\t\t$0", "\t}", "}"],
+    "description": "Responsive @media block"
+  },
+  "var() reference": {
+    "prefix": "var",
+    "body": ["var(--${1:name}${2:, ${3:fallback}})"],
+    "description": "Reference a design token"
+  },
+  "Card preset": {
+    "prefix": "card",
+    "body": [
+      ".${1:card} {",
+      "\tpadding: ${2:24};",
+      "\tbackground: ${3:#1E1E2E};",
+      "\tborder-radius: ${4:16};",
+      "\tborder-width: 1;",
+      "\tborder-color: ${5:#313244};",
+      "}"
+    ],
+    "description": "A card container preset"
+  }
+}

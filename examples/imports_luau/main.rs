@@ -2,7 +2,7 @@ use glacier_ui::{EngineMessage, GlacierUI};
 use iced::{widget::text, Color, Element, Subscription, Task};
 use std::time::Duration;
 
-/// Imports na camada Lua: o `<script>` de `app.xml` divide a lógica em
+/// Imports na camada Lua: o `<script>` de `app.gv` divide a lógica em
 /// bibliotecas e as importa com `require`, mantendo tudo encapsulado:
 ///
 /// ```luau
@@ -21,7 +21,7 @@ struct App {
 impl App {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register_component("app", "examples/imports_luau/app.xml") {
+        if let Err(e) = motor.register_component("app", "examples/imports_luau/app.gv") {
             eprintln!("Erro ao registrar: {}", e);
         }
         motor.set_initial_screen("app");

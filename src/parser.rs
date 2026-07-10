@@ -105,7 +105,7 @@ pub enum NodeType {
         props: HashMap<String, String>,
     },
     /// Declares that a component named `name` should be loaded from the XML
-    /// file at `from`, e.g. `<import name="PerfilCard" from="templates/perfil_card.xml" />`.
+    /// file at `from`, e.g. `<import name="PerfilCard" from="templates/perfil_card.gv" />`.
     /// Processed at registration time and stripped before rendering.
     Import {
         name: String,

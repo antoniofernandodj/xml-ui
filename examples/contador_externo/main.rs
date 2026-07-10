@@ -19,7 +19,7 @@ struct App {
 impl App {
     fn new() -> (Self, Task<EngineMessage>) {
         let mut motor = GlacierUI::new();
-        if let Err(e) = motor.register_component("contador", "examples/contador_externo/contador_externo.xml") {
+        if let Err(e) = motor.register_component("contador", "examples/contador_externo/contador_externo.gv") {
             eprintln!("Erro ao registrar: {}", e);
         }
         motor.set_initial_screen("contador");
