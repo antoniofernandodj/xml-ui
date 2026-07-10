@@ -190,14 +190,43 @@ impl Runtime {
         for spec in pending {
             tasks.push(self.open_child(spec));
         }
+
+        // 3. drena os broadcasts desse motor e entrega às OUTRAS janelas
+        let broadcasts = self
+            .windows
+            .get_mut(&id)
+            .map(|e| e.take_pending_broadcasts())
+            .unwrap_or_default();
+        if !broadcasts.is_empty() {
+            let others: Vec<window::Id> =
+                self.windows.keys().copied().filter(|w| *w != id).collect();
+            for b in &broadcasts {
+                for &oid in &others {
+                    if let Some(engine) = self.windows.get_mut(&oid) {
+                        tasks.push(
+                            engine
+                                .deliver_broadcast(&b.event, &b.payload)
+                                .map(move |m| DaemonMessage::Ui { id: oid, msg: m }),
+                        );
+                    }
+                }
+            }
+        }
+
+        // 4. se o motor pediu para fechar a própria janela, fecha (o
+        // `close_events` subsequente remove o motor; a última encerra o app)
+        if self.windows.get_mut(&id).map(|e| e.take_close_requested()).unwrap_or(false) {
+            tasks.push(window::close(id));
+        }
+
         Task::batch(tasks)
     }
 
     /// Materializa um [`WindowSpec`] numa janela nova: constrói um motor fresco,
     /// abre a janela (o `Id` vem síncrono) e registra motor + título.
     fn open_child(&mut self, spec: WindowSpec) -> Task<DaemonMessage> {
-        let WindowSpec { source, title, size, resizable } = spec;
-        let (engine, fallback_title) = build_engine(source);
+        let WindowSpec { source, title, size, resizable, data } = spec;
+        let (engine, fallback_title) = build_engine(source, &data);
         let (w, h) = size.unwrap_or((640.0, 480.0));
         let settings = window::Settings {
             size: Size::new(w, h),
@@ -270,9 +299,14 @@ impl Runtime {
 
 /// Constrói um [`GlacierUI`] novo para uma janela a partir da sua fonte, e
 /// devolve também o título de fallback (nome do componente). `Named` já deve ter
-/// sido resolvido para `File` no motor de origem (ver `run_on_owner`).
-fn build_engine(source: WindowSource) -> (GlacierUI, String) {
+/// sido resolvido para `File` no motor de origem (ver `run_on_owner`). `data`
+/// (pares `open_window({ data = ... })`) é semeado no contexto **antes** de
+/// registrar o componente, para que seu `init` já enxergue os valores.
+fn build_engine(source: WindowSource, data: &[(String, String)]) -> (GlacierUI, String) {
     let mut engine = GlacierUI::new();
+    for (k, v) in data {
+        engine.define_data(k, v);
+    }
     let title = match source {
         WindowSource::Component(comp) => {
             let name = comp.name().to_string();
@@ -381,9 +415,82 @@ mod tests {
     #[test]
     fn build_engine_de_arquivo_usa_stem_como_titulo() {
         let (engine, title) =
-            build_engine(WindowSource::File("examples/janelas_glacier/detalhe.gv".into()));
+            build_engine(WindowSource::File("examples/janelas_glacier/detalhe.gv".into()), &[]);
         assert_eq!(title, "detalhe");
         // O motor da nova janela renderiza a tela carregada sem erro.
         assert!(engine.render_current().is_ok());
+    }
+
+    #[test]
+    fn build_engine_semeia_data_no_contexto() {
+        let (engine, _) = build_engine(
+            WindowSource::File("examples/janelas_glacier/detalhe.gv".into()),
+            &[("url".into(), "http://x".into()), ("token".into(), "abc".into())],
+        );
+        assert_eq!(engine.get_data("url").map(String::as_str), Some("http://x"));
+        assert_eq!(engine.get_data("token").map(String::as_str), Some("abc"));
+    }
+
+    /// Emissor: uma ação envia um broadcast. Receptor: registra o que recebe.
+    struct Emissor;
+    impl Component for Emissor {
+        fn name(&self) -> &str {
+            "emissor"
+        }
+        fn template(&self) -> Template {
+            Template::Inline("<Text content=\"x\" />".to_string())
+        }
+        fn update(&mut self, action: &str, _v: Option<&str>, ctx: &mut Context) {
+            match action {
+                "enviar" => ctx.broadcast("ping", "{\"v\":\"1\"}"),
+                "fechar" => ctx.close_window(),
+                _ => {}
+            }
+        }
+    }
+    struct Receptor;
+    impl Component for Receptor {
+        fn name(&self) -> &str {
+            "receptor"
+        }
+        fn template(&self) -> Template {
+            Template::Inline("<Text content=\"x\" />".to_string())
+        }
+        fn update(&mut self, _a: &str, _v: Option<&str>, _c: &mut Context) {}
+        fn on_broadcast(&mut self, event: &str, payload: &str, ctx: &mut Context) {
+            ctx.set("rx", format!("{event}:{payload}"));
+        }
+    }
+
+    #[test]
+    fn broadcast_de_um_motor_chega_no_on_broadcast_de_outro() {
+        // Motor emissor: a ação enfileira um broadcast pendente.
+        let mut a = GlacierUI::new();
+        a.register(Box::new(Emissor)).unwrap();
+        a.set_initial_screen("emissor");
+        assert!(a.take_pending_broadcasts().is_empty());
+        let _ = a.dispatch(&EngineMessage::UiClick("enviar".into()));
+        let msgs = a.take_pending_broadcasts();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].event, "ping");
+
+        // Motor receptor: `deliver_broadcast` chama seu `on_broadcast`.
+        let mut b = GlacierUI::new();
+        b.register(Box::new(Receptor)).unwrap();
+        b.set_initial_screen("receptor");
+        let _ = b.deliver_broadcast(&msgs[0].event, &msgs[0].payload);
+        assert_eq!(b.get_data("rx").map(String::as_str), Some("ping:{\"v\":\"1\"}"));
+    }
+
+    #[test]
+    fn close_window_vira_take_close_requested() {
+        let mut a = GlacierUI::new();
+        a.register(Box::new(Emissor)).unwrap();
+        a.set_initial_screen("emissor");
+        assert!(!a.take_close_requested());
+        let _ = a.dispatch(&EngineMessage::UiClick("fechar".into()));
+        assert!(a.take_close_requested());
+        // Consumido: não persiste.
+        assert!(!a.take_close_requested());
     }
 }

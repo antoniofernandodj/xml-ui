@@ -8,6 +8,7 @@
 >
     <Column spacing="20" alignX="Center">
         <Text content="Detalhe (XML + Lua)" size="24" bold="true" color="#F5E0DC" />
+        <Text content="Aberto por: {origem}" size="13" color="#9399B2" />
         <Text content="Cliques nesta janela: {n}" size="16" color="#89B4FA" />
 
         <Button
@@ -24,26 +25,45 @@
             width="240"
             padding="10"
         />
+        <Button
+            text="Enviar ao painel e fechar"
+            on_click="avisar_e_fechar"
+            color="#F38BA8"
+            width="240"
+            padding="10"
+        />
     </Column>
 </Container>
 
 <script>
 -- Semeia o estado inicial desta janela (contador próprio, isolado das demais).
+-- `origem` vem semeado por open_window({ data = { origem = ... } }); default se
+-- a janela foi aberta sem data.
 function init()
     ctx.n = ctx.n or "0"
+    ctx.origem = ctx.origem or "(desconhecida)"
 end
 
 function contar()
     ctx.n = tostring((tonumber(ctx.n) or 0) + 1)
 end
 
--- Caminho Lua puro: abre MAIS uma janela carregando este mesmo XML.
+-- Caminho Lua puro: abre MAIS uma janela carregando este mesmo XML, passando
+-- de onde veio via `data`.
 function abrir_outra()
     open_window({
         file = "examples/janelas_glacier/detalhe.gv",
         title = "Detalhe (Lua)",
         width = 420,
         height = 320,
+        data = { origem = "detalhe" },
     })
+end
+
+-- Envia o contador atual ao painel (broadcast p/ as OUTRAS janelas) e fecha a si
+-- mesma — o padrão "janela auxiliar devolve um resultado e some".
+function avisar_e_fechar()
+    broadcast("detalhe_contou", { n = ctx.n })
+    close_window()
 end
 </script>

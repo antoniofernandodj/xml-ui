@@ -475,7 +475,28 @@ impl LuauComponent {
             }
 
             if req.get::<bool>("__glacier_window").unwrap_or(false) {
-                ctx.open_window(build_window_spec(&req)?);
+                ctx.open_window(build_window_spec(&self.luau, &req)?);
+                args = MultiValue::new();
+                continue;
+            }
+
+            if req.get::<bool>("__glacier_broadcast").unwrap_or(false) {
+                let event: String = req.get("event")?;
+                // `payload` é opcional; uma tabela é serializada em JSON (o mesmo
+                // caminho de `ctx.foo = tabela`), uma string vai como está, `nil`
+                // vira "".
+                let payload = match req.get::<Value>("payload")? {
+                    Value::Nil => String::new(),
+                    Value::String(s) => s.to_string_lossy(),
+                    other => luau_value_to_string(&self.luau, &other).unwrap_or_default(),
+                };
+                ctx.broadcast(event, payload);
+                args = MultiValue::new();
+                continue;
+            }
+
+            if req.get::<bool>("__glacier_window_close").unwrap_or(false) {
+                ctx.close_window();
                 args = MultiValue::new();
                 continue;
             }
@@ -607,6 +628,31 @@ impl LuauComponent {
         self.drive(thread, args, ctx)
     }
 
+    /// Entrega um broadcast de outra janela chamando a função Lua global
+    /// `on_broadcast(event, payload)`. `payload` (JSON) é decodificado para um
+    /// valor Lua (tabela) antes da chamada; vazio vira `nil`, JSON inválido vira
+    /// a string crua. Janelas sem `on_broadcast` global ignoram (no-op).
+    fn on_broadcast_inner(&self, event: &str, payload: &str, ctx: &mut Context) -> mlua::Result<()> {
+        let Ok(func) = self.luau.globals().get::<Function>("on_broadcast") else {
+            return Ok(());
+        };
+        self.sync_to_luau(ctx)?;
+        let payload_val: Value = if payload.is_empty() {
+            Value::Nil
+        } else {
+            match serde_json::from_str::<serde_json::Value>(payload) {
+                Ok(json) => self.luau.to_value(&json)?,
+                Err(_) => Value::String(self.luau.create_string(payload)?),
+            }
+        };
+        let thread = self.luau.create_thread(func)?;
+        let args = MultiValue::from_iter([
+            Value::String(self.luau.create_string(event)?),
+            payload_val,
+        ]);
+        self.drive(thread, args, ctx)
+    }
+
     /// Extrai uma [`PendingFetch`] da tabela `{ url, opts }` que o `fetch` cedeu.
     fn parse_fetch(&self, id: u64, req: &Table) -> mlua::Result<PendingFetch> {
         let url: String = req.get("url")?;
@@ -668,6 +714,12 @@ impl Component for LuauComponent {
         }
     }
 
+    fn on_broadcast(&mut self, event: &str, payload: &str, ctx: &mut Context) {
+        if let Err(e) = self.on_broadcast_inner(event, payload, ctx) {
+            self.report_error(&format!("on_broadcast '{event}'"), e, ctx);
+        }
+    }
+
     fn resume_timer(&mut self, id: u64, ctx: &mut Context) {
         if let Err(e) = self.resume_timer_inner(id, ctx) {
             self.report_error(&format!("after #{id}"), e, ctx);
@@ -711,7 +763,7 @@ fn build_dialog(req: &Table) -> mlua::Result<crate::dialogs::DialogSpec> {
 /// A fonte é `file` (caminho de template) ou `component` (nome já registrado no
 /// motor de origem, resolvido para o arquivo em `run_on_owner`). `title`,
 /// `width`/`height` e `resizable` são opcionais.
-fn build_window_spec(req: &Table) -> mlua::Result<crate::component::WindowSpec> {
+fn build_window_spec(lua: &Lua, req: &Table) -> mlua::Result<crate::component::WindowSpec> {
     use crate::component::WindowSpec;
     let mut spec = match (req.get::<Option<String>>("file")?, req.get::<Option<String>>("component")?) {
         (Some(file), _) => WindowSpec::file(file),
@@ -730,6 +782,17 @@ fn build_window_spec(req: &Table) -> mlua::Result<crate::component::WindowSpec> 
     }
     if let Some(resizable) = req.get::<Option<bool>>("resizable")? {
         spec = spec.resizable(resizable);
+    }
+    // `data = { chave = valor, ... }`: semeia o contexto da nova janela. Cada
+    // valor é convertido em string pela mesma regra de `ctx.foo = ...` (tabelas
+    // viram JSON); `nil` é ignorado.
+    if let Some(data) = req.get::<Option<Table>>("data")? {
+        for pair in data.pairs::<String, Value>() {
+            let (key, value) = pair?;
+            if let Some(v) = luau_value_to_string(lua, &value) {
+                spec = spec.with_data(key, v);
+            }
+        }
     }
     Ok(spec)
 }
@@ -1528,6 +1591,74 @@ mod tests {
         comp.run("abrir", None, &mut ctx);
         assert_eq!(ctx.windows.len(), 1);
         assert!(matches!(&ctx.windows[0].source, crate::component::WindowSource::Named(n) if n == "perfil"));
+    }
+
+    #[test]
+    fn open_window_com_data_semeia_contexto_da_nova_janela() {
+        // `data` vira pares no WindowSpec (o daemon/runtime os semeia no motor
+        // da nova janela). Uma tabela dentro de `data` é serializada em JSON.
+        let comp = LuauComponent::from_source(
+            "function abrir() open_window({ file = 'f.gv', data = { url = 'http://x', n = 3 } }) end",
+            "t.gv",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        let mut ctx = Context::new(&mut data);
+        comp.run("abrir", None, &mut ctx);
+        assert_eq!(ctx.windows.len(), 1);
+        let seeded = &ctx.windows[0].data;
+        assert!(seeded.iter().any(|(k, v)| k == "url" && v == "http://x"));
+        assert!(seeded.iter().any(|(k, v)| k == "n" && v == "3"));
+    }
+
+    #[test]
+    fn broadcast_enfileira_mensagem_com_payload_json() {
+        // `broadcast(event, tabela)` serializa a tabela em JSON no payload.
+        let comp = LuauComponent::from_source(
+            "function enviar() broadcast('project_created', { id = '42', name = 'api' }) end",
+            "t.gv",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        let mut ctx = Context::new(&mut data);
+        comp.run("enviar", None, &mut ctx);
+        assert_eq!(ctx.broadcasts.len(), 1);
+        assert_eq!(ctx.broadcasts[0].event, "project_created");
+        let json: serde_json::Value = serde_json::from_str(&ctx.broadcasts[0].payload).unwrap();
+        assert_eq!(json["id"], "42");
+        assert_eq!(json["name"], "api");
+    }
+
+    #[test]
+    fn close_window_pede_fechar_a_propria_janela() {
+        let comp = LuauComponent::from_source("function sair() close_window() end", "t.gv", "c").unwrap();
+        let mut data = HashMap::new();
+        let mut ctx = Context::new(&mut data);
+        assert!(!ctx.close_self);
+        comp.run("sair", None, &mut ctx);
+        assert!(ctx.close_self);
+    }
+
+    #[test]
+    fn on_broadcast_recebe_evento_e_payload_decodificado() {
+        // O handler global `on_broadcast(event, payload)` recebe o payload já
+        // decodificado de JSON numa tabela Lua.
+        let comp = LuauComponent::from_source(
+            "function on_broadcast(event, payload)\n\
+             ctx.got_event = event\n\
+             ctx.got_name = payload.name\n\
+             end",
+            "t.gv",
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        let mut ctx = Context::new(&mut data);
+        comp.on_broadcast_inner("project_created", "{\"name\":\"api\"}", &mut ctx).unwrap();
+        assert_eq!(ctx.get("got_event").map(String::as_str), Some("project_created"));
+        assert_eq!(ctx.get("got_name").map(String::as_str), Some("api"));
     }
 
     #[test]

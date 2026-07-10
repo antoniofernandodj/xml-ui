@@ -270,6 +270,11 @@ pub struct WindowSpec {
     pub size: Option<(f32, f32)>,
     /// Se a janela é redimensionável. Default `true`.
     pub resizable: bool,
+    /// Valores `(chave, valor)` semeados no contexto do motor da nova janela
+    /// **antes** de seu componente inicializar — como passar parâmetros para a
+    /// janela (`open_window({ file = ..., data = { url = ..., token = ... } })`
+    /// na camada Lua). Vazio por padrão.
+    pub data: Vec<(String, String)>,
 }
 
 impl WindowSpec {
@@ -289,7 +294,13 @@ impl WindowSpec {
     }
 
     fn from_source(source: WindowSource) -> Self {
-        Self { source, title: None, size: None, resizable: true }
+        Self { source, title: None, size: None, resizable: true, data: Vec::new() }
+    }
+
+    /// Semeia um par `(chave, valor)` no contexto da nova janela (encadeável).
+    pub fn with_data(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.data.push((key.into(), value.into()));
+        self
     }
 
     /// Define o título da janela (encadeável).
@@ -360,10 +371,31 @@ pub struct Context<'a> {
     /// Novas janelas pedidas via [`Context::open_window`]; o motor as drena para
     /// `pending_windows` e o daemon as abre após o `update`.
     pub(crate) windows: Vec<WindowSpec>,
+    /// Mensagens para OUTRAS janelas pedidas via [`Context::broadcast`]; o motor
+    /// as drena para `pending_broadcasts` e o daemon/runtime as entrega ao
+    /// [`Component::on_broadcast`] das demais janelas após o `update`.
+    pub(crate) broadcasts: Vec<BroadcastMessage>,
+    /// Pedido de fechar a **própria** janela ([`Context::close_window`]); o motor
+    /// o expõe via `take_close_requested` e o daemon/runtime fecha a janela dona
+    /// deste motor após o `update` (o motor isolado não conhece o próprio `Id`).
+    pub(crate) close_self: bool,
     /// Viewport atual `(largura, altura)` em px lógicos, lido por
     /// `Context::viewport` (a camada Lua expõe isto via `viewport()`). Só o
     /// motor escreve aqui (ver [`Context::set_viewport`]); um componente lê.
     pub(crate) viewport: (f32, f32),
+}
+
+/// Uma mensagem de uma janela para as demais, pedida via [`Context::broadcast`]
+/// (`broadcast(event, payload)` na camada Lua). `payload` é uma string livre —
+/// na prática JSON, para carregar dados estruturados; a janela receptora a
+/// recebe em [`Component::on_broadcast`] (o [`crate::luau::LuauComponent`]
+/// decodifica o JSON numa tabela Lua antes de chamar `on_broadcast`).
+#[derive(Debug, Clone)]
+pub struct BroadcastMessage {
+    /// Nome do evento (ex.: `"project_created"`), roteado pela janela receptora.
+    pub event: String,
+    /// Carga do evento — string livre; convenção: JSON.
+    pub payload: String,
 }
 
 impl<'a> Context<'a> {
@@ -382,6 +414,8 @@ impl<'a> Context<'a> {
             stream_cmds: Vec::new(),
             timers: Vec::new(),
             windows: Vec::new(),
+            broadcasts: Vec::new(),
+            close_self: false,
             viewport: (0.0, 0.0),
         }
     }
@@ -447,6 +481,28 @@ impl<'a> Context<'a> {
     /// instância Rust de [`Component`] — o caminho da API Rust.
     pub fn open_window_component(&mut self, comp: Box<dyn Component>) {
         self.windows.push(WindowSpec::component(comp));
+    }
+
+    /// Envia uma mensagem `(event, payload)` para as **outras** janelas abertas
+    /// (não para a própria). O daemon/runtime a entrega ao
+    /// [`Component::on_broadcast`] de cada uma após o `update`. `payload` é uma
+    /// string livre (convenção: JSON); na camada Lua, `broadcast(event, tabela)`
+    /// serializa a tabela em JSON automaticamente.
+    ///
+    /// ```ignore
+    /// ctx.broadcast("project_created", r#"{"id":"42","name":"api"}"#);
+    /// ```
+    pub fn broadcast(&mut self, event: impl Into<String>, payload: impl Into<String>) {
+        self.broadcasts.push(BroadcastMessage { event: event.into(), payload: payload.into() });
+    }
+
+    /// Pede para fechar a **própria** janela após o `update` (equivalente ao
+    /// `window:close`, mas disparável de dentro do componente/Lua). O motor
+    /// isolado não conhece o próprio `window::Id`; quem fecha é o daemon/runtime,
+    /// ao consumir `take_close_requested`. Útil logo após um [`Context::broadcast`]
+    /// para dispensar uma janela auxiliar (ex.: um formulário) ao concluir.
+    pub fn close_window(&mut self) {
+        self.close_self = true;
     }
 
     /// Pede ao motor para mostrar um toast (ver [`crate::toasts`]) após o
@@ -578,6 +634,15 @@ pub trait Component {
     /// [`crate::luau::LuauComponent`] usa isto para chamar o handler Lua
     /// registrado, exatamente como um evento de stream.
     fn resume_timer(&mut self, _id: u64, _ctx: &mut Context) {}
+
+    /// Recebe uma mensagem enviada por **outra** janela via [`Context::broadcast`]
+    /// (`broadcast(event, payload)` na camada Lua). `event` roteia o tratamento;
+    /// `payload` é a carga (convenção: JSON). Componentes que não escutam
+    /// broadcasts não precisam implementar. A [`crate::luau::LuauComponent`] usa
+    /// isto para chamar a função Lua global `on_broadcast(event, payload)` — com
+    /// `payload` já decodificado de JSON para uma tabela Lua —, que pode escrever
+    /// em `ctx` como qualquer ação (montar um card, exibir um toast, etc.).
+    fn on_broadcast(&mut self, _event: &str, _payload: &str, _ctx: &mut Context) {}
 
     /// Fontes contínuas de eventos externos (sockets, timers, watchers) que
     /// alimentam o contexto. Mapeie cada stream para

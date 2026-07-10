@@ -27,7 +27,7 @@ pub use app::GlacierApp;
 pub use parser::{UiNode, NodeType};
 pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_directives, StyleContext};
 pub use widget::{render_node, EngineMessage};
-pub use component::{Component, Context, ContextVar, DialogAction, Effect, EffectOutcome, FetchResult, Nav, Template, WindowSource, WindowSpec};
+pub use component::{BroadcastMessage, Component, Context, ContextVar, DialogAction, Effect, EffectOutcome, FetchResult, Nav, Template, WindowSource, WindowSpec};
 pub use daemon::{DaemonMessage, GlacierDaemon};
 pub use luau::LuauComponent;
 pub use stylesheet::{StyleSheet, StyleRule};
@@ -134,6 +134,15 @@ pub struct GlacierUI {
     /// [`component::WindowSource::Named`] para `File`. O daemon as consome com
     /// [`GlacierUI::take_pending_windows`] após cada `dispatch` e as abre.
     pending_windows: Vec<component::WindowSpec>,
+    /// Broadcasts pedidos por componentes deste motor (via
+    /// [`component::Context::broadcast`]). O daemon os consome com
+    /// [`GlacierUI::take_pending_broadcasts`] após cada `dispatch` e os entrega
+    /// às outras janelas.
+    pending_broadcasts: Vec<component::BroadcastMessage>,
+    /// `true` quando um componente deste motor pediu para fechar a própria
+    /// janela (via [`component::Context::close_window`]). O daemon o consome com
+    /// [`GlacierUI::take_close_requested`] após cada `dispatch` e fecha a janela.
+    pending_close_self: bool,
 }
 
 /// Contador global que dá a cada [`GlacierUI::new`] um `engine_id` único no
@@ -198,6 +207,8 @@ impl GlacierUI {
             builtin_component_names: std::collections::HashSet::new(),
             engine_id: NEXT_ENGINE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             pending_windows: Vec::new(),
+            pending_broadcasts: Vec::new(),
+            pending_close_self: false,
         };
         ui.register_builtins();
         ui
@@ -794,14 +805,20 @@ impl GlacierUI {
     ) -> iced::Task<EngineMessage> {
         // Disjoint per-field borrows (`components` vs `context_data`) are
         // accepted by the borrow checker when done inline like this.
-        let (nav, effects, dialog, toasts, fetches, streams, stream_cmds, timers, windows) = if let Some(comp) = self.components.get_mut(owner) {
+        let (nav, effects, dialog, toasts, fetches, streams, stream_cmds, timers, windows, broadcasts, close_self) = if let Some(comp) = self.components.get_mut(owner) {
             let mut ctx = component::Context::new(&mut self.context_data);
             ctx.set_viewport(self.viewport);
             run(comp.as_mut(), &mut ctx);
-            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts, ctx.fetches, ctx.streams, ctx.stream_cmds, ctx.timers, ctx.windows)
+            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts, ctx.fetches, ctx.streams, ctx.stream_cmds, ctx.timers, ctx.windows, ctx.broadcasts, ctx.close_self)
         } else {
             return iced::Task::none();
         };
+
+        // Broadcasts para as outras janelas e o pedido de fechar a própria: só
+        // acumulados aqui; o daemon/runtime os consome (`take_pending_broadcasts`
+        // / `take_close_requested`) após o `dispatch`.
+        self.pending_broadcasts.extend(broadcasts);
+        self.pending_close_self |= close_self;
 
         // Novas janelas pedidas pelo componente: resolve `Named` para o caminho
         // do arquivo (a nova janela sobe um motor independente que o carrega do
@@ -911,6 +928,34 @@ impl GlacierUI {
     /// transforma cada [`component::WindowSpec`] numa janela real do iced.
     pub fn take_pending_windows(&mut self) -> Vec<component::WindowSpec> {
         std::mem::take(&mut self.pending_windows)
+    }
+
+    /// Retira e devolve os broadcasts que os componentes deste motor pediram para
+    /// enviar desde a última chamada (ver [`component::Context::broadcast`]). O
+    /// runner [`daemon::GlacierDaemon`] chama isto após cada `dispatch` e entrega
+    /// cada mensagem às **outras** janelas via [`GlacierUI::deliver_broadcast`].
+    pub fn take_pending_broadcasts(&mut self) -> Vec<component::BroadcastMessage> {
+        std::mem::take(&mut self.pending_broadcasts)
+    }
+
+    /// Retira e devolve se um componente deste motor pediu para fechar a própria
+    /// janela desde a última chamada (ver [`component::Context::close_window`]).
+    /// O runner [`daemon::GlacierDaemon`] chama isto após cada `dispatch`; quando
+    /// `true`, fecha a janela dona deste motor.
+    pub fn take_close_requested(&mut self) -> bool {
+        std::mem::take(&mut self.pending_close_self)
+    }
+
+    /// Entrega um broadcast (`event`, `payload`) ao componente da tela atual
+    /// deste motor, chamando seu [`Component::on_broadcast`] (a
+    /// [`crate::luau::LuauComponent`] roteia para a função Lua global
+    /// `on_broadcast`). Chamado pelo runner nas janelas que **não** enviaram a
+    /// mensagem. Sem tela atual, é no-op.
+    pub fn deliver_broadcast(&mut self, event: &str, payload: &str) -> iced::Task<EngineMessage> {
+        let Some(owner) = self.current_screen.clone() else {
+            return iced::Task::none();
+        };
+        self.run_on_owner(&owner, |comp, ctx| comp.on_broadcast(event, payload, ctx))
     }
 
     /// Aggregates the [`Component::subscription`] of every registered component

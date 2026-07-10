@@ -675,6 +675,44 @@ function salvar() storage.set("rascunho", ctx.rascunho) end
 
 Nenhuma delas suspende a corrotina — o motor aplica o efeito e retoma na hora.
 
+### Múltiplas janelas: `open_window`, `broadcast`, `close_window`
+
+No modelo multi-janela (runner `GlacierDaemon`, sobre `iced::daemon`) cada
+janela é um `GlacierUI` **independente** — contexto e estado isolados. Estas três
+funções do prelúdio coordenam janelas (nenhuma suspende a corrotina):
+
+- **`open_window(opts)`** — abre uma janela nova. `opts` = string (caminho de
+  template) ou tabela:
+  ```lua
+  open_window("telas/detalhe.gv")
+  open_window({
+      file = "telas/detalhe.gv",   -- ou component = "nome_registrado"
+      title = "Detalhe", width = 460, height = 340,
+      data = { url = ctx.api_url, token = ctx.api_token },  -- semeia o contexto da nova janela
+  })
+  ```
+  Os pares de `data` são gravados no contexto do motor da nova janela **antes**
+  do `init` — é como passar parâmetros para ela.
+- **`broadcast(event, payload)`** — envia uma mensagem para as **outras** janelas
+  (não para a própria). `payload` é opcional; uma tabela é serializada em JSON. A
+  janela receptora trata em `on_broadcast(event, payload)` (função global), com o
+  `payload` já decodificado de volta numa tabela:
+  ```lua
+  -- janela A (emissora):
+  broadcast("project_created", { id = "42", name = "api" })
+  -- janela B (receptora):
+  function on_broadcast(event, payload)
+      if event == "project_created" then ctx.ultimo = payload.name end
+  end
+  ```
+- **`close_window()`** — fecha a **própria** janela (o motor isolado não conhece
+  o próprio `window::Id`; quem fecha é o daemon). Comum logo após um `broadcast`,
+  no padrão "janela auxiliar devolve um resultado e some".
+
+Do lado Rust, os equivalentes são `Context::open_window` / `Context::broadcast`
+/ `Context::close_window` e o método `Component::on_broadcast`. Veja
+[`examples/janelas_glacier`](examples/janelas_glacier).
+
 ### Erros visíveis: `on_error`
 
 Um erro de runtime no script vira **visível** em vez de sumir num `eprintln!`.

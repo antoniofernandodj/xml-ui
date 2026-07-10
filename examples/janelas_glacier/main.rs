@@ -16,14 +16,16 @@
 
 use glacier_ui::{Component, Context, GlacierDaemon, Template, WindowSpec};
 
-/// Componente Rust: um contador com botões para abrir janelas novas.
+/// Componente Rust: um contador com botões para abrir janelas novas e um
+/// contador de broadcasts recebidos das outras janelas (ver `on_broadcast`).
 struct Painel {
     valor: i32,
+    recebidos: i32,
 }
 
 impl Painel {
     fn new() -> Self {
-        Self { valor: 0 }
+        Self { valor: 0, recebidos: 0 }
     }
 }
 
@@ -38,6 +40,7 @@ impl Component for Painel {
 
     fn init(&mut self, ctx: &mut Context) {
         ctx.set("valor", self.valor.to_string());
+        ctx.set("recebidos", self.recebidos.to_string());
     }
 
     fn update(&mut self, action: &str, _value: Option<&str>, ctx: &mut Context) {
@@ -51,15 +54,27 @@ impl Component for Painel {
                 ctx.open_window_component(Box::new(Painel::new()));
             }
             // Caminho XML: abre uma janela carregando um template (que tem seu
-            // próprio `<script>` Lua).
+            // próprio `<script>` Lua), passando de onde veio via `data`.
             "nova_xml" => {
                 ctx.open_window(
                     WindowSpec::file("examples/janelas_glacier/detalhe.gv")
                         .title("Detalhe (Lua)")
-                        .size(420.0, 320.0),
+                        .size(420.0, 320.0)
+                        .with_data("origem", "painel"),
                 );
             }
             _ => {}
+        }
+    }
+
+    // Recebe os broadcasts que a janela `detalhe.gv` envia (`avisar_e_fechar`):
+    // incrementa o contador e mostra no template. Demonstra o lado RECEPTOR em
+    // Rust do IPC entre janelas.
+    fn on_broadcast(&mut self, event: &str, payload: &str, ctx: &mut Context) {
+        if event == "detalhe_contou" {
+            self.recebidos += 1;
+            ctx.set("recebidos", self.recebidos.to_string());
+            println!("painel recebeu broadcast '{event}': {payload}");
         }
     }
 }

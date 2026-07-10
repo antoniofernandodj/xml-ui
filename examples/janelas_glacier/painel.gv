@@ -9,6 +9,7 @@
     <Column spacing="22" align="Center">
         <Text content="Painel (Rust)" size="28" bold="true" color="#ECEFF4" />
         <Text content="Contador desta janela: {valor}" size="18" color="#A3BE8C" />
+        <Text content="Broadcasts recebidos: {recebidos}" size="14" color="#EBCB8B" />
 
         <Button
             text="Incrementar"

@@ -88,6 +88,29 @@ function open_window(opts)
     return coroutine.yield(t)
 end
 
+-- Envia uma mensagem para as OUTRAS janelas abertas (não para a própria). NÃO
+-- suspende: cede um pedido, o motor o acumula e o daemon o entrega ao
+-- `on_broadcast(event, payload)` de cada outra janela, retomando na hora.
+-- `payload` é opcional; uma tabela é serializada em JSON automaticamente (a
+-- janela receptora a recebe já decodificada de volta numa tabela).
+--   broadcast("project_created", { id = "42", name = "api" })
+function broadcast(event, payload)
+    return coroutine.yield({
+        __glacier_broadcast = true,
+        event = event,
+        payload = payload,
+    })
+end
+
+-- Fecha a PRÓPRIA janela. NÃO suspende: cede um pedido, o daemon fecha a janela
+-- dona deste motor após o turno. Útil logo após um `broadcast(...)` para
+-- dispensar uma janela auxiliar (ex.: um formulário) ao concluir.
+function close_window()
+    return coroutine.yield({
+        __glacier_window_close = true,
+    })
+end
+
 -- Temporizador de disparo único (equivalente a setTimeout). NÃO suspende: cede
 -- um pedido, o motor agenda `fn` (função ou nome de função global) para daqui
 -- a `ms` milissegundos e retoma na hora devolvendo um handle cancelável.
