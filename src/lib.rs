@@ -1081,10 +1081,16 @@ impl GlacierUI {
 
     /// Re-evaluates all templates with the current context and caches them
     pub fn reevaluate_all(&mut self) -> Result<(), String> {
+        // Qualquer sheet (global ou de escopo) com seletor de tag liga a
+        // resolução de estilo para nós sem class/id — calculado uma vez aqui
+        // para não pagar por nó no caso comum (nenhum seletor de tag).
+        let has_tag_rules = self.stylesheets.iter().any(|s| s.has_tag_rules())
+            || self.component_stylesheets.values().flatten().any(|s| s.has_tag_rules());
         let styles = StyleContext {
             global: &self.stylesheets,
             by_component: &self.component_stylesheets,
             viewport: Some(self.viewport),
+            has_tag_rules,
         };
         let mut evals = HashMap::new();
         for (name, template_ast) in &self.parsed_templates {

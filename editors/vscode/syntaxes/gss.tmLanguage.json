@@ -88,7 +88,7 @@
       "patterns": [
         {
           "name": "meta.selector.gss",
-          "begin": "(?=[.#])",
+          "begin": "(?=[.#]|[A-Za-z_])",
           "end": "(?=\\{|\\})",
           "patterns": [
             { "include": "#comments" },
@@ -105,6 +105,11 @@
                 "1": { "name": "punctuation.definition.entity.id.gss" },
                 "2": { "name": "entity.other.attribute-name.id.gss" }
               }
+            },
+            {
+              "comment": "Tag selector (builtin kind or component name): a bare identifier not preceded by . # or :",
+              "match": "(?<![.#:\\w-])[A-Za-z_][A-Za-z0-9_-]*",
+              "name": "entity.name.tag.gss"
             },
             {
               "match": "(:)(hover|focus|active|pressed|disabled)\\b",

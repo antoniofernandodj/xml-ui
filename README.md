@@ -731,9 +731,12 @@ da markup e os agrupa em **classes**. Aplique com `class="..."`:
 **Precedência (igual à do CSS):**
 
 1. um **atributo inline** no nó sempre vence tudo;
-2. um seletor de **id** (`#nome`) vence a classe (especificidade maior);
+2. um seletor de **id** (`#nome`) vence a classe;
 3. classes aplicam da **esquerda para a direita** (`class="a b"` → `b` sobrepõe `a`);
-4. estilos **globais** primeiro, depois os **com escopo** do componente.
+4. um seletor de **tag** (`Button`, `Card`) é o de **menor** especificidade — abaixo de classe/id/inline;
+5. estilos **globais** primeiro, depois os **com escopo** do componente.
+
+Especificidade, do mais fraco ao mais forte: **tag < classe < id < inline**.
 
 **Seletor de id.** Além de `.classe`, um bloco `#nome { }` casa o atributo
 `id="nome"` do nó e é aplicado **por cima** das classes (mas ainda por baixo do
@@ -749,6 +752,24 @@ unicidade não é exigida — vários nós podem compartilhar o mesmo `id`.
 ```xml
 <Text id="hero" class="title" content="Olá" />
 ```
+
+**Seletor de tag.** Um bloco `Tag { }` casa elementos pela **tag da markup**, com
+a **menor** especificidade (abaixo de classe/id/inline) — bom para *defaults*.
+Casa por dois caminhos: o **tipo builtin** do nó (`Button`, `Column`, `Text`, …)
+e o **nome de um componente** no seu uso (`<Card/>`). Como o componente é
+inlinado, um `Card {}` é aplicado como base na **raiz** do template dele. O nome
+é normalizado para minúsculo (`Button {}` == `button {}`) e aceita pseudo-estados
+(`Button:hover { }`) e `@media`.
+
+```gss
+Button { border-radius: 8; }   /* default de todo Button (builtin) */
+Card   { padding: 24; }        /* default de todo uso de <Card> (componente) */
+```
+
+> Cuidado com o alcance: uma regra de tag **global** atinge o elemento em
+> **todos** os componentes (não é opt-in como a classe). Prefira id/classe quando
+> quiser mirar um caso específico. Um componente de template **multi-raiz**
+> (`Fragment`) não recebe o underlay de `Card {}` — use uma raiz única.
 
 **Propriedades reconhecidas:** `width`/`w`, `height`/`h`, `padding`, `spacing`,
 `align-x`/`align-y`, `background`/`bg`, `border-radius`, `border-width`,

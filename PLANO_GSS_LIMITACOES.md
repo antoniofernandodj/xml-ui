@@ -25,20 +25,16 @@ traz problema, benefício, custo estimado, esboço de implementação e status.
 | 9 | Seletores **compostos/descendentes** + especificidade + `!important` | Médio-baixo | Alto | 4 | ⬜ |
 | 10 | Propriedades extras sob demanda (opacity, shadow, borda por-lado, gradiente radial, transform) | Pontual | Médio | 4 | ⬜ |
 | 11 | Seletor de **id** (`#nome`) + `#nome:estado` | Alto | Baixo | 2 | ✅ feito |
-| 12 | Seletor de **tag** (`Button {}`, incl. minúsculo) | Baixo | Baixo-médio | 4 | ⬜ |
+| 12 | Seletor de **tag** (`Button {}` builtin + `Card {}` componente) | Baixo-médio | Baixo-médio | 4 | ✅ feito |
 
 Fora de escopo: `margin` (o iced usa `padding`+`spacing`, não há caixa de margem).
 
-> **Nota sobre seletor de tag (#12).** Revisado: **é factível** (a tag já é
-> conhecida no parse), mas o valor é baixo e há duas armadilhas — (a) o namespace
-> de tag é compartilhado entre **builtins** e **componentes do usuário**
-> (`parser.rs:594` transforma tag desconhecida em `Component`), e como componentes
-> são **inlinados antes da resolução de estilo**, `Card {}` nunca casaria (só tipos
-> builtin); (b) um `Button {}` global fura a **encapsulação** de todo componente.
-> Se for feito: só builtins, especificidade mais baixa (tag < classe < id < inline),
-> tag normalizada para minúsculo (`Button {}` == `button {}`), documentar o raio
-> de alcance. O caso desejado ("estilizar um componente pelo nome") fica com
-> **id/classe**, não com tag.
+> **Nota sobre seletor de tag (#12) — resolvida.** As duas armadilhas viraram
+> decisões de design: (a) o `Card {}` **passou** a casar componente — como o
+> componente é inlinado, a regra é resolvida no uso e aplicada como **underlay**
+> (menor especificidade) na raiz do template; builtins casam pelo `kind` no
+> próprio nó. Ambos moram no mesmo mapa `tags` (por nome minúsculo). (b) O raio de
+> alcance de um `Button {}` global é **documentado** (não é opt-in como classe).
 
 ---
 
@@ -215,6 +211,31 @@ acima da classe.
 Extensão VS Code (`gss.tmLanguage.json`/snippets/README) e exemplo `estilos`
 (`#hero` vence `.title`) atualizados. **Exemplo rodado sem erro** (`cargo run
 --example estilos`; render visual não conferido headless, como os demais).
+
+### 12. Seletor de tag (`Button {}` builtin + `Card {}` componente)  ✅
+**Problema.** Só havia `.classe`/`#id`. Sem jeito de dar um *default* por tipo de
+elemento (todo Button) nem de estilizar um componente pelo seu nome.
+**Fix (feito).**
+- `Tag { }` e `Tag:estado { }` parseados como um identificador nu (o `!starts_with('.')`
+  que antes era erro), normalizados para **minúsculo**, guardados em
+  `StyleSheet.tags`/`tag_states` (e em `MediaQuery`). `Button {}` == `button {}`.
+- `resolve_classes`/`resolve_state_classes` ganharam o parâmetro `tag` como
+  **tier 0** (menor especificidade): `tag < classe < id < inline`.
+- **Builtin**: `NodeType::tag_name()` mapeia o `kind` para o nome canônico
+  (`column`, `text`, …); `eval.rs` casa no próprio nó. Fast-path preservado por
+  `StyleContext.has_tag_rules` — nó sem class/id só resolve se houver regra de tag.
+- **Componente**: como `<Card/>` é inlinado, a regra `Card {}` é resolvida no
+  **uso** (sheets do escopo do uso) e passada como **underlay** para a raiz do
+  template via novos parâmetros de `eval_owned` (`underlay`/`underlay_states`).
+  Aninhamento propaga o underlay (interno vence externo). Builtins e componentes
+  compartilham o mapa `tags` — o underlay é só `resolve_classes(Some(nome), "", None, …)`.
+- **Limitação documentada**: componente de template **multi-raiz** (`Fragment`)
+  não recebe o underlay (usar raiz única); e o raio de alcance de tag global.
+**Arquivos.** `stylesheet.rs` (tags/tag_states + `has_tag_rules` + `StateStyles::merge_from`
++ parse + resolve + 6 testes), `parser.rs` (`NodeType::tag_name`), `eval.rs`
+(underlay threading + `StyleContext.has_tag_rules` + 4 testes fim-a-fim), `lib.rs`.
+Extensão VS Code (grammar `entity.name.tag` + snippet `tag`) e exemplo `estilos`
+(`Button { border-radius }`) atualizados. **124 testes; exemplo rodado sem erro.**
 
 ---
 

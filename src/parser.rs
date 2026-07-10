@@ -171,6 +171,43 @@ pub enum NodeType {
     Fragment,
 }
 
+impl NodeType {
+    /// The canonical (lowercase) tag name a **tag selector** (`Button { }`)
+    /// matches this node by — its builtin kind. `None` for reference/structural
+    /// nodes (components, imports, `if`/`else`, `Fragment`, …), which either
+    /// inline away before styling (components are matched by *name*, as an
+    /// underlay, not here) or never render a box. Tag selectors are normalized
+    /// to lowercase, so `Button {}` and `button {}` both match a `Button`.
+    pub fn tag_name(&self) -> Option<&'static str> {
+        Some(match self {
+            NodeType::Container => "container",
+            NodeType::Column => "column",
+            NodeType::Row => "row",
+            NodeType::Text { .. } => "text",
+            NodeType::Button { .. } => "button",
+            NodeType::TextInput { .. } => "textinput",
+            NodeType::TextArea { .. } => "textarea",
+            NodeType::Image { .. } => "image",
+            NodeType::Svg { .. } => "svg",
+            NodeType::Scrollable { .. } => "scrollable",
+            NodeType::Checkbox { .. } => "checkbox",
+            NodeType::Toggle { .. } => "toggle",
+            NodeType::Rule { .. } => "rule",
+            NodeType::Select { .. } => "select",
+            NodeType::Form { .. } => "form",
+            NodeType::Include { .. }
+            | NodeType::Component { .. }
+            | NodeType::Import { .. }
+            | NodeType::ForEach { .. }
+            | NodeType::If { .. }
+            | NodeType::Else
+            | NodeType::Link { .. }
+            | NodeType::Style { .. }
+            | NodeType::Fragment => return None,
+        })
+    }
+}
+
 /// A numeric attribute that normally parses to `f32` at parse time. When its
 /// value carries a `{...}` placeholder it can't be parsed until the context is
 /// known, so the raw string is stashed in [`UiNode::numeric_templates`] under

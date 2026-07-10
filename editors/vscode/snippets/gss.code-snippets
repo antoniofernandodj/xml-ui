@@ -9,6 +9,11 @@
     "body": ["#${1:name} {", "\t$0", "}"],
     "description": "A GSS id rule (higher specificity than a class)"
   },
+  "Tag rule": {
+    "prefix": "tag",
+    "body": ["${1:Button} {", "\t$0", "}"],
+    "description": "A GSS tag rule (builtin kind or component name; lowest specificity)"
+  },
   "Pseudo-state rule": {
     "prefix": "hover",
     "body": ["${1|.,#|}${2:name}:${3|hover,focus,active,pressed,disabled|} {", "\t$0", "}"],

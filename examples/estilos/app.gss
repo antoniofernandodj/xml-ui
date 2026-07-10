@@ -46,3 +46,10 @@ Edite este arquivo com o exemplo rodando: o hot-reload aplica na hora.
 #hero {
     color: #F38BA8;
 }
+
+/* Seletor de tag: casa o tipo builtin do nó (aqui, todo Button), com a MENOR
+   especificidade — a classe/inline do botão ainda vencem. `Button {}` ==
+   `button {}` (normalizado p/ minúsculo). Um `Card {}` casaria o componente. */
+Button {
+    border-radius: 8;
+}

@@ -30,6 +30,7 @@ impl Component for Estilos {
         let atual: i32 = ctx.get("valor")
             .and_then(|v| v.parse::<i32>().ok())
             .unwrap_or(0);
+
         match action {
             "incrementar" => ctx.set("valor", (atual + 1).to_string()),
             "decrementar" => ctx.set("valor", (atual - 1).to_string()),

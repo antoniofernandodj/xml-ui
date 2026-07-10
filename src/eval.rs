@@ -225,6 +225,10 @@ pub struct StyleContext<'a> {
     /// Tamanho atual do viewport `(largura, altura)` em px lógicos, para avaliar
     /// blocos `@media`. `None` = sem info (nenhuma media query ativa).
     pub viewport: Option<(f32, f32)>,
+    /// `true` se qualquer sheet ativo (global ou de escopo) declara seletor de
+    /// **tag** — atalho para pular a resolução de estilo em nós sem `class`/`id`
+    /// quando não há nenhuma regra de tag para casar (ver [`eval_owned`]).
+    pub has_tag_rules: bool,
 }
 
 impl<'a> StyleContext<'a> {
@@ -352,7 +356,7 @@ fn expand_children(
                 // Clone child and clear else directive
                 let mut clone = child.clone();
                 clone.is_else = false;
-                out.push(eval_owned(&clone, context, templates, styles, scope, owner)?);
+                out.push(eval_owned(&clone, context, templates, styles, scope, owner, None, None)?);
             }
             last_if = None;
             continue;
@@ -367,7 +371,7 @@ fn expand_children(
                 clone.if_cond = None;
                 clone.if_equals = None;
                 clone.if_not_equals = None;
-                out.push(eval_owned(&clone, context, templates, styles, scope, owner)?);
+                out.push(eval_owned(&clone, context, templates, styles, scope, owner, None, None)?);
             }
             last_if = Some(truthy);
             continue;
@@ -457,7 +461,7 @@ fn expand_children(
                 last_if = None;
             }
             _ => {
-                let n = eval_owned(child, context, templates, styles, scope, owner)?;
+                let n = eval_owned(child, context, templates, styles, scope, owner, None, None)?;
                 // A `Fragment` (a multi-root component template, or an explicit
                 // `Fragment { … }`) is transparent: splice its already-evaluated
                 // children into this list instead of pushing a wrapper node, so
@@ -488,7 +492,7 @@ pub fn evaluate_node(
     styles: &StyleContext,
     scope: Option<&str>,
 ) -> Result<UiNode, String> {
-    eval_owned(node, context, templates, styles, scope, None)
+    eval_owned(node, context, templates, styles, scope, None, None, None)
 }
 
 /// Prefixes an action with its owning component, so `dispatch` can route it.
@@ -517,6 +521,7 @@ fn namespace_action(action: String, owner: Option<&str>) -> String {
 /// `<Component>`/`<Include>` reference, used to namespace its actions. `scope`
 /// is the component whose `<link>`-scoped stylesheets are currently in effect
 /// (it follows the same component boundaries as `owner`).
+#[allow(clippy::too_many_arguments)]
 fn eval_owned(
     node: &UiNode,
     context: &HashMap<String, String>,
@@ -524,6 +529,12 @@ fn eval_owned(
     styles: &StyleContext,
     scope: Option<&str>,
     owner: Option<&str>,
+    // Underlay de **tag-de-componente** (`Card {}`), passado só para a raiz
+    // avaliada do template de um componente: entra como o tier de MENOR
+    // especificidade (abaixo de tag builtin/classe/id/inline). `None` no caso
+    // comum. Aninhamento: o componente interno recebe o do externo já mesclado.
+    underlay: Option<&StyleRule>,
+    underlay_states: Option<&StateStyles>,
 ) -> Result<UiNode, String> {
     // A component reference — either the legacy `<Include src="..." />` or a tag
     // named after a registered component (e.g. `<PerfilCard ... />`) — is replaced
@@ -544,9 +555,26 @@ fn eval_owned(
             local_context.insert(key.clone(), evaluated_val);
         }
 
+        // Underlay de tag-de-componente: `Card {}` (minúsculo) casa o *nome* do
+        // componente no seu uso. Como o componente é inlinado, o estilo é
+        // resolvido aqui (sheets do escopo do USO) e passado como underlay de
+        // menor especificidade para a raiz avaliada do template. Herda o
+        // underlay do componente externo (aninhamento), com este por cima.
+        let mut underlay_rule = underlay.cloned().unwrap_or_default();
+        let mut underlay_st = underlay_states.cloned().unwrap_or_default();
+        if styles.has_tag_rules {
+            let active = styles.active(scope);
+            let tag = name.to_lowercase();
+            underlay_rule.merge_from(&resolve_classes(Some(&tag), "", None, &active, styles.viewport));
+            underlay_st.merge_from(&resolve_state_classes(Some(&tag), "", None, &active, styles.viewport));
+        }
+
         // The referenced subtree's actions and scoped styles belong to `name`
         // (innermost wins).
-        return eval_owned(template_ast, &local_context, templates, styles, Some(name), Some(name));
+        return eval_owned(
+            template_ast, &local_context, templates, styles, Some(name), Some(name),
+            Some(&underlay_rule), Some(&underlay_st),
+        );
     }
 
     // Resolve `class="..."` into a merged style rule that sits *underneath* the
@@ -554,21 +582,31 @@ fn eval_owned(
     // apply first, then the current component's scoped sheets. Pseudo-state
     // overlays (`.classe:hover { }` etc.) are resolved alongside the base rule
     // from the very same class list/sheets/viewport, so they stay consistent.
-    // Resolved when the node carries a `class` and/or an `id`; both are
-    // interpolated (`id="item-{i}"` works) and matched against the sheets.
-    let (style, state_styles): (StyleRule, StateStyles) =
-        if node.class.is_some() || node.id.is_some() {
+    // Style resolution, by ascending specificity (each overriding the previous):
+    //   component-tag underlay  <  builtin-tag  <  class  <  id  <  inline
+    // The underlay (from an enclosing `<Card/>`, if any) is the base; the tag
+    // (this node's builtin kind), classes and id are merged on top by
+    // `resolve_classes`; inline attrs win last, in the per-field match below.
+    // `class`/`id` are interpolated (`id="item-{i}"` works). The `styles.active`
+    // allocation is skipped for a plain node unless a tag rule is in play.
+    let (style, state_styles): (StyleRule, StateStyles) = {
+        let mut base = underlay.cloned().unwrap_or_default();
+        let mut states = underlay_states.cloned().unwrap_or_default();
+        let tag = node.kind.tag_name();
+        let needs_lookup = node.class.is_some()
+            || node.id.is_some()
+            || (tag.is_some() && styles.has_tag_rules);
+        if needs_lookup {
             let active = styles.active(scope);
             let processed = node.class.as_deref()
                 .map(|c| process_template(c, context))
                 .unwrap_or_default();
             let id = node.id.as_deref().map(|i| process_template(i, context));
-            let base = resolve_classes(&processed, id.as_deref(), &active, styles.viewport);
-            let states = resolve_state_classes(&processed, id.as_deref(), &active, styles.viewport);
-            (base, states)
-        } else {
-            (StyleRule::default(), StateStyles::default())
-        };
+            base.merge_from(&resolve_classes(tag, &processed, id.as_deref(), &active, styles.viewport));
+            states.merge_from(&resolve_state_classes(tag, &processed, id.as_deref(), &active, styles.viewport));
+        }
+        (base, states)
+    };
 
     // Resolve a numeric attribute whose XML value was a `{...}` template (see
     // `NumAttr`): interpolate against the context and parse to f32. `None` if
@@ -933,5 +971,73 @@ mod tests {
                 "ação built-in não pode ser namespaceada"
             );
         }
+    }
+
+    // --- Seletor de tag (builtin + componente), fim-a-fim pelo eval ------------
+
+    fn parse(xml: &str) -> UiNode {
+        UiNode::parse_xml(xml).unwrap()
+    }
+
+    /// Avalia `xml` com `sheet` como sheet global e um mapa de componentes.
+    fn eval_with(
+        xml: &str,
+        gss: &str,
+        templates: &HashMap<String, UiNode>,
+    ) -> UiNode {
+        let global = vec![StyleSheet::parse(gss).unwrap()];
+        let by_component: HashMap<String, Vec<StyleSheet>> = HashMap::new();
+        let styles = StyleContext {
+            global: &global,
+            by_component: &by_component,
+            viewport: None,
+            has_tag_rules: global.iter().any(|s| s.has_tag_rules()),
+        };
+        evaluate_node(&parse(xml), &HashMap::new(), templates, &styles, None).unwrap()
+    }
+
+    #[test]
+    fn builtin_tag_selector_applies_to_node() {
+        // `Button { padding: 7 }` casa o kind builtin, sem class/id no nó.
+        let out = eval_with(r#"<Button text="x" />"#, "Button { padding: 7; }", &HashMap::new());
+        assert_eq!(out.padding.as_deref(), Some("7"));
+    }
+
+    #[test]
+    fn inline_wins_over_builtin_tag() {
+        let out = eval_with(
+            r#"<Button text="x" padding="20" />"#,
+            "Button { padding: 7; }",
+            &HashMap::new(),
+        );
+        assert_eq!(out.padding.as_deref(), Some("20"));
+    }
+
+    #[test]
+    fn component_tag_selector_underlays_inlined_root() {
+        // `Card {}` casa o NOME do componente e vira underlay na raiz (Column) do
+        // template inlinado. O `background` da raiz (via classe) vence o underlay,
+        // mas o `padding`, que só o underlay declara, sobrevive.
+        let mut templates = HashMap::new();
+        templates.insert(
+            "Card".to_string(),
+            parse(r#"<Column class="root"><Text content="oi" /></Column>"#),
+        );
+        let out = eval_with(
+            r#"<Card />"#,
+            ".root { background: #101010; } Card { padding: 24; background: #ffffff; }",
+            &templates,
+        );
+        // A raiz avaliada é a Column do template.
+        assert!(matches!(out.kind, NodeType::Column));
+        assert_eq!(out.padding.as_deref(), Some("24")); // só o underlay declara
+        assert_eq!(out.background.as_deref(), Some("#101010")); // classe vence o underlay
+    }
+
+    #[test]
+    fn tag_selector_ignored_without_any_tag_rule() {
+        // Sem regra de tag no sheet, um nó pelado não paga resolução e nada muda.
+        let out = eval_with(r#"<Button text="x" />"#, ".unused { padding: 9; }", &HashMap::new());
+        assert_eq!(out.padding, None);
     }
 }
