@@ -840,14 +840,20 @@ impl GlacierUI {
     ) -> iced::Task<EngineMessage> {
         // Disjoint per-field borrows (`components` vs `context_data`) are
         // accepted by the borrow checker when done inline like this.
-        let (nav, effects, dialog, toasts, fetches, streams, stream_cmds, timers, windows, broadcasts, close_self) = if let Some(comp) = self.components.get_mut(owner) {
+        let (nav, effects, dialog, toasts, fetches, streams, stream_cmds, timers, windows, broadcasts, close_self, editor_appends) = if let Some(comp) = self.components.get_mut(owner) {
             let mut ctx = component::Context::new(&mut self.context_data);
             ctx.set_viewport(self.viewport);
             run(comp.as_mut(), &mut ctx);
-            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts, ctx.fetches, ctx.streams, ctx.stream_cmds, ctx.timers, ctx.windows, ctx.broadcasts, ctx.close_self)
+            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts, ctx.fetches, ctx.streams, ctx.stream_cmds, ctx.timers, ctx.windows, ctx.broadcasts, ctx.close_self, ctx.editor_appends)
         } else {
             return iced::Task::none();
         };
+
+        // Appends incrementais a <textarea> (append_textarea): insere `text` no
+        // fim do Content mantido, sem recriar (preserva scroll; O(text)), e
+        // sincroniza context_data + editor_synced para `clipboard:` copiar tudo e
+        // sync_editors não reconstruir depois. Ver `Context::append_textarea`.
+        self.apply_editor_appends(editor_appends);
 
         // Broadcasts para as outras janelas e o pedido de fechar a própria: só
         // acumulados aqui; o daemon/runtime os consome (`take_pending_broadcasts`
@@ -1240,6 +1246,28 @@ impl GlacierUI {
             self.last_stream_reeval = Some(std::time::Instant::now());
             self.pending_reeval = false;
             let _ = self.reevaluate_all();
+        }
+    }
+
+    /// Aplica os appends incrementais pedidos por `append_textarea` (ver
+    /// [`crate::component::Context::append_textarea`]): insere `text` no fim do
+    /// [`text_editor::Content`] do editor `binding` (criando-o se preciso), SEM
+    /// recriar o buffer — preserva o scroll e custa O(text), não O(conteúdo).
+    /// Sincroniza `context_data` + `editor_synced` com o texto resultante para
+    /// `clipboard:<binding>` copiar tudo e [`GlacierUI::sync_editors`] não
+    /// reconstruir (perdendo o insert) na próxima reavaliação.
+    fn apply_editor_appends(&mut self, appends: Vec<(String, String)>) {
+        use iced::widget::text_editor::{Action, Content, Edit, Motion};
+        for (binding, text) in appends {
+            if text.is_empty() {
+                continue;
+            }
+            let content = self.editors.entry(binding.clone()).or_insert_with(Content::new);
+            content.perform(Action::Move(Motion::DocumentEnd));
+            content.perform(Action::Edit(Edit::Paste(std::sync::Arc::new(text))));
+            let full = content.text();
+            self.editor_synced.insert(binding.clone(), full.clone());
+            self.context_data.insert(binding, full);
         }
     }
 
@@ -1737,6 +1765,36 @@ fn resize_direction(s: &str) -> Option<iced::window::Direction> {
         "sw" | "southwest" | "south-west" => SouthWest,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod editor_append_tests {
+    use super::*;
+
+    // `append_textarea` (via apply_editor_appends) cria o buffer no 1º append e,
+    // nos seguintes, INSERE no fim sem substituir — as linhas coexistem em ordem.
+    // E sincroniza context_data (p/ clipboard) == editor_synced (p/ sync_editors
+    // não reconstruir e perder o insert).
+    #[test]
+    fn append_creates_and_grows_without_replacing() {
+        let mut motor = GlacierUI::new();
+
+        motor.apply_editor_appends(vec![("logs".to_string(), "linha 1\n".to_string())]);
+        assert!(
+            motor.get_data("logs").is_some_and(|s| s.contains("linha 1")),
+            "1º append deve refletir no ctx"
+        );
+
+        motor.apply_editor_appends(vec![("logs".to_string(), "linha 2\n".to_string())]);
+        let after = motor.get_data("logs").cloned().unwrap_or_default();
+        let p1 = after.find("linha 1");
+        let p2 = after.find("linha 2");
+        assert!(p1.is_some() && p2.is_some(), "ambas as linhas devem existir: {after:?}");
+        assert!(p1 < p2, "linha 2 deve vir depois da linha 1");
+
+        // ctx == editor_synced → a próxima reavaliação não reconstrói o Content.
+        assert_eq!(motor.editor_synced.get("logs"), motor.get_data("logs"));
+    }
 }
 
 #[cfg(test)]

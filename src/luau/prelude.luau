@@ -111,6 +111,22 @@ function close_window()
     })
 end
 
+-- Anexa `text` ao FIM do <textarea> ligado a `binding` (a chave usada no seu
+-- `value`), de forma INCREMENTAL: o motor faz um insert no fim do buffer do
+-- text_editor em vez de recriá-lo, então o scroll é preservado e o custo é
+-- O(text), não O(conteúdo todo). Ideal para logs vivos — cada linha nova é
+-- appendada no fim, sem o "pulo pro topo" de reescrever ctx[binding] inteiro.
+-- O motor também sincroniza ctx[binding] com o texto completo, para `clipboard:`
+-- copiar tudo e o conteúdo sobreviver a uma reavaliação. NÃO suspende.
+--   append_textarea("meus_logs", "12:00:00 nova linha\n")
+function append_textarea(binding, text)
+    return coroutine.yield({
+        __glacier_editor_append = true,
+        binding = binding,
+        text = text,
+    })
+end
+
 -- Temporizador de disparo único (equivalente a setTimeout). NÃO suspende: cede
 -- um pedido, o motor agenda `fn` (função ou nome de função global) para daqui
 -- a `ms` milissegundos e retoma na hora devolvendo um handle cancelável.

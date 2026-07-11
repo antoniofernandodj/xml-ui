@@ -501,6 +501,14 @@ impl LuauComponent {
                 continue;
             }
 
+            if req.get::<bool>("__glacier_editor_append").unwrap_or(false) {
+                let binding: String = req.get("binding")?;
+                let text: String = req.get("text")?;
+                ctx.append_textarea(binding, text);
+                args = MultiValue::new();
+                continue;
+            }
+
             if req.get::<bool>("__glacier_after").unwrap_or(false) {
                 let id = self.alloc_id();
                 let ms: u64 = req.get("ms")?;

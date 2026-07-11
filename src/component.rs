@@ -379,6 +379,10 @@ pub struct Context<'a> {
     /// o expõe via `take_close_requested` e o daemon/runtime fecha a janela dona
     /// deste motor após o `update` (o motor isolado não conhece o próprio `Id`).
     pub(crate) close_self: bool,
+    /// Appends incrementais a `<textarea>`s pedidos via [`Context::append_textarea`]
+    /// (`(binding, text)`); o motor os aplica ao `text_editor::Content` após o
+    /// `update`, sem recriar o buffer. Ver `append_textarea` no prelúdio Lua.
+    pub(crate) editor_appends: Vec<(String, String)>,
     /// Viewport atual `(largura, altura)` em px lógicos, lido por
     /// `Context::viewport` (a camada Lua expõe isto via `viewport()`). Só o
     /// motor escreve aqui (ver [`Context::set_viewport`]); um componente lê.
@@ -416,6 +420,7 @@ impl<'a> Context<'a> {
             windows: Vec::new(),
             broadcasts: Vec::new(),
             close_self: false,
+            editor_appends: Vec::new(),
             viewport: (0.0, 0.0),
         }
     }
@@ -503,6 +508,14 @@ impl<'a> Context<'a> {
     /// para dispensar uma janela auxiliar (ex.: um formulário) ao concluir.
     pub fn close_window(&mut self) {
         self.close_self = true;
+    }
+
+    /// Anexa `text` ao fim do buffer do `<textarea>` ligado a `binding` (ver
+    /// `append_textarea` no prelúdio Lua). O motor faz o insert incremental no
+    /// [`iced::widget::text_editor::Content`] após o `update` e sincroniza
+    /// `data[binding]` — não recria o buffer (preserva scroll; O(text)).
+    pub fn append_textarea(&mut self, binding: impl Into<String>, text: impl Into<String>) {
+        self.editor_appends.push((binding.into(), text.into()));
     }
 
     /// Pede ao motor para mostrar um toast (ver [`crate::toasts`]) após o
