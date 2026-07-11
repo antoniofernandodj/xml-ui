@@ -143,7 +143,27 @@ pub struct GlacierUI {
     /// janela (via [`component::Context::close_window`]). O daemon o consome com
     /// [`GlacierUI::take_close_requested`] após cada `dispatch` e fecha a janela.
     pending_close_self: bool,
+    /// Coalescência de reavaliação para eventos de stream de alta frequência
+    /// (`sse`/`websocket`). Reavaliar TODOS os templates a cada mensagem de
+    /// stream é O(templates) por mensagem e, sob um stream verborrágico (ex.:
+    /// logs de container a centenas de linhas/s), satura a thread da UI. Em vez
+    /// disso, a cada mensagem de stream o contexto é aplicado (barato) mas a
+    /// reavaliação é limitada a ~[`STREAM_REEVAL_INTERVAL`]: se o intervalo já
+    /// passou, reavalia na hora; senão só marca `pending_reeval` e o resíduo é
+    /// escoado no próximo tick de `ToastTick` (ver `prune_expired_toasts`
+    /// call-site) ou na próxima mensagem elegível. Ações do usuário (clique,
+    /// submit, navegação) NÃO passam por aqui — reavaliam sempre na hora.
+    pending_reeval: bool,
+    /// Instante da última reavaliação disparada por mensagem de stream, base do
+    /// throttle acima. `None` = nunca (primeira mensagem reavalia na hora).
+    last_stream_reeval: Option<std::time::Instant>,
 }
+
+/// Intervalo mínimo entre reavaliações disparadas por mensagens de stream
+/// (`sse`/`websocket`). ~30fps: rápido o bastante para logs vivos parecerem
+/// contínuos, lento o bastante para o custo de reavaliar os templates não
+/// saturar a UI sob rajada. Ver [`GlacierUI::pending_reeval`].
+const STREAM_REEVAL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(33);
 
 /// Contador global que dá a cada [`GlacierUI::new`] um `engine_id` único no
 /// processo (ver [`GlacierUI::engine_id`]).
@@ -209,6 +229,8 @@ impl GlacierUI {
             pending_windows: Vec::new(),
             pending_broadcasts: Vec::new(),
             pending_close_self: false,
+            pending_reeval: false,
+            last_stream_reeval: None,
         };
         ui.register_builtins();
         ui
@@ -541,6 +563,10 @@ impl GlacierUI {
             }
             EngineMessage::ToastTick => {
                 self.prune_expired_toasts();
+                // Escoa o resíduo da coalescência de stream (ver `pending_reeval`):
+                // as últimas mensagens de uma rajada aparecem no máx. um tick após
+                // ela cessar, sem custo quando não há nada pendente.
+                self.flush_pending_reeval();
                 return iced::Task::none();
             }
             // Tab / Shift+Tab: move focus between focusable widgets. iced's text
@@ -610,7 +636,7 @@ impl GlacierUI {
                 let owner = owner.clone();
                 let id = *id;
                 let result = result.clone();
-                return self.run_on_owner(&owner, move |comp, ctx| {
+                return self.run_on_owner(&owner, false, move |comp, ctx| {
                     comp.resume_fetch(id, &result, ctx);
                 });
             }
@@ -636,7 +662,10 @@ impl GlacierUI {
                         (K::Closed, String::new())
                     }
                 };
-                return self.run_on_owner(&owner, move |comp, ctx| {
+                // Só mensagens (`Message`, alta frequência) coalescem a
+                // reavaliação; Open/Error/Closed são raras e refletem na hora.
+                let coalesce = matches!(kind, K::Message);
+                return self.run_on_owner(&owner, coalesce, move |comp, ctx| {
                     comp.on_stream_event(id, kind, &data, ctx);
                 });
             }
@@ -646,7 +675,7 @@ impl GlacierUI {
             EngineMessage::LuauTimer { owner, id } => {
                 let owner = owner.clone();
                 let id = *id;
-                return self.run_on_owner(&owner, move |comp, ctx| {
+                return self.run_on_owner(&owner, false, move |comp, ctx| {
                     comp.resume_timer(id, ctx);
                 });
             }
@@ -787,7 +816,7 @@ impl GlacierUI {
             },
         };
 
-        self.run_on_owner(&owner, move |comp, ctx| route(comp, &bare_action, ctx))
+        self.run_on_owner(&owner, false, move |comp, ctx| route(comp, &bare_action, ctx))
     }
 
     /// Borrows the component named `owner`, runs `run` against it and a fresh
@@ -798,9 +827,15 @@ impl GlacierUI {
     /// an HTTP task ([`crate::net::perform`]) whose completion comes back as
     /// [`EngineMessage::LuaResume`] to resume the suspended Lua coroutine.
     /// Shared by [`GlacierUI::route_to_owner`] and the `LuaResume` path.
+    /// `coalesce_reeval`: quando `true` (mensagens de stream de alta frequência),
+    /// a reavaliação final é limitada por [`STREAM_REEVAL_INTERVAL`] via
+    /// [`GlacierUI::request_stream_reeval`] em vez de rodar a cada chamada — a
+    /// menos que o handler tenha produzido uma mudança visual imediata (nav,
+    /// dialog ou toast), caso em que reavalia na hora mesmo assim.
     fn run_on_owner(
         &mut self,
         owner: &str,
+        coalesce_reeval: bool,
         run: impl FnOnce(&mut dyn component::Component, &mut component::Context),
     ) -> iced::Task<EngineMessage> {
         // Disjoint per-field borrows (`components` vs `context_data`) are
@@ -836,6 +871,11 @@ impl GlacierUI {
             self.pending_windows.push(spec);
         }
 
+        // Mudança visual imediata? Nav/dialog/toast precisam refletir na hora,
+        // então cancelam a coalescência (senão um toast pedido por um handler de
+        // stream poderia demorar até um tick para aparecer).
+        let visual_change = nav.is_some() || dialog.is_some() || !toasts.is_empty();
+
         match nav {
             Some(component::Nav::To(s)) => self.navigate_to(&s),
             Some(component::Nav::Back) => self.navigate_back(),
@@ -852,7 +892,13 @@ impl GlacierUI {
             self.show_toast(spec);
         }
 
-        let _ = self.reevaluate_all();
+        if coalesce_reeval && !visual_change {
+            self.request_stream_reeval();
+        } else {
+            self.last_stream_reeval = Some(std::time::Instant::now());
+            self.pending_reeval = false;
+            let _ = self.reevaluate_all();
+        }
 
         // Turn each requested effect into an iced Task whose completion feeds an
         // EffectOutcome (data patch + optional toast) back through dispatch.
@@ -955,7 +1001,7 @@ impl GlacierUI {
         let Some(owner) = self.current_screen.clone() else {
             return iced::Task::none();
         };
-        self.run_on_owner(&owner, |comp, ctx| comp.on_broadcast(event, payload, ctx))
+        self.run_on_owner(&owner, false, |comp, ctx| comp.on_broadcast(event, payload, ctx))
     }
 
     /// Aggregates the [`Component::subscription`] of every registered component
@@ -1167,6 +1213,36 @@ impl GlacierUI {
     }
 
     /// Re-evaluates all templates with the current context and caches them
+    /// Reavaliação coalescida para mensagens de stream de alta frequência:
+    /// reavalia na hora se [`STREAM_REEVAL_INTERVAL`] já passou desde a última;
+    /// senão só marca `pending_reeval`, para o próximo tick (ou a próxima
+    /// mensagem elegível) escoar. Ver [`GlacierUI::pending_reeval`].
+    fn request_stream_reeval(&mut self) {
+        let now = std::time::Instant::now();
+        let due = self
+            .last_stream_reeval
+            .map_or(true, |t| now.duration_since(t) >= STREAM_REEVAL_INTERVAL);
+        if due {
+            self.last_stream_reeval = Some(now);
+            self.pending_reeval = false;
+            let _ = self.reevaluate_all();
+        } else {
+            self.pending_reeval = true;
+        }
+    }
+
+    /// Escoa uma reavaliação coalescida pendente (ver [`GlacierUI::pending_reeval`]),
+    /// para as últimas mensagens de uma rajada de stream aparecerem mesmo depois
+    /// que ela cessa. Chamado nos ticks de `ToastTick`. Sem efeito (nem custo de
+    /// reavaliação) quando não há nada pendente.
+    fn flush_pending_reeval(&mut self) {
+        if self.pending_reeval {
+            self.last_stream_reeval = Some(std::time::Instant::now());
+            self.pending_reeval = false;
+            let _ = self.reevaluate_all();
+        }
+    }
+
     pub fn reevaluate_all(&mut self) -> Result<(), String> {
         // Qualquer sheet (global ou de escopo) com seletor de tag liga a
         // resolução de estilo para nós sem class/id — calculado uma vez aqui
