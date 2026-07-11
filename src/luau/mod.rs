@@ -669,7 +669,15 @@ impl LuauComponent {
             Some(o) => {
                 let method = o.get::<Option<String>>("method")?.unwrap_or_else(|| "GET".into());
                 let body = o.get::<Option<String>>("body")?;
-                let headers = parse_headers_table(&o)?;
+                let mut headers = parse_headers_table(&o)?;
+                // Atalho `user_agent = "..."`: vira um header User-Agent, a menos
+                // que o chamador já tenha posto um em `headers` (esse vence). Sem
+                // isto, o net aplica o UA padrão (ver DEFAULT_USER_AGENT).
+                if let Some(ua) = o.get::<Option<String>>("user_agent")? {
+                    if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
+                        headers.push(("User-Agent".to_string(), ua));
+                    }
+                }
                 (method, body, headers)
             }
             None => ("GET".into(), None, Vec::new()),

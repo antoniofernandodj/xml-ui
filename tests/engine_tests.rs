@@ -1014,11 +1014,19 @@ fn test_textarea_parses_and_syncs() {
     let xml = r##"<TextArea value="dotenv" placeholder="KEY=VALUE" onChange="env_changed" />"##;
     let ast = UiNode::parse_xml(xml).unwrap();
     match &ast.kind {
-        NodeType::TextArea { value_var, placeholder, on_change } => {
+        NodeType::TextArea { value_var, placeholder, on_change, readonly } => {
             assert_eq!(value_var, "dotenv");
             assert_eq!(placeholder, "KEY=VALUE");
             assert_eq!(on_change, "env_changed");
+            assert!(!readonly, "readonly deve ser falso por padrão");
         }
+        other => panic!("expected TextArea, got {other:?}"),
+    }
+
+    // `readonly` liga via atributo.
+    let ro = UiNode::parse_xml(r##"<TextArea value="x" readonly="true" />"##).unwrap();
+    match &ro.kind {
+        NodeType::TextArea { readonly, .. } => assert!(readonly, "readonly=true deve parsear"),
         other => panic!("expected TextArea, got {other:?}"),
     }
 

@@ -653,11 +653,12 @@ fn eval_owned(
                 secure: *secure,
             }
         }
-        NodeType::TextArea { placeholder, value_var, on_change } => {
+        NodeType::TextArea { placeholder, value_var, on_change, readonly } => {
             NodeType::TextArea {
                 placeholder: process_template(placeholder, context),
                 value_var: process_template(value_var, context),
                 on_change: namespace_action(process_template(on_change, context), owner),
+                readonly: *readonly,
             }
         }
         NodeType::Image { source, clip_circle } => {

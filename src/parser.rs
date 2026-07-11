@@ -36,6 +36,10 @@ pub enum NodeType {
         placeholder: String,
         value_var: String,
         on_change: String,
+        /// Somente-leitura: o usuário pode selecionar, rolar e mover o cursor,
+        /// mas edições (digitar/apagar/colar) são ignoradas. Útil para exibir
+        /// texto selecionável/copiável (ex.: logs) sem permitir alteração.
+        readonly: bool,
     },
     Image {
         source: String,
@@ -529,7 +533,8 @@ impl UiNode {
                 let placeholder = Self::get_attr(&node, &["placeholder", "dica"]).unwrap_or_default();
                 let value_var = Self::get_attr(&node, &["value", "valor"]).unwrap_or_default();
                 let on_change = Self::get_attr(&node, &["onChange", "on_change", "on-change", "aoMudar", "ao_mudar"]).unwrap_or_default();
-                NodeType::TextArea { placeholder, value_var, on_change }
+                let readonly = Self::get_attr_bool(&node, &["readonly", "read_only", "read-only", "somenteLeitura", "somente_leitura"]);
+                NodeType::TextArea { placeholder, value_var, on_change, readonly }
             }
             "Image" | "image" | "Imagem" | "imagem" => {
                 let source = Self::get_attr(&node, &["source", "src", "origem", "caminho"]).unwrap_or_default();

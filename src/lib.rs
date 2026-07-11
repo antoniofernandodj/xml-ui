@@ -511,6 +511,20 @@ impl GlacierUI {
                 open_url(&url);
                 return iced::Task::none();
             }
+            // Built-in: `textarea_end:<binding>` rola o <textarea> de `binding`
+            // até o FIM (e leva o cursor pro fim), sem envolver um componente.
+            // Útil para um botão "ir ao fim" num log longo. Faz Scroll por
+            // line_count (clampa no fundo) + Move(DocumentEnd).
+            if let Some(binding) = a.strip_prefix("textarea_end:") {
+                use iced::widget::text_editor::{Action, Motion};
+                if let Some(content) = self.editors.get_mut(binding) {
+                    let lines = content.line_count() as i32;
+                    content.perform(Action::Scroll { lines });
+                    content.perform(Action::Move(Motion::DocumentEnd));
+                }
+                let _ = self.reevaluate_all();
+                return iced::Task::none();
+            }
             // Built-in window controls: drive the host window without any
             // component code, so a borderless app can wire its custom titlebar
             // straight from markup — `on_click="window:close"` for the buttons,
@@ -757,7 +771,13 @@ impl GlacierUI {
                     None => submit_task,
                 };
             }
-            EngineMessage::UiEditorAction { binding, on_change, action } => {
+            EngineMessage::UiEditorAction { binding, on_change, action, readonly } => {
+                // Read-only (<textarea readonly>): ignora EDIÇÕES (digitar/apagar/
+                // colar), mantendo navegação/seleção/scroll — o texto continua
+                // selecionável, copiável e rolável, só não é alterável.
+                if *readonly && matches!(action, iced::widget::text_editor::Action::Edit(_)) {
+                    return iced::Task::none();
+                }
                 // Apply the edit to the kept editor buffer, then mirror its full
                 // text into the context (and `editor_synced`, so the sync step
                 // doesn't treat this as an external change).

@@ -125,7 +125,7 @@ pub enum EngineMessage {
     /// An edit on a `<TextArea>`: `binding` is its `value` key, `action` is the
     /// editor action to apply to the kept `Content`, `on_change` is the action
     /// dispatched (with the new full text) after applying it.
-    UiEditorAction { binding: String, on_change: String, action: text_editor::Action },
+    UiEditorAction { binding: String, on_change: String, action: text_editor::Action, readonly: bool },
     /// Navigate to the given screen (button with `navigateTo`).
     Navigate(String),
     /// Go back to the previous screen (button with `navigateBack`).
@@ -536,7 +536,7 @@ pub fn render_node<'a>(
             }
             elem
         }
-        NodeType::TextArea { placeholder, value_var, on_change } => {
+        NodeType::TextArea { placeholder, value_var, on_change, readonly } => {
             // The engine keeps the `Content` for this binding (created by
             // `sync_editors` before render). If it is somehow missing on a first
             // frame, fall back to a static placeholder rather than panicking.
@@ -544,12 +544,14 @@ pub fn render_node<'a>(
                 Some(content) => {
                     let binding = value_var.clone();
                     let on_change = on_change.clone();
+                    let readonly = *readonly;
                     let mut ed = text_editor(content)
                         .placeholder(placeholder.as_str())
                         .on_action(move |action| EngineMessage::UiEditorAction {
                             binding: binding.clone(),
                             on_change: on_change.clone(),
                             action,
+                            readonly,
                         })
                         .padding(parse_padding(&node.padding));
                     if let Some(f) = font_for(&node.font) {

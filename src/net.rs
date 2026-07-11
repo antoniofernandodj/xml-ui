@@ -18,6 +18,10 @@ use crate::component::{FetchResult, PendingFetch, StreamKind};
 
 type HttpsClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
 
+/// User-Agent padrão dos `fetch`, usado quando o chamador não define um (nem por
+/// header nem pelo opt `user_agent`). Ver [`send`].
+const DEFAULT_USER_AGENT: &str = concat!("glacier-ui/", env!("CARGO_PKG_VERSION"));
+
 /// Instala o provider de criptografia default (ring) do rustls no processo, uma
 /// única vez. Necessário porque o rustls 0.23 não embute um provider default:
 /// tanto o cliente hyper quanto o handshake TLS do WebSocket
@@ -58,6 +62,12 @@ async fn send(req: &PendingFetch) -> Result<FetchResult, Box<dyn std::error::Err
     let mut builder = hyper::Request::builder().method(method).uri(&req.url);
     for (k, v) in &req.headers {
         builder = builder.header(k.as_str(), v.as_str());
+    }
+    // User-Agent padrão quando o chamador não definiu um (via header ou o opt
+    // `user_agent` de `fetch`): alguns servidores rejeitam/roteiam diferente sem
+    // UA. Um UA explícito nos headers sempre vence (não sobrescrevemos).
+    if !req.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
+        builder = builder.header(hyper::header::USER_AGENT, DEFAULT_USER_AGENT);
     }
     let request = builder.body(body)?;
 
