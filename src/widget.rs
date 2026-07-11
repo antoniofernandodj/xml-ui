@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use iced::widget::{
     button, column, row, text, container, text_input, text_editor, image, svg, scrollable,
-    checkbox, toggler, rule, pick_list, mouse_area, Space,
+    checkbox, toggler, rule, pick_list, mouse_area, Space, Tooltip,
 };
+use iced::widget::tooltip::Position as TooltipPosition;
 
 /// One option of a `<Select>`: `label` is shown, `value` is dispatched. Equality
 /// (used by `pick_list` to mark the current selection) is by `value` only.
@@ -1006,6 +1007,28 @@ pub fn render_node<'a>(
             }
         }
         element = ma.into();
+    }
+
+    // `tooltip="..."` — envolve por último, DEPOIS do mouse_area acima, para o
+    // balão reagir ao hover sobre a superfície interativa inteira (não só o
+    // conteúdo visual). Sem `.style()` explícito: `container::dark` é um
+    // helper embutido do iced, independente do tema ativo (fundo quase preto +
+    // texto branco) — não precisa de fiação nova com o `theme.json` do app
+    // pra ficar legível em qualquer paleta.
+    if let Some(tip) = node.tooltip.as_deref().filter(|s| !s.is_empty()) {
+        let position = match node.tooltip_position.as_deref() {
+            Some("bottom") => TooltipPosition::Bottom,
+            Some("left") => TooltipPosition::Left,
+            Some("follow") | Some("follow_cursor") | Some("cursor") => {
+                TooltipPosition::FollowCursor
+            }
+            Some("top") => TooltipPosition::Top,
+            _ => TooltipPosition::Right,
+        };
+        let label = container(text(tip.to_string()).size(12))
+            .padding([4, 8])
+            .style(container::dark);
+        element = Tooltip::new(element, label, position).gap(6).into();
     }
 
     element

@@ -1721,3 +1721,55 @@ fn test_text_attribute_fallback_when_no_child() {
         panic!("Root should be Text");
     }
 }
+
+#[test]
+fn tooltip_parses_interpolates_and_renders() {
+    // Atributo cru: `tooltip` e o alias `title` (HTML-like) parseiam pro mesmo
+    // campo; `tooltipPosition` é opcional (default resolvido em widget.rs, não
+    // no parser — aqui só confere que o valor cru sobrevive).
+    let ast = UiNode::parse_xml(r#"<Button text="x" tooltip="Ajuda" />"#).unwrap();
+    assert_eq!(ast.tooltip.as_deref(), Some("Ajuda"));
+
+    let ast_alias = UiNode::parse_xml(r#"<Button text="x" title="Ajuda 2" />"#).unwrap();
+    assert_eq!(ast_alias.tooltip.as_deref(), Some("Ajuda 2"));
+
+    let ast_pos = UiNode::parse_xml(
+        r#"<Button text="x" tooltip="Ajuda" tooltipPosition="left" />"#,
+    ).unwrap();
+    assert_eq!(ast_pos.tooltip_position.as_deref(), Some("left"));
+
+    // Sem tooltip, o campo fica None (não vira string vazia nem afeta o render).
+    let ast_none = UiNode::parse_xml(r#"<Button text="x" />"#).unwrap();
+    assert_eq!(ast_none.tooltip, None);
+
+    // Interpolação (`tooltip="{var}"`) + render de ponta a ponta, com um botão
+    // (mouse_area) E um nó puro (row, sem on_press) — o wrap de tooltip fica
+    // depois do mouse_area em widget.rs; isso confere que ambos os caminhos
+    // (com e sem mouse_area) compilam/renderizam sem panicar.
+    let xml = r#"
+        <Column>
+            <Button text="Doc" tooltip="{help_text}" onClick="noop" />
+            <Row tooltip="linha sem clique" tooltipPosition="bottom">
+                <Text content="ícone" />
+            </Row>
+        </Column>
+    "#;
+    let mut motor = GlacierUI::new();
+    std::fs::create_dir_all("templates").ok();
+    let tpl = "templates/test_tooltip.gv";
+    std::fs::write(tpl, xml).unwrap();
+    motor.register_component("tipcomp", tpl).unwrap();
+    motor.define_data("help_text", "Ajuda interpolada");
+    motor.reevaluate_all().unwrap();
+
+    let evaluated = motor.evaluated_templates.get("tipcomp").unwrap();
+    let button_node = &evaluated.children[0];
+    assert_eq!(button_node.tooltip.as_deref(), Some("Ajuda interpolada"));
+    let row_node = &evaluated.children[1];
+    assert_eq!(row_node.tooltip.as_deref(), Some("linha sem clique"));
+    assert_eq!(row_node.tooltip_position.as_deref(), Some("bottom"));
+
+    assert!(motor.render("tipcomp").is_ok(), "render com tooltip não deve panicar");
+
+    std::fs::remove_file(tpl).ok();
+}

@@ -277,6 +277,15 @@ pub struct UiNode {
     pub cursor: Option<String>,
     /// Cor do rótulo de um `Button` (`textColor`); o `color` do botão é o fundo.
     pub text_color: Option<String>,
+    /// Texto exibido num balão flutuante ao pairar o mouse sobre o elemento
+    /// (`tooltip="..."`/`title="..."`), via `iced::widget::Tooltip`. Só
+    /// atributo inline (sem `.classe { }` equivalente — é conteúdo, não
+    /// estilo). Útil sobretudo em ícones sem rótulo visível (ex.: a sidebar
+    /// colapsada de rustploy-gui).
+    pub tooltip: Option<String>,
+    /// Lado do balão (`tooltipPosition="right"`, padrão): `top`/`bottom`/
+    /// `left`/`right`/`follow` (segue o cursor). Ignorado sem `tooltip`.
+    pub tooltip_position: Option<String>,
     /// Teto de largura/altura (`maxWidth`/`maxHeight`) — envolve o elemento num
     /// `container` que limita, já que `Row`/`Column` não capam o próprio tamanho.
     pub max_width: Option<f32>,
@@ -463,6 +472,8 @@ impl UiNode {
         let on_double_click = Self::get_attr(&node, &["onDoubleClick", "on_double_click", "on-double-click", "aoClicarDuplo"]);
         let cursor = Self::get_attr(&node, &["cursor", "cursor_", "cursorIcon"]);
         let text_color = Self::get_attr(&node, &["textColor", "text_color", "text-color", "cor_texto"]);
+        let tooltip = Self::get_attr(&node, &["tooltip", "title", "dica"]);
+        let tooltip_position = Self::get_attr(&node, &["tooltipPosition", "tooltip_position", "tooltip-position"]);
         let max_width = Self::get_attr_num(&node, &["maxWidth", "max_width", "max-width", "largura_max"], NumAttr::MaxWidth, &mut numeric_templates);
         let max_height = Self::get_attr_num(&node, &["maxHeight", "max_height", "max-height", "altura_max"], NumAttr::MaxHeight, &mut numeric_templates);
         let hidden = Self::get_attr(&node, &["hidden", "oculto"])
@@ -699,6 +710,8 @@ impl UiNode {
             on_double_click,
             cursor,
             text_color,
+            tooltip,
+            tooltip_position,
             max_width,
             max_height,
             hidden,
@@ -876,6 +889,8 @@ pub(crate) fn empty_node(kind: NodeType, children: Vec<UiNode>) -> UiNode {
         on_double_click: None,
         cursor: None,
         text_color: None,
+        tooltip: None,
+        tooltip_position: None,
         max_width: None,
         max_height: None,
         hidden: None,

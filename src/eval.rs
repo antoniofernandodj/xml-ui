@@ -749,6 +749,10 @@ fn eval_owned(
     let on_double_click_eval = node.on_double_click.as_ref().map(|s| process_template(s, context));
     let cursor_eval = resolve(&node.cursor, &style.cursor);
     let text_color_eval = resolve(&node.text_color, &style.text_color);
+    // `tooltip` é conteúdo, não estilo (sem equivalente `.classe { }`, como
+    // `on_press`) — interpolado direto pra suportar `tooltip="{var}"`.
+    let tooltip_eval = node.tooltip.as_ref().map(|s| process_template(s, context));
+    let tooltip_position_eval = node.tooltip_position.clone();
     let max_width_eval = num_template(NumAttr::MaxWidth).or(node.max_width).or(style.max_width);
     let max_height_eval = num_template(NumAttr::MaxHeight).or(node.max_height).or(style.max_height);
     // `hidden` resolvido: inline vence a classe/`@media` (mesma precedência dos
@@ -812,6 +816,8 @@ fn eval_owned(
         on_double_click: on_double_click_eval,
         cursor: cursor_eval,
         text_color: text_color_eval,
+        tooltip: tooltip_eval,
+        tooltip_position: tooltip_position_eval,
         max_width: max_width_eval,
         max_height: max_height_eval,
         hidden: hidden_eval,
