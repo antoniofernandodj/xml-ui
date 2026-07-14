@@ -18,6 +18,8 @@
 
 use std::collections::HashMap;
 
+use crate::error::{Diagnostic, GlacierError, Result};
+
 /// The set of style fields a single `.class { ... }` rule may carry.
 ///
 /// Mirrors the style-bearing fields of [`crate::parser::UiNode`] (plus the
@@ -293,9 +295,18 @@ impl StyleSheet {
 }
 
 impl StyleSheet {
-    /// Parses an `.gss` source string into a [`StyleSheet`].
-    pub fn parse(input: &str) -> Result<Self, String> {
+    /// Parses an `.gss` source string into a [`StyleSheet`]. Erros saem
+    /// posicionados (linha/coluna) mas sem citar arquivo — use
+    /// [`StyleSheet::parse_in`] quando houver um para citar.
+    pub fn parse(input: &str) -> Result<Self> {
         parse_gss(input)
+    }
+
+    /// Igual a [`StyleSheet::parse`], citando `file` nos erros e deslocando as
+    /// linhas em `line_offset` (1 para um `.gss` de verdade; a linha do
+    /// `<style>` para um bloco inline). Ver [`parse_gss_in`].
+    pub fn parse_in(input: &str, file: Option<&str>, line_offset: u32) -> Result<Self> {
+        parse_gss_in(input, file, line_offset)
     }
 }
 
@@ -500,50 +511,164 @@ pub fn resolve_state_classes(
     out
 }
 
-/// Removes `//` line comments and `/* ... */` block comments from an `.gss`
-/// source, leaving everything else (including `#RRGGBB` colors and newlines)
-/// intact. Each block comment is replaced by a single space so it can't glue
-/// adjacent tokens together. Errors on an unterminated block comment.
-fn strip_comments(input: &str) -> Result<String, String> {
+/// Substitui `//` e `/* ... */` por espaços, **preservando a posição de tudo o
+/// mais**: cada caractere de comentário vira um espaço e cada `\n` é mantido.
+///
+/// A preservação não é estética — é o que faz linha e coluna de um erro de GSS
+/// baterem com o arquivo que o autor escreveu. A versão anterior colapsava um
+/// bloco `/* ... */` inteiro (inclusive suas quebras de linha) num único espaço,
+/// então qualquer comentário multi-linha deslocava para cima todas as linhas
+/// seguintes — e o erro apontava para a linha errada, que é exatamente o
+/// problema que este módulo existe para não ter.
+///
+/// A troca é 1-para-1 em **caracteres** (não em bytes): um comentário com
+/// acentos vira o mesmo número de espaços, então a *coluna* (contada em chars,
+/// como no [`Diagnostic`]) também sobrevive.
+fn strip_comments(input: &str) -> std::result::Result<String, Diagnostic> {
     let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '/' {
-            match chars.peek() {
-                // Line comment: drop everything up to (but not including) the newline.
-                Some('/') => {
-                    chars.next();
-                    while let Some(&nc) = chars.peek() {
-                        if nc == '\n' {
-                            break;
-                        }
-                        chars.next();
-                    }
-                    continue;
-                }
-                // Block comment: drop everything up to and including `*/`.
-                Some('*') => {
-                    chars.next();
-                    let mut closed = false;
-                    while let Some(c2) = chars.next() {
-                        if c2 == '*' && chars.peek() == Some(&'/') {
-                            chars.next();
-                            closed = true;
-                            break;
-                        }
-                    }
-                    if !closed {
-                        return Err("Unterminated block comment `/* ... */`".to_string());
-                    }
-                    out.push(' ');
-                    continue;
-                }
-                _ => {}
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        // Comentário de linha: vira espaços até (sem incluir) a quebra.
+        if chars[i] == '/' && chars.get(i + 1) == Some(&'/') {
+            while i < chars.len() && chars[i] != '\n' {
+                out.push(' ');
+                i += 1;
             }
+            continue;
         }
-        out.push(c);
+        // Bloco: vira espaços até (e incluindo) o `*/`, com os `\n` intactos.
+        if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
+            let start = i;
+            out.push(' ');
+            out.push(' ');
+            i += 2;
+            loop {
+                if i >= chars.len() {
+                    let (line, col) = line_col_of(input, start);
+                    return Err(
+                        Diagnostic::new(line, col, "comentário de bloco `/* ... */` nunca fechado")
+                            .with_hint("falta um `*/` — o parser leu o resto do arquivo como comentário"),
+                    );
+                }
+                if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                    break;
+                }
+                out.push(if chars[i] == '\n' { '\n' } else { ' ' });
+                i += 1;
+            }
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
     }
     Ok(out)
+}
+
+/// Linha e coluna (1-based, coluna em **caracteres**) do `char` de índice
+/// `char_idx` em `s`.
+fn line_col_of(s: &str, char_idx: usize) -> (u32, u32) {
+    let mut line = 1u32;
+    let mut col = 1u32;
+    for (i, c) in s.chars().enumerate() {
+        if i == char_idx {
+            break;
+        }
+        if c == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
+}
+
+/// Índice de linha/coluna por **byte offset**, pré-computado uma vez por sheet
+/// para não varrer a fonte inteira a cada regra. `starts[i]` é o offset em bytes
+/// onde começa a linha `i+1`.
+struct LineMap {
+    starts: Vec<usize>,
+}
+
+impl LineMap {
+    fn new(s: &str) -> Self {
+        let mut starts = vec![0];
+        starts.extend(s.match_indices('\n').map(|(i, _)| i + 1));
+        Self { starts }
+    }
+
+    /// Linha (1-based) e coluna (1-based, em caracteres) do byte `offset`.
+    fn pos(&self, s: &str, offset: usize) -> (u32, u32) {
+        let line = self.starts.partition_point(|&start| start <= offset).max(1);
+        let line_start = self.starts[line - 1];
+        let col = s[line_start..offset.min(s.len())].chars().count() as u32 + 1;
+        (line as u32, col)
+    }
+}
+
+/// O que o parser de GSS precisa saber, o tempo todo, para posicionar uma
+/// mensagem: a fonte como o autor a escreveu (`input`, para recortar o trecho),
+/// a fonte sem comentários que ele de fato varre (`cleaned`, onde os offsets
+/// vivem), o arquivo a citar e o deslocamento de linha até ele.
+struct SheetCtx<'a> {
+    input: &'a str,
+    cleaned: &'a str,
+    file: Option<&'a str>,
+    line_offset: u32,
+    lines: &'a LineMap,
+}
+
+impl SheetCtx<'_> {
+    /// Linha/coluna **locais** de um byte offset em `cleaned`.
+    fn at(&self, offset: usize) -> (u32, u32) {
+        self.lines.pos(self.cleaned, offset)
+    }
+
+    /// Traduz um diagnóstico local no erro final, já nas coordenadas do arquivo.
+    fn err(&self, local: Diagnostic) -> GlacierError {
+        gss_error(local, self.input, self.file, self.line_offset)
+    }
+
+    /// Como o autor identifica esta posição: `arquivo:linha` (ou só `linha`
+    /// quando a fonte é inline). Usado nos **avisos** (que não são erros e
+    /// portanto não constroem um `Diagnostic` inteiro).
+    fn where_at(&self, local_line: u32) -> String {
+        let line = self.line_offset + local_line.saturating_sub(1);
+        match self.file {
+            Some(f) => format!("{f}:{line}"),
+            None => format!("<inline>:{line}"),
+        }
+    }
+}
+
+/// Monta o [`GlacierError::Gss`] a partir de um diagnóstico **local** (linha
+/// relativa à fonte `source` recebida), traduzindo-o para as coordenadas do
+/// arquivo: a linha vira `line_offset + local - 1` e o trecho ofensor é
+/// recortado de `source` pela linha local. Ver [`parse_gss_in`].
+fn gss_error(
+    local: Diagnostic,
+    source: &str,
+    file: Option<&str>,
+    line_offset: u32,
+) -> GlacierError {
+    let snippet = source.lines().nth(local.line.saturating_sub(1) as usize).unwrap_or("");
+    let mut d = Diagnostic::new(
+        line_offset + local.line.saturating_sub(1),
+        local.col,
+        local.message,
+    )
+    .with_snippet(snippet);
+    if let Some(f) = file {
+        d = d.from_file(f);
+    }
+    if let Some(h) = local.hint {
+        d = d.with_hint(h);
+    }
+    GlacierError::Gss(Box::new(d))
 }
 
 /// Parses an `.gss` document.
@@ -554,21 +679,40 @@ fn strip_comments(input: &str) -> Result<String, String> {
 ///   kept verbatim.
 /// - Rules: `.name { prop: value; prop: value; }`
 /// - Properties: `key: value;` where the value may contain spaces (`padding: 8 16`).
-pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
-    // Strip comments first; '#' inside a value (hex colors) survives.
-    let cleaned = strip_comments(input)?;
+pub fn parse_gss(input: &str) -> Result<StyleSheet> {
+    parse_gss_in(input, None, 1)
+}
 
-    let mut rules: HashMap<String, StyleRule> = HashMap::new();
-    let mut variables: HashMap<String, String> = HashMap::new();
-    let mut media: Vec<MediaQuery> = Vec::new();
-    let mut states: HashMap<String, HashMap<PseudoState, StyleRule>> = HashMap::new();
-    let mut ids: HashMap<String, StyleRule> = HashMap::new();
-    let mut id_states: HashMap<String, HashMap<PseudoState, StyleRule>> = HashMap::new();
-    let mut tags: HashMap<String, StyleRule> = HashMap::new();
-    let mut tag_states: HashMap<String, HashMap<PseudoState, StyleRule>> = HashMap::new();
+/// Igual a [`parse_gss`], mas ciente de **onde** a fonte mora: `file` é citado
+/// nos erros e `line_offset` é a linha do arquivo correspondente à linha 1 de
+/// `input`.
+///
+/// `line_offset` existe porque nem todo `.gss` é um arquivo `.gss`: um bloco
+/// `<style>` inline começa lá pela linha 200 de um `.xml`, e um erro na 3ª linha
+/// *dele* precisa sair como "linha 202 do home.xml", não "linha 3" de coisa
+/// nenhuma. Para um arquivo `.gss` de verdade, `line_offset` é 1 e as duas
+/// numerações coincidem.
+pub fn parse_gss_in(input: &str, file: Option<&str>, line_offset: u32) -> Result<StyleSheet> {
+    // Comentários viram espaços — preservando linhas e colunas, para as posições
+    // que reportamos serem as do arquivo original (ver `strip_comments`).
+    let cleaned = strip_comments(input).map_err(|d| gss_error(d, input, file, line_offset))?;
+    let lines = LineMap::new(&cleaned);
+    let ctx = SheetCtx { input, cleaned: &cleaned, file, line_offset, lines: &lines };
+    // Toda posição daqui para baixo nasce local (relativa a `input`) e só vira
+    // absoluta em `gss_error`, então o mapeamento mora num lugar só.
+    let err = |local: Diagnostic| ctx.err(local);
+    let at = |offset: usize| ctx.at(offset);
+
+    let mut sheet = StyleSheet::default();
     let mut rest = cleaned.as_str();
+
     while let Some(open) = rest.find('{') {
+        // Offset absoluto (em `cleaned`) do `{` corrente — `rest` é sempre um
+        // sufixo de `cleaned`, então a diferença de tamanhos dá o offset.
+        let base = cleaned.len() - rest.len();
+        let brace_at = base + open;
         let selector = rest[..open].trim();
+        let (sel_line, sel_col) = at(base + rest[..open].len() - rest[..open].trim_start().len());
         let after_open = &rest[open + 1..];
 
         // `@media (cond) { .a {…} .b {…} }` — bloco com regras ANINHADAS, então
@@ -577,10 +721,16 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
         // como um mini-sheet (`rules` e `states` interessam; `variables`
         // aninhadas num `@media` não são suportadas — `:root` fica de fora).
         if selector.starts_with("@media") {
-            let (inner, remainder) = split_balanced_block(after_open)?;
-            let condition = parse_media_condition(selector)?;
-            let inner_sheet = parse_gss(inner)?;
-            media.push(MediaQuery {
+            let (inner, remainder) = split_balanced_block(after_open)
+                .map_err(|m| err(Diagnostic::new(sel_line, sel_col, m)))?;
+            let condition = parse_media_condition(selector)
+                .map_err(|m| err(Diagnostic::new(sel_line, sel_col, m)))?;
+            // O interior começa logo após o `{`, ainda na linha do `@media` —
+            // então a linha 1 dele é a linha do `@media` (as posições compõem
+            // pela mesma conta em cada nível de aninhamento).
+            let (inner_line, _) = at(brace_at);
+            let inner_sheet = parse_gss_in(inner, file, line_offset + inner_line - 1)?;
+            sheet.media.push(MediaQuery {
                 condition,
                 rules: inner_sheet.rules,
                 states: inner_sheet.states,
@@ -593,126 +743,146 @@ pub fn parse_gss(input: &str) -> Result<StyleSheet, String> {
             continue;
         }
 
-        let close = after_open
-            .find('}')
-            .ok_or_else(|| format!("Unclosed rule for selector '{}'", selector))?;
+        let close = after_open.find('}').ok_or_else(|| {
+            err(Diagnostic::new(sel_line, sel_col, format!("a regra '{selector}' nunca é fechada"))
+                .with_hint("falta a `}` que fecha este bloco"))
+        })?;
         let body = &after_open[..close];
+        let body_at = brace_at + 1;
         rest = &after_open[close + 1..];
 
         // `:root { --nome: valor; }` — bloco especial de design tokens (a única
         // exceção à regra "só seletor de classe"). Referenciados com `var(--nome)`.
         if selector == ":root" {
-            parse_root_vars(body, &mut variables)?;
+            parse_root_vars(body, &mut sheet.variables)
+                .map_err(|m| err(Diagnostic::new(sel_line, sel_col, m)))?;
             continue;
         }
 
-        // `#nome { }` / `#nome:estado { }` — seletor de id. Guardado à parte em
-        // `ids`/`id_states` (nunca em `rules`/`states`), casado depois pelo
-        // atributo `id` do nó. Mesma mecânica de estado das classes.
-        if let Some(raw) = selector.strip_prefix('#') {
-            let raw = raw.trim();
-            if raw.is_empty() {
-                return Err("Empty id selector '#'".to_string());
+        // Seletor por vírgula (`.a, .b { }`): cada parte recebe a MESMA regra,
+        // como no CSS. Antes o seletor inteiro virava uma chave literal — uma
+        // classe chamada `a, .b`, que nenhum nó jamais casa. Não dava erro nem
+        // aviso: o estilo simplesmente não aparecia, e o autor ia procurar o bug
+        // no XML. É a falha silenciosa mais cara que o motor tinha.
+        for part in selector.split(',') {
+            let sel = part.trim();
+            if sel.is_empty() {
+                return Err(err(Diagnostic::new(
+                    sel_line,
+                    sel_col,
+                    format!("seletor vazio em '{selector}'"),
+                )
+                .with_hint("uma vírgula sobrando na lista de seletores (ex.: `.a, { }` ou `.a,, .b { }`)")));
             }
-            if let Some((name, state_str)) = raw.split_once(':') {
-                let name = name.trim();
-                if name.is_empty() {
-                    return Err(format!("Empty id name in pseudo-state selector '#{}'", raw));
-                }
-                let state = PseudoState::parse(state_str.trim()).ok_or_else(|| {
-                    format!("Unsupported pseudo-state ':{}' in selector '#{}'", state_str.trim(), raw)
-                })?;
-                let rule = parse_rule_body(body, raw)?;
-                id_states
-                    .entry(name.to_string())
-                    .or_default()
-                    .entry(state)
-                    .or_default()
-                    .merge_from(&rule);
-                continue;
-            }
-            let rule = parse_rule_body(body, raw)?;
-            ids.entry(raw.to_string()).or_default().merge_from(&rule);
-            continue;
+            let rule = parse_rule_body(body, sel, body_at, &ctx)?;
+            apply_selector(&mut sheet, sel, rule, sel_line, sel_col, &err)?;
         }
-
-        // Seletor de **tag** — qualquer identificador que não seja
-        // `.classe`/`#id`/`:root`/`@media` (esses já foram tratados acima).
-        // Casa o tipo builtin do nó (`Column`, `Text`, …) OU o nome de um
-        // componente (`Card`) no seu uso. Normalizado para minúsculo, então
-        // `Button {}` == `button {}`. Aceita `Tag:estado`.
-        if !selector.starts_with('.') {
-            let raw = selector.trim();
-            if raw.is_empty() {
-                return Err("Empty selector before '{'".to_string());
-            }
-            if let Some((name, state_str)) = raw.split_once(':') {
-                let name = name.trim().to_lowercase();
-                if name.is_empty() {
-                    return Err(format!("Empty tag name in pseudo-state selector '{}'", raw));
-                }
-                let state = PseudoState::parse(state_str.trim()).ok_or_else(|| {
-                    format!("Unsupported pseudo-state ':{}' in selector '{}'", state_str.trim(), raw)
-                })?;
-                let rule = parse_rule_body(body, raw)?;
-                tag_states
-                    .entry(name)
-                    .or_default()
-                    .entry(state)
-                    .or_default()
-                    .merge_from(&rule);
-                continue;
-            }
-            let rule = parse_rule_body(body, raw)?;
-            tags.entry(raw.to_lowercase()).or_default().merge_from(&rule);
-            continue;
-        }
-        let raw = selector[1..].trim();
-        if raw.is_empty() {
-            return Err("Empty class selector '.'".to_string());
-        }
-
-        // `.classe:estado { }` — pseudo-estado (`:hover`/`:focus`/`:active`/
-        // `:disabled`), guardado à parte em `states` (nunca em `rules`).
-        if let Some((name, state_str)) = raw.split_once(':') {
-            let name = name.trim();
-            if name.is_empty() {
-                return Err(format!("Empty class name in pseudo-state selector '.{}'", raw));
-            }
-            let state = PseudoState::parse(state_str.trim()).ok_or_else(|| {
-                format!("Unsupported pseudo-state ':{}' in selector '.{}'", state_str.trim(), raw)
-            })?;
-            let rule = parse_rule_body(body, raw)?;
-            states
-                .entry(name.to_string())
-                .or_default()
-                .entry(state)
-                .or_default()
-                .merge_from(&rule);
-            continue;
-        }
-
-        let name = raw.to_string();
-        let rule = parse_rule_body(body, &name)?;
-        // Classe duplicada no mesmo arquivo faz *merge* (não clobber): o CSS
-        // aplica ambas as regras de mesmo seletor. Sobrescrever a anterior
-        // inteira era um footgun silencioso. Campos `None` do 2º bloco
-        // preservam os do 1º; campos `Some` sobrescrevem.
-        rules.entry(name).or_default().merge_from(&rule);
     }
 
     // Anything left after the last rule that isn't blank is a dangling selector.
     if !rest.trim().is_empty() {
-        return Err(format!("Expected '{{' after selector '{}'", rest.trim()));
+        let base = cleaned.len() - rest.len();
+        let lead = rest.len() - rest.trim_start().len();
+        let (line, col) = at(base + lead);
+        return Err(err(Diagnostic::new(
+            line,
+            col,
+            format!("esperava '{{' depois do seletor '{}'", rest.trim()),
+        )
+        .with_hint("um seletor solto no fim do arquivo — falta o bloco `{ ... }`")));
     }
 
-    Ok(StyleSheet { rules, variables, media, states, ids, id_states, tags, tag_states })
+    Ok(sheet)
+}
+
+/// Encaixa `rule` no mapa certo do `sheet` conforme a *forma* do seletor:
+/// `.classe`, `#id`, `Tag`, e a variante `:estado` de cada um. Extraído do laço
+/// principal para que o suporte a vírgula (`.a, .b { }`) reaproveite exatamente
+/// a mesma resolução em cada parte, em vez de duplicá-la.
+fn apply_selector(
+    sheet: &mut StyleSheet,
+    selector: &str,
+    rule: StyleRule,
+    line: u32,
+    col: u32,
+    err: &impl Fn(Diagnostic) -> GlacierError,
+) -> Result<()> {
+    // Um estado pendurado no seletor (`.a:hover`, `#b:focus`, `Button:disabled`).
+    let split_state = |raw: &str| -> Result<(String, Option<PseudoState>)> {
+        match raw.split_once(':') {
+            Some((name, state_str)) => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(err(Diagnostic::new(
+                        line,
+                        col,
+                        format!("nome vazio antes do pseudo-estado em '{raw}'"),
+                    )));
+                }
+                let state = PseudoState::parse(state_str.trim()).ok_or_else(|| {
+                    err(Diagnostic::new(
+                        line,
+                        col,
+                        format!("pseudo-estado ':{}' não suportado em '{}'", state_str.trim(), raw),
+                    )
+                    .with_hint("os suportados são :hover, :focus, :active e :disabled"))
+                })?;
+                Ok((name.to_string(), Some(state)))
+            }
+            None => Ok((raw.trim().to_string(), None)),
+        }
+    };
+
+    // `#nome { }` — seletor de id. Guardado à parte em `ids`/`id_states` (nunca
+    // em `rules`/`states`), casado depois pelo atributo `id` do nó.
+    if let Some(raw) = selector.strip_prefix('#') {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return Err(err(Diagnostic::new(line, col, "seletor de id vazio ('#')")));
+        }
+        let (name, state) = split_state(raw)?;
+        match state {
+            Some(s) => sheet.id_states.entry(name).or_default().entry(s).or_default().merge_from(&rule),
+            None => sheet.ids.entry(name).or_default().merge_from(&rule),
+        }
+        return Ok(());
+    }
+
+    // `.classe { }`. Classe duplicada no mesmo arquivo faz *merge* (não
+    // clobber): o CSS aplica ambas as regras de mesmo seletor. Campos `None` do
+    // 2º bloco preservam os do 1º; campos `Some` sobrescrevem.
+    if let Some(raw) = selector.strip_prefix('.') {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return Err(err(Diagnostic::new(line, col, "seletor de classe vazio ('.')")));
+        }
+        let (name, state) = split_state(raw)?;
+        match state {
+            Some(s) => sheet.states.entry(name).or_default().entry(s).or_default().merge_from(&rule),
+            None => sheet.rules.entry(name).or_default().merge_from(&rule),
+        }
+        return Ok(());
+    }
+
+    // Seletor de **tag** — o que sobrou. Casa o tipo builtin do nó (`Column`,
+    // `Text`, …) OU o nome de um componente (`Card`) no seu uso. Normalizado
+    // para minúsculo, então `Button {}` == `button {}`.
+    if selector.is_empty() {
+        return Err(err(Diagnostic::new(line, col, "seletor vazio antes de '{'")));
+    }
+    let (name, state) = split_state(selector)?;
+    let name = name.to_lowercase();
+    match state {
+        Some(s) => sheet.tag_states.entry(name).or_default().entry(s).or_default().merge_from(&rule),
+        None => sheet.tags.entry(name).or_default().merge_from(&rule),
+    }
+    Ok(())
 }
 
 /// Dado o texto logo APÓS o `{` de um bloco, devolve `(interior, resto)` onde
 /// `interior` vai até a `}` que casa (por profundidade de chaves) e `resto` é o
 /// que vem depois dela. Erra se o bloco não fecha.
-fn split_balanced_block(s: &str) -> Result<(&str, &str), String> {
+fn split_balanced_block(s: &str) -> std::result::Result<(&str, &str), String> {
     let mut depth = 1usize;
     for (i, c) in s.char_indices() {
         match c {
@@ -733,7 +903,7 @@ fn split_balanced_block(s: &str) -> Result<(&str, &str), String> {
 /// `@media (max-width: 800)` ou `@media (min-width: 600) and (max-width: 900)`.
 /// Coleta todas as features `(chave: número)` com semântica AND; palavras como
 /// `and`/`screen`/`all` fora dos parênteses são ignoradas.
-fn parse_media_condition(selector: &str) -> Result<MediaCondition, String> {
+fn parse_media_condition(selector: &str) -> std::result::Result<MediaCondition, String> {
     let mut cond = MediaCondition::default();
     let mut s = selector.strip_prefix("@media").unwrap_or(selector);
     while let Some(open) = s.find('(') {
@@ -766,7 +936,7 @@ fn parse_media_condition(selector: &str) -> Result<MediaCondition, String> {
 
 /// Parses the `--nome: valor;` declarations of a `:root { ... }` block into the
 /// sheet's design-token map. As chaves guardam o `--nome` completo.
-fn parse_root_vars(body: &str, vars: &mut HashMap<String, String>) -> Result<(), String> {
+fn parse_root_vars(body: &str, vars: &mut HashMap<String, String>) -> std::result::Result<(), String> {
     for decl in body.split(';') {
         let decl = decl.trim();
         if decl.is_empty() {
@@ -792,25 +962,56 @@ fn parse_root_vars(body: &str, vars: &mut HashMap<String, String>) -> Result<(),
 }
 
 /// Parses the `key: value;` declarations inside a single rule body.
-fn parse_rule_body(body: &str, selector: &str) -> Result<StyleRule, String> {
+///
+/// `body_at` é o offset (em bytes, dentro de `ctx.cleaned`) onde o corpo começa
+/// — é o que permite dizer em **que linha** está a declaração ofensora, em vez
+/// de só nomear o seletor. Um `.gss` de 400 linhas com três `.card { }` faz
+/// dessa diferença a diferença entre achar e não achar o erro.
+fn parse_rule_body(body: &str, selector: &str, body_at: usize, ctx: &SheetCtx) -> Result<StyleRule> {
     let mut rule = StyleRule::default();
-    for decl in body.split(';') {
-        let decl = decl.trim();
+
+    // Percorre as declarações mantendo o offset de cada uma (o `split` sozinho
+    // perde a posição, que é justamente o que queremos reportar).
+    let mut offset = 0usize;
+    for raw in body.split(';') {
+        let decl_at = offset;
+        offset += raw.len() + 1; // +1 pelo ';' consumido pelo split
+
+        let decl = raw.trim();
         if decl.is_empty() {
             continue;
         }
-        let (key, value) = decl
-            .split_once(':')
-            .ok_or_else(|| format!("Invalid declaration '{}' in '.{}'", decl, selector))?;
+        // Posição do 1º caractere não-branco da declaração.
+        let lead = raw.len() - raw.trim_start().len();
+        let (line, col) = ctx.at(body_at + decl_at + lead);
+
+        let (key, value) = decl.split_once(':').ok_or_else(|| {
+            ctx.err(
+                Diagnostic::new(line, col, format!("declaração inválida '{decl}' em '{selector}'"))
+                    .with_hint("uma declaração é `propriedade: valor;` — faltou o `:` (ou um `;` antes)"),
+            )
+        })?;
         let key = key.trim();
         let value = value.trim().to_string();
         if value.is_empty() {
-            return Err(format!("Empty value for '{}' in '.{}'", key, selector));
+            return Err(ctx.err(Diagnostic::new(
+                line,
+                col,
+                format!("valor vazio para '{key}' em '{selector}'"),
+            )));
         }
 
-        let parse_f32 = |v: &str| -> Result<f32, String> {
-            v.parse::<f32>()
-                .map_err(|_| format!("Expected a number for '{}' in '.{}', got '{}'", key, selector, v))
+        let parse_f32 = |v: &str| -> Result<f32> {
+            v.parse::<f32>().map_err(|_| {
+                ctx.err(
+                    Diagnostic::new(
+                        line,
+                        col,
+                        format!("'{key}' em '{selector}' espera um número, veio '{v}'"),
+                    )
+                    .with_hint("valores numéricos do GSS são px sem unidade (ex.: `padding: 16`, não `16px`)"),
+                )
+            })
         };
 
         match key {
@@ -843,15 +1044,148 @@ fn parse_rule_body(body: &str, selector: &str) -> Result<StyleRule, String> {
             // sheet — o resto da regra e das outras regras continua válido.
             // Erros *estruturais* (sem `:`, valor vazio, número inválido)
             // seguem sendo erro fatal.
+            //
+            // O aviso diz ONDE (arquivo:linha) e, quando o nome é perto de uma
+            // propriedade real, QUAL você quis dizer — um `colr:` ignorado em
+            // silêncio, sem posição, é a segunda falha silenciosa mais cara do
+            // motor (a primeira era o seletor por vírgula).
             other => {
+                let suggestion = closest_property(other)
+                    .map(|p| format!(" — você quis dizer '{p}'?"))
+                    .unwrap_or_default();
                 eprintln!(
-                    "glacier-ui: propriedade GSS desconhecida '{}' em '.{}' (ignorada)",
-                    other, selector
+                    "glacier-ui: {}: propriedade GSS desconhecida '{}' em '{}' (ignorada){}",
+                    ctx.where_at(line),
+                    other,
+                    selector,
+                    suggestion
                 );
             }
         }
     }
     Ok(rule)
+}
+
+/// Toda propriedade que o GSS entende, na grafia canônica — a lista contra a
+/// qual um nome desconhecido é comparado para sugerir o certo.
+const KNOWN_PROPERTIES: &[&str] = &[
+    "width", "height", "padding", "spacing", "align-x", "align-y", "background",
+    "border-radius", "border-width", "border-color", "color", "size", "bold",
+    "font", "gradient", "text-align", "cursor", "text-color", "max-width",
+    "max-height", "hidden", "display",
+];
+
+/// A propriedade conhecida mais próxima de `name`, se houver uma perto o
+/// bastante para o palpite valer (distância de edição ≤ 2, ou ≤ 1 para nomes
+/// curtos, onde tudo fica "perto de" tudo). `None` quando o nome não lembra
+/// nada — melhor calar que sugerir besteira.
+fn closest_property(name: &str) -> Option<&'static str> {
+    let name = name.to_ascii_lowercase();
+    let limit = if name.len() <= 4 { 1 } else { 2 };
+    KNOWN_PROPERTIES
+        .iter()
+        .map(|p| (*p, edit_distance(&name, p)))
+        .filter(|(_, d)| *d <= limit)
+        .min_by_key(|(_, d)| *d)
+        .map(|(p, _)| p)
+}
+
+/// Distância de Levenshtein entre duas palavras curtas (duas linhas de DP —
+/// não vale trazer uma dependência para sugerir um typo).
+fn edit_distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    // A falha silenciosa que motivou o suporte a vírgula: `.a, .b { }` virava
+    // UMA classe de nome literal "a, .b", que nó nenhum casa. Sem erro, sem
+    // aviso — o estilo só não aparecia.
+    #[test]
+    fn seletor_por_virgula_aplica_a_regra_a_cada_parte() {
+        let sheet = parse_gss(".a, .b { padding: 4; }").unwrap();
+        assert_eq!(sheet.rules.get("a").and_then(|r| r.padding.as_deref()), Some("4"));
+        assert_eq!(sheet.rules.get("b").and_then(|r| r.padding.as_deref()), Some("4"));
+        assert!(!sheet.rules.contains_key("a, .b"), "a chave literal não pode mais existir");
+    }
+
+    // Vírgula funciona com as outras formas de seletor e com pseudo-estados,
+    // e mistura tiers (classe + id + tag) na mesma lista.
+    #[test]
+    fn virgula_vale_para_id_tag_e_estado() {
+        let sheet = parse_gss("#salvar, Button, .cta { color: #fff; } .a:hover, .b:hover { bold: true; }")
+            .unwrap();
+        assert!(sheet.ids.contains_key("salvar"));
+        assert!(sheet.tags.contains_key("button"));
+        assert!(sheet.rules.contains_key("cta"));
+        assert!(sheet.states.get("a").is_some_and(|m| m.contains_key(&PseudoState::Hover)));
+        assert!(sheet.states.get("b").is_some_and(|m| m.contains_key(&PseudoState::Hover)));
+    }
+
+    // Uma vírgula sobrando não pode passar batida (era o comportamento antigo).
+    #[test]
+    fn virgula_sobrando_e_erro() {
+        let err = parse_gss(".a, { padding: 4; }").unwrap_err();
+        assert!(err.to_string().contains("vazio"), "{err}");
+    }
+
+    // Um comentário de bloco multi-linha NÃO pode deslocar as linhas seguintes:
+    // era isso que fazia o erro apontar para o lugar errado.
+    #[test]
+    fn comentario_multilinha_nao_desloca_a_linha_do_erro() {
+        let gss = "/* um\n   comentário\n   de três linhas */\n.card {\n  spacing: muito;\n}\n";
+        let err = parse_gss_in(gss, Some("app.gss"), 1).unwrap_err();
+        let d = err.diagnostic().expect("erro de GSS tem diagnóstico");
+        assert_eq!(d.file.as_deref(), Some("app.gss"));
+        assert_eq!(d.line, 5, "a linha do `spacing: muito`");
+        assert!(d.snippet.as_deref().is_some_and(|s| s.contains("muito")), "{:?}", d.snippet);
+    }
+
+    // `line_offset`: um `.gss` inline num `<style>` lá pela linha 200 reporta a
+    // linha do ARQUIVO, não a do corpo do bloco.
+    #[test]
+    fn line_offset_traduz_para_a_linha_do_arquivo() {
+        let css = "\n.card {\n  size: nao-numero;\n}\n";
+        // O `<style>` está na linha 200 do home.xml.
+        let err = parse_gss_in(css, Some("home.xml"), 200).unwrap_err();
+        let d = err.diagnostic().unwrap();
+        assert_eq!(d.line, 202, "linha 3 do CSS = linha 202 do arquivo");
+    }
+
+    // Regras dentro de um `@media` também reportam a linha certa (o offset
+    // compõe através do aninhamento).
+    #[test]
+    fn erro_dentro_de_media_reporta_linha_certa() {
+        let gss = "\n\n@media (max-width: 800) {\n  .a { spacing: xis; }\n}\n";
+        let err = parse_gss_in(gss, Some("app.gss"), 1).unwrap_err();
+        assert_eq!(err.diagnostic().unwrap().line, 4);
+    }
+
+    // Um typo numa propriedade não derruba o arquivo, mas sugere o certo.
+    #[test]
+    fn typo_de_propriedade_sugere_a_correta() {
+        assert_eq!(closest_property("colr"), Some("color"));
+        assert_eq!(closest_property("paddign"), Some("padding"));
+        assert_eq!(closest_property("bordr-radius"), Some("border-radius"));
+        // Nada parecido → nenhum palpite (melhor calar que chutar besteira).
+        assert_eq!(closest_property("banana-split"), None);
+        // E segue sendo não-fatal: a outra propriedade da regra é preservada.
+        let sheet = parse_gss(".a { colr: #fff; padding: 8; }").unwrap();
+        assert_eq!(sheet.rules["a"].padding.as_deref(), Some("8"));
+    }
 }
 
 #[cfg(test)]

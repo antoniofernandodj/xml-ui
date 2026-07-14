@@ -1,93 +1,62 @@
 # Roadmap — rumo a um `1.0` publicável
 
-Roteiro para levar o `glacier-ui` de protótipo enxuto a um framework maduro e
-distribuível publicamente no crates.io.
+Roteiro para levar o `glacier-ui` de protótipo enxuto a um framework maduro.
 
-## Onde estamos hoje
+> **Nota (0.38.0).** As versões anteriores deste arquivo descreviam a lib de
+> muito tempo atrás ("~1.3K LOC, 7 widgets, 11 testes") e faziam parecer pendente
+> um monte de coisa que já existe. A tabela abaixo é o estado real; o histórico
+> foi reescrito para não voltar a enganar.
+
+## Onde estamos hoje (0.38.0)
 
 | Indicador | Estado |
 |---|---|
-| Código | ~1.3K LOC em `src`, 140 na macro, 509 de testes |
-| Testes | 11, todos num arquivo; 0 na macro, 0 de render, 0 doctests |
-| Erros | 12 assinaturas `Result<_, String>` — sem tipo de erro |
-| Widgets | 7 (`button, column, row, text, container, text_input, image`) |
-| Docs | 0 `//!` no crate root; sem `deny(missing_docs)` |
-| Distribuição | sem LICENSE, CI, CHANGELOG; sem metadata de publicação |
-
-Pontos fortes: quase nenhum `unwrap`/`panic` no runtime, zero TODO/FIXME,
-arquitetura limpa. O gargalo de maturidade **não é o tamanho** — é
-infraestrutura (erro tipado, encapsulamento, completude de widgets, docs e
-distribuição).
+| Código | ~9K LOC em `src`, ~210 testes |
+| Erros | ✅ `GlacierError` tipado + `Diagnostic` (arquivo:linha:coluna, trecho, dica) |
+| Encapsulamento | ✅ campos do `GlacierUI` privados, com getters; erro `#[non_exhaustive]` |
+| Widgets | 15 (`container column row text button text_input textarea image svg scrollable checkbox toggle rule select form`) + diretivas (`if/else`, `ForEach`, `import`, `include`, `fragment`) |
+| Estilo | `.gss` com `:root`/`var()`, pseudo-estados, `@media`, seletores de classe/id/tag e **lista por vírgula** |
+| Reavaliação | ✅ escopada: só a tela ativa (+ fixados) é construída, não todo template registrado |
+| Runner | `GlacierDaemon` multi-janela: fontes, `window::Settings`, janelas-filhas, `on_message`, `on_close` |
+| Distribuição | publicado no crates.io; LICENSE + metadata OK. **Falta CI e CHANGELOG.** |
 
 ---
 
-## Fase 0 — Bloqueadores de publicação
+## Feito
 
-Barato e de alto valor; viável em ~1 dia.
+- **Fase 0** — LICENSE, metadata, publicação no crates.io.
+- **Fase 1 (robustez)** — erro tipado (`error.rs`), encapsulamento do `GlacierUI`,
+  diagnóstico posicional em XML e `.gss`.
+- **Fase 2 (completude)** — cobertura de widgets, design tokens/temas,
+  `if`/`else`/`ForEach`, componentes, multi-janela.
+- **Dirty-tracking** — `reevaluate_all` deixou de reconstruir a árvore uma vez
+  por template registrado (ver o doc do método).
 
-- [ ] **LICENSE** dual `MIT OR Apache-2.0` (convenção Rust).
-- [ ] **Metadata no `Cargo.toml`** dos dois crates: `description`, `license`,
-      `repository`, `keywords`, `categories`, `readme`, `rust-version` (MSRV).
-      A macro deve publicar junto, com versão casada (`=x.y.z`).
-- [ ] **Nome único no crates.io** — conferir disponibilidade de `glacier-ui`;
-      considerar rebatizar para algo de marca.
+## Pendente
+
+### Qualidade / infra
 - [ ] **CI** (GitHub Actions): `build` + `test` + `clippy -D warnings` +
-      `fmt --check` + `cargo doc`. Zerar os ~10 warnings de clippy da lib.
-- [ ] **`#![deny(missing_docs)]`** + doc no crate root (`//!`).
+      `fmt --check` + `cargo doc`.
+- [ ] **`CHANGELOG.md`** (keep-a-changelog) + `cargo-release`/`release-plz`.
+- [ ] **`#![deny(missing_docs)]`** no crate root.
+- [ ] **`cargo-deny`** — licenças e advisories.
+- [ ] **Benchmarks (`criterion`)** — medir o custo de avaliação por tamanho de
+      árvore, agora que a reavaliação é escopada.
+- [ ] **Testes de render** — snapshot da árvore avaliada; fuzzing leve no parser.
 
-## Fase 1 — Robustez de biblioteca
+### Motor
+- [ ] **Seletores compostos/descendentes** no `.gss` + especificidade + `!important`
+      (item 9 do `PLANO_GSS_LIMITACOES.md`).
+- [ ] **Propriedades extras** sob demanda: `opacity`, `shadow`, borda por lado,
+      gradiente radial, `transform` (item 10).
+- [ ] **Render sem panic** — degradar markup malformado para um nó de erro
+      visível em vez de derrubar o `view`.
+- [ ] **Estado por instância em `ForEach`** — hoje N instâncias de um componente
+      com estado dentro de uma lista compartilham o mesmo `update`.
+- [ ] **Linguagem de template mais rica** — expressões, `else if`, eventos com
+      argumentos.
 
-- [ ] **Tipo de erro real** — substituir os 12 `Result<_, String>` por um
-      `enum XmlUiError` com `thiserror` (arquivo ausente, XML inválido,
-      componente não registrado, …). **Maior alavancagem.**
-- [ ] **Encapsular o `GlacierUI`** — campos hoje são todos `pub`; torná-los
-      privados (+ getters) e marcar enums públicos com `#[non_exhaustive]`.
-- [ ] **Política de semver** — crates em lockstep; documentar superfície estável.
-- [ ] **Render sem panic** — degradar input malformado para um nó de erro
-      visível, nunca panicar em `widget.rs`/`dispatch`.
-
-## Fase 2 — Completude funcional
-
-- [ ] **Cobertura de widgets** — prioridade `scrollable`; depois `checkbox`,
-      `toggler`, `slider`, `pick_list`/dropdown, `radio`, `space`, `rule`,
-      `progress_bar`, `tooltip`, `svg`.
-- [ ] **Temas/estilo reutilizável** — tokens de tema / "classes" / herança de
-      estilo em vez de hex inline repetido; integrar com o tema do `iced`.
-- [ ] **Linguagem de template mais rica** — expressões simples, negação no
-      `if`, `else if`, eventos com argumentos.
-- [ ] **Estado por instância em `ForEach`** — IDs de instância para componentes
-      com estado dentro de listas (hoje N instâncias compartilham um `update`).
-- [ ] **Contexto tipado (opcional)** — avaliar valores tipados/serializáveis
-      para reduzir `to_string()`/parse manual.
-
-## Fase 3 — Qualidade e DX
-
-- [ ] **Testes de macro** — `trybuild` para casos compile-fail e pass.
-- [ ] **Testes de render** — snapshot da árvore avaliada; property tests no
-      `parser`/`process_template`; fuzzing leve no parser.
-- [ ] **Benchmarks (`criterion`)** + **dirty-tracking** — hoje `reevaluate_all`
-      reavalia todos os templates e clona o contexto a cada mudança (O(n)
-      cheio); reavaliar só o que mudou.
-- [ ] **`cargo-deny`** — auditoria de licenças e advisories no CI.
-
-## Fase 4 — Apresentação e lançamento
-
-- [ ] **Guia/livro (`mdBook`)** — tutorial + referência da DSL.
+### Apresentação
+- [ ] **Guia (`mdBook`)** — tutorial + referência da DSL.
 - [ ] **Galeria de exemplos com screenshots/GIFs.**
-- [ ] **`CHANGELOG.md`** (keep-a-changelog) + automação (`cargo-release`/`release-plz`).
-- [ ] **Anúncio** — `1.0.0` no crates.io, post no fórum do `iced` / `r/rust`, docs.rs.
-
----
-
-## Caminho crítico
-
-```
-Fase 0 (1 dia)  →  publicável "early/0.x"
-  + erro tipado + encapsulamento        →  confiável como dependência
-  + scrollable + temas                  →  usável em app real
-  + dirty-tracking + testes macro/render →  defensável como "maduro"
-  → congela API → 1.0
-```
-
-A base está arquiteturalmente pronta para crescer; o trabalho é incremental,
-não refatoração de fundação.
+- [ ] Congelar a API → `1.0`.

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use roxmltree::Node;
+use crate::error::{Diagnostic, GlacierError, Result};
 use crate::stylesheet::StyleRule;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -162,6 +163,13 @@ pub enum NodeType {
     Style {
         css: String,
         scoped: bool,
+        /// Linha (1-based) do `<style>` no arquivo que o declarou. É o
+        /// deslocamento que traduz a linha de um erro **dentro do `.gss`
+        /// inline** para a linha do arquivo XML onde o autor a escreveu — sem
+        /// isso, um erro de GSS num `<style>` na linha 200 seria reportado como
+        /// "linha 3" (a 3ª linha do corpo), que não ajuda ninguém. Ver
+        /// [`crate::stylesheet::parse_gss_in`].
+        line: u32,
     },
     /// A transparent grouping node: renders its children inline into the parent,
     /// adding no layout box of its own. Produced by [`UiNode::parse_xml`] when a
@@ -641,13 +649,20 @@ impl UiNode {
                 if let Some(href) = Self::get_attr(&node, &["href", "src", "from", "caminho"]) {
                     NodeType::Link { rel: "stylesheet".to_string(), href, name: None }
                 } else {
+                    // O corpo veio blindado em CDATA (ver `protect_style_bodies`),
+                    // e o roxmltree entrega CDATA como nó de texto comum — então
+                    // `.gss` com `<`, `&` ou tags citadas em comentário chega aqui
+                    // verbatim, sem nunca ter sido lido como XML.
                     let css = node
                         .children()
                         .filter(|c| c.is_text())
                         .filter_map(|c| c.text())
                         .collect::<String>();
                     let scoped = Self::get_attr_bool(&node, &["scoped", "escopado"]);
-                    NodeType::Style { css, scoped }
+                    // Linha do `<style>` no arquivo, para posicionar erros do
+                    // `.gss` inline (o pré-processamento preserva linhas).
+                    let line = node.document().text_pos_at(node.range().start).row;
+                    NodeType::Style { css, scoped, line }
                 }
             }
             _ => {
@@ -741,7 +756,14 @@ impl UiNode {
         })
     }
 
-    /// Parse a full XML string into UiNode.
+    /// Parse a full XML string into UiNode, sem saber de que arquivo veio — os
+    /// erros saem posicionados (linha/coluna) mas sem caminho. Prefira
+    /// [`UiNode::parse_xml_in`] quando houver um arquivo a citar.
+    pub fn parse_xml(xml: &str) -> Result<Self> {
+        Self::parse_xml_in(xml, None)
+    }
+
+    /// Parse a full XML string into UiNode, citando `file` nos erros.
     ///
     /// A file may declare `<import name="..." from="..." />` or
     /// `<link rel="stylesheet" href="..." />` at the top level, before its
@@ -749,13 +771,33 @@ impl UiNode {
     /// wrapped in a synthetic root before parsing; the declarations are then
     /// attached to the real root as children (they are stripped before
     /// rendering, so they have no visual effect but remain discoverable).
-    pub fn parse_xml(xml: &str) -> Result<Self, String> {
+    ///
+    /// **Toda transformação feita aqui antes do parse preserva a contagem de
+    /// linhas**, para o `line` que o roxmltree reporta ser o `line` do arquivo
+    /// que o autor escreveu (ver [`crate::error::Diagnostic`]). O embrulho na
+    /// raiz sintética fica na linha 1 (a coluna é descontada depois), e o corpo
+    /// dos `<style>` é blindado com CDATA — que não introduz quebra de linha.
+    pub fn parse_xml_in(xml: &str, file: Option<&str>) -> Result<Self> {
+        Self::parse_xml_with_source(xml, xml, file)
+    }
+
+    /// Igual a [`UiNode::parse_xml_in`], mas recorta o trecho ofensor dos erros
+    /// de `source` em vez de `xml`.
+    ///
+    /// Os dois diferem porque o motor **pré-processa** o markup antes de
+    /// parseá-lo (tira o `<script>`, reescreve `else` como `else=""`): `xml` é o
+    /// resultado dessas passadas — o texto que o roxmltree de fato viu, e a que
+    /// as posições se referem — enquanto `source` é o arquivo como o autor o
+    /// escreveu, que é o que ele espera ver de volta na mensagem de erro. Como
+    /// as passadas preservam a contagem de linhas, a linha serve para os dois.
+    pub fn parse_xml_with_source(xml: &str, source: &str, file: Option<&str>) -> Result<Self> {
         // `&nbsp;` isn't a predefined XML entity, so roxmltree would reject it.
         // Rewrite it to a literal non-breaking space (U+00A0) up front; the text
         // normalizer then preserves it as a hard space (see `normalize_text`).
-        let xml = xml.replace("&nbsp;", "\u{00A0}");
-        let wrapped = format!("<__glacier_fragment__>{}</__glacier_fragment__>", xml);
-        let doc = roxmltree::Document::parse(&wrapped).map_err(|e| e.to_string())?;
+        let prepared = protect_style_bodies(&xml.replace("&nbsp;", "\u{00A0}"));
+        let wrapped = format!("{FRAGMENT_OPEN}{prepared}</__glacier_fragment__>");
+        let doc = roxmltree::Document::parse(&wrapped)
+            .map_err(|e| xml_error(e, source, file))?;
         let fragment = doc.root_element();
 
         let mut decls = Vec::new();
@@ -778,12 +820,275 @@ impl UiNode {
         // children (they're stripped during evaluation) so `load_imports` /
         // `process_links` still find them.
         let mut root = match roots.len() {
-            0 => return Err("No root element found".to_string()),
+            0 => {
+                let mut d = Diagnostic::new(1, 1, "o template não tem nenhum elemento raiz")
+                    .with_hint("um template precisa de ao menos um nó de layout (ex.: <Column>…</Column>); \
+                                só <import>/<link>/<style> não basta");
+                if let Some(f) = file {
+                    d = d.in_file(f, source);
+                }
+                return Err(GlacierError::Xml(Box::new(d)));
+            }
             1 => roots.pop().expect("len checked"),
             _ => empty_node(NodeType::Fragment, roots),
         };
         root.children.extend(decls);
         Ok(root)
+    }
+}
+
+/// Raiz sintética que envolve o documento para permitir declarações irmãs da
+/// raiz real (`<import>`/`<link>`/`<style>` antes do nó de layout). Fica **na
+/// linha 1**, então só desloca a *coluna* dessa linha — o que [`xml_error`]
+/// desconta ao traduzir a posição de volta para o arquivo original.
+const FRAGMENT_OPEN: &str = "<__glacier_fragment__>";
+
+/// Traduz um erro do roxmltree — cuja posição se refere ao documento
+/// **preprocessado** — num [`Diagnostic`] posicionado no arquivo **original**,
+/// com o trecho ofensor e, quando a causa é uma pegadinha conhecida, uma dica.
+fn xml_error(err: roxmltree::Error, original: &str, file: Option<&str>) -> GlacierError {
+    let pos = err.pos();
+    // Só a linha 1 carrega o prefixo da raiz sintética; nas demais a coluna já
+    // é a do arquivo. `saturating_sub` protege contra um erro reportado dentro
+    // do próprio prefixo (não deveria acontecer, mas não vale um panic).
+    let col = if pos.row == 1 {
+        pos.col.saturating_sub(FRAGMENT_OPEN.len() as u32).max(1)
+    } else {
+        pos.col
+    };
+
+    let mut d = Diagnostic::new(pos.row, col, xml_message(&err));
+    d = match file {
+        Some(f) => d.in_file(f, original),
+        None => d.with_source(original),
+    };
+    if let Some(hint) = xml_hint(&err) {
+        d = d.with_hint(hint);
+    }
+    GlacierError::Xml(Box::new(d))
+}
+
+/// A mensagem do erro, em português, para os casos que o motor sabe nomear —
+/// e o texto do roxmltree (em inglês) para o resto, que é raro. O `Display` do
+/// roxmltree termina em " at linha:coluna"; esse sufixo é cortado porque a
+/// posição agora é responsabilidade do [`Diagnostic`] (e a dele se referiria ao
+/// documento pré-processado, não ao arquivo do autor).
+fn xml_message(err: &roxmltree::Error) -> String {
+    use roxmltree::Error as E;
+    match err {
+        E::UnexpectedCloseTag(expected, actual, _) => {
+            format!("esperava a tag de fechamento '{expected}', encontrei '{actual}'")
+        }
+        E::UnknownEntityReference(name, _) => format!("entidade '&{name};' desconhecida"),
+        E::MalformedEntityReference(_) => "referência de entidade mal formada".to_string(),
+        E::DuplicatedAttribute(name, _) => format!("atributo '{name}' repetido na mesma tag"),
+        E::UnclosedRootNode => "o elemento raiz nunca é fechado".to_string(),
+        E::UnexpectedEndOfStream => "o documento termina no meio de uma tag".to_string(),
+        E::InvalidName(..) => "nome de tag ou atributo inválido".to_string(),
+        E::InvalidComment(_) => "comentário XML mal formado".to_string(),
+        other => {
+            let raw = other.to_string();
+            raw.rsplit_once(" at ").map_or(raw.as_str(), |(head, _)| head).to_string()
+        }
+    }
+}
+
+/// A dica ("como saio disso") para os erros de XML que o motor sabe reconhecer.
+/// São exatamente as pegadinhas que já custaram tempo de depuração de verdade —
+/// um XML mal formado por um `&` solto ou por uma tag de fechamento trocada é o
+/// que 90% dos erros de template são na prática.
+fn xml_hint(err: &roxmltree::Error) -> Option<&'static str> {
+    use roxmltree::Error as E;
+    Some(match err {
+        E::UnexpectedCloseTag { .. } => {
+            "tag de fechamento trocada ou aninhamento errado — confira a grafia \
+             (maiúsculas contam: <Column> fecha com </Column>) e se nenhuma tag \
+             ficou aberta antes desta"
+        }
+        E::UnknownEntityReference(..) | E::MalformedEntityReference(..) => {
+            "o XML só conhece &amp; &lt; &gt; &quot; &apos; (e &nbsp;, que o glacier \
+             traduz) — para um `&` literal num atributo, escreva `&amp;`"
+        }
+        E::InvalidName(..) | E::UnknownToken(..) => {
+            "nome de tag/atributo inválido — um `<` solto no texto precisa virar `&lt;`"
+        }
+        E::UnclosedRootNode | E::UnexpectedEndOfStream => {
+            "tag aberta e nunca fechada — todo elemento sem filhos precisa terminar em `/>`"
+        }
+        E::InvalidComment(..) => {
+            "comentário XML mal formado — `--` não pode aparecer dentro de `<!-- ... -->`"
+        }
+        E::DuplicatedAttribute(..) => "o mesmo atributo aparece duas vezes na tag",
+        _ => return None,
+    })
+}
+
+/// Blinda o corpo de cada `<style>…</style>` envolvendo-o em `<![CDATA[…]]>`,
+/// para que o parser de XML **nunca** olhe dentro dele.
+///
+/// Sem isso, o corpo do `<style>` é XML como qualquer outro texto — e um `<` no
+/// CSS, ou uma tag citada num comentário do CSS (`/* .card vira <Text> */`),
+/// vira um elemento de verdade aos olhos do roxmltree. O erro que sai daí é
+/// dos piores possíveis: aponta o `</style>` (linha errada) e reclama de uma
+/// tag que o autor nunca abriu ("expected 'Text' tag, not 'style'"). Como o
+/// corpo do `<style>` não é XML — é `.gss`, uma outra linguagem — a correção
+/// certa é tirá-lo do alcance do parser, não pedir ao autor que escape o CSS.
+///
+/// Não introduz quebras de linha (os marcadores são inline), então a contagem
+/// de linhas do documento — e portanto toda posição de erro — fica intacta.
+/// Blocos já em CDATA, ou cujo corpo contenha o terminador `]]>`, são deixados
+/// como estão (não há como aninhar CDATA; o caso não ocorre em `.gss` real).
+fn protect_style_bodies(xml: &str) -> String {
+    let mut out = String::with_capacity(xml.len() + 32);
+    let mut rest = xml;
+
+    loop {
+        // Pula comentários inteiros: um `<style>` citado dentro de `<!-- -->`
+        // não é um bloco de verdade e não deve ser tocado.
+        let comment = rest.find("<!--");
+        let style = find_style_open(rest);
+
+        let Some(open) = style else {
+            out.push_str(rest);
+            return out;
+        };
+        if let Some(c) = comment {
+            if c < open {
+                let end = rest[c..].find("-->").map(|e| c + e + 3).unwrap_or(rest.len());
+                out.push_str(&rest[..end]);
+                rest = &rest[end..];
+                continue;
+            }
+        }
+
+        // `<style ...>` — o corpo começa depois do `>` da tag de abertura. Uma
+        // tag vazia (`<style href="..."/>`) não tem corpo a proteger.
+        let Some(gt) = rest[open..].find('>').map(|i| open + i) else {
+            out.push_str(rest);
+            return out;
+        };
+        let body_start = gt + 1;
+        if rest[open..gt].ends_with('/') {
+            out.push_str(&rest[..body_start]);
+            rest = &rest[body_start..];
+            continue;
+        }
+        let Some(close) = find_style_close(&rest[body_start..]).map(|i| body_start + i) else {
+            out.push_str(rest);
+            return out;
+        };
+
+        let body = &rest[body_start..close];
+        out.push_str(&rest[..body_start]);
+        if body.contains("]]>") || body.trim_start().starts_with("<![CDATA[") {
+            out.push_str(body);
+        } else {
+            out.push_str("<![CDATA[");
+            out.push_str(body);
+            out.push_str("]]>");
+        }
+        rest = &rest[close..];
+    }
+}
+
+/// Índice do próximo `<style`/`<Style` que abre uma tag de verdade (seguido de
+/// espaço, `>` ou `/`, para não casar um `<styles>` qualquer).
+fn find_style_open(s: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(i) = s[from..].find('<').map(|i| from + i) {
+        let tail = &s[i + 1..];
+        let name_len = if tail.len() >= 5 && tail[..5].eq_ignore_ascii_case("style") {
+            5
+        } else {
+            from = i + 1;
+            continue;
+        };
+        match tail.as_bytes().get(name_len) {
+            Some(b' ' | b'\t' | b'\n' | b'\r' | b'>' | b'/') => return Some(i),
+            _ => from = i + 1,
+        }
+    }
+    None
+}
+
+/// Índice do `</style>` que fecha o bloco corrente (case-insensitive).
+fn find_style_close(s: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(i) = s[from..].find("</").map(|i| from + i) {
+        let tail = &s[i + 2..];
+        if tail.len() >= 5 && tail[..5].eq_ignore_ascii_case("style") {
+            return Some(i);
+        }
+        from = i + 2;
+    }
+    None
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    // A regressão que motivou `protect_style_bodies`: uma tag citada num
+    // comentário do CSS fazia o XML parser reclamar de uma tag que o autor
+    // nunca abriu, apontando o `</style>`. Agora o corpo do <style> é opaco.
+    #[test]
+    fn tag_em_comentario_de_css_nao_quebra_o_parse() {
+        let xml = "<Column>\n  <style>\n    /* o card vira <Text> aqui */\n    .card { padding: 8; }\n  </style>\n  <Text content=\"oi\" />\n</Column>";
+        let root = UiNode::parse_xml(xml).expect("o corpo do <style> não é XML");
+        let css = root.children.iter().find_map(|c| match &c.kind {
+            NodeType::Style { css, .. } => Some(css.as_str()),
+            _ => None,
+        });
+        assert!(css.is_some_and(|c| c.contains(".card") && c.contains("<Text>")));
+    }
+
+    // Um `<` literal no CSS (seletor imaginário, expressão) idem: é CSS, não XML.
+    #[test]
+    fn menor_que_literal_no_css_nao_quebra_o_parse() {
+        let xml = "<Column><style>.a { width: 10; } /* a < b */</style><Text content=\"x\"/></Column>";
+        assert!(UiNode::parse_xml(xml).is_ok());
+    }
+
+    // `<style href="...">` (auto-fechada, sem corpo) continua virando um Link.
+    #[test]
+    fn style_sem_corpo_segue_virando_link() {
+        let xml = "<Column><style href=\"a.gss\" /><Text content=\"x\"/></Column>";
+        let root = UiNode::parse_xml(xml).unwrap();
+        assert!(root.children.iter().any(|c| matches!(&c.kind, NodeType::Link { href, .. } if href == "a.gss")));
+    }
+
+    // O erro precisa apontar o arquivo, a linha REAL e a coluna, e trazer a
+    // linha ofensora — é o contrato do ponto "falhar apontando o dedo certo".
+    #[test]
+    fn erro_de_xml_traz_arquivo_linha_e_trecho() {
+        let xml = "<Column>\n  <Text content=\"a\" />\n</Colunm>\n";
+        let err = UiNode::parse_xml_in(xml, Some("views/home.xml")).unwrap_err();
+        let d = err.diagnostic().expect("erro de XML tem diagnóstico");
+        assert_eq!(d.file.as_deref(), Some("views/home.xml"));
+        assert_eq!(d.line, 3, "a linha do </Colunm>");
+        assert!(d.snippet.as_deref().is_some_and(|s| s.contains("Colunm")));
+        assert!(d.hint.is_some(), "tag de fechamento trocada tem dica");
+    }
+
+    // Um erro na PRIMEIRA linha não pode herdar a coluna da raiz sintética
+    // (22 chars) — antes o caret apontava para o meio do nada.
+    #[test]
+    fn coluna_da_linha_1_desconta_a_raiz_sintetica() {
+        let err = UiNode::parse_xml_in("<Column></Row>", Some("t.xml")).unwrap_err();
+        let d = err.diagnostic().unwrap();
+        assert_eq!(d.line, 1);
+        assert!(d.col <= 14, "coluna {} saiu do tamanho da linha", d.col);
+    }
+
+    // Template sem nó de layout tem mensagem própria (e dica), não um erro
+    // genérico de XML.
+    #[test]
+    fn template_sem_raiz_tem_mensagem_propria() {
+        let err = UiNode::parse_xml_in("<link rel=\"stylesheet\" href=\"a.gss\" />", Some("t.xml"))
+            .unwrap_err();
+        let d = err.diagnostic().unwrap();
+        assert!(d.message.contains("raiz"), "{}", d.message);
+        assert!(d.hint.is_some());
     }
 }
 

@@ -22,23 +22,52 @@
 //! ```
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Duration;
 
 use iced::window;
-use iced::{Element, Size, Subscription, Task};
+use iced::{Element, Font, Point, Size, Subscription, Task};
 
 use crate::component::{WindowSource, WindowSpec};
 use crate::{EngineMessage, GlacierUI};
+
+/// A geometria de uma janela no momento em que ela vai fechar — o que um app
+/// precisa para reabrir onde parou. Entregue ao gancho de
+/// [`GlacierDaemon::on_close`].
+///
+/// `position` é `None` no Wayland: o protocolo simplesmente não expõe a posição
+/// da janela ao cliente. Não é um bug a corrigir; é para o app decidir o que
+/// fazer (na prática, só persistir o tamanho).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowGeometry {
+    pub size: Size,
+    pub position: Option<Point>,
+}
 
 /// Construtor/runner do app multi-janela. Ver [módulo](self).
 pub struct GlacierDaemon {
     /// Título da janela principal (e default das demais que não trazem um).
     title: String,
-    /// Tamanho inicial da janela principal, em px lógicos.
-    main_size: (f32, f32),
+    /// `window::Settings` da janela principal. Começa no default do iced com o
+    /// tamanho de [`GlacierDaemon::main_size`]; um app que precise de mais
+    /// (borderless, ícone, `min_size`, geometria restaurada) troca o bloco
+    /// inteiro com [`GlacierDaemon::main_window`].
+    main_settings: window::Settings,
+    /// Ajuste opcional das `window::Settings` de cada janela-filha, aplicado
+    /// sobre o default do daemon. Ver [`GlacierDaemon::child_window`].
+    child_settings: Option<Rc<dyn Fn(&WindowSpec, &mut window::Settings)>>,
     /// Configura o motor da janela principal (registra componentes, define a
     /// tela inicial, carrega `.gss`, …). Rodado uma vez na inicialização.
     setup: Box<dyn Fn(&mut GlacierUI)>,
+    /// Fontes embutidas a registrar no runtime do iced (bytes de `.ttf`/`.otf`).
+    fonts: Vec<&'static [u8]>,
+    /// Fonte padrão de todas as janelas, quando o app embute a sua.
+    default_font: Option<Font>,
+    /// Observador rodado depois de cada `dispatch` na janela principal — é o
+    /// gancho de persistência (ver [`GlacierDaemon::on_message`]).
+    on_message: Option<Rc<dyn Fn(&EngineMessage, &GlacierUI)>>,
+    /// Gancho de fechamento da janela principal (ver [`GlacierDaemon::on_close`]).
+    on_close: Option<Rc<dyn Fn(&GlacierUI, WindowGeometry)>>,
     /// Período do tick de hot-reload (checagem de arquivos alterados).
     reload_period: Duration,
     /// Período do tick de expiração de toasts.
@@ -51,8 +80,16 @@ impl GlacierDaemon {
     pub fn new() -> Self {
         Self {
             title: "Glacier".to_string(),
-            main_size: (1024.0, 768.0),
+            main_settings: window::Settings {
+                size: Size::new(1024.0, 768.0),
+                ..window::Settings::default()
+            },
+            child_settings: None,
             setup: Box::new(|_| {}),
+            fonts: Vec::new(),
+            default_font: None,
+            on_message: None,
+            on_close: None,
             reload_period: Duration::from_millis(500),
             toast_period: Duration::from_millis(400),
         }
@@ -66,7 +103,45 @@ impl GlacierDaemon {
 
     /// Define o tamanho inicial da janela principal (encadeável).
     pub fn main_size(mut self, width: f32, height: f32) -> Self {
-        self.main_size = (width, height);
+        self.main_settings.size = Size::new(width, height);
+        self
+    }
+
+    /// Substitui as `window::Settings` da janela principal — o escape hatch para
+    /// tudo que o builder não nomeia: `decorations: false` (titlebar própria),
+    /// `icon`, `min_size`, `position` restaurada, `platform_specific`.
+    ///
+    /// Um app com titlebar custom também vai querer `exit_on_close_request:
+    /// false`, para que o pedido de fechar da WM passe por
+    /// [`GlacierDaemon::on_close`] antes de a janela sumir.
+    pub fn main_window(mut self, settings: window::Settings) -> Self {
+        self.main_settings = settings;
+        self
+    }
+
+    /// Ajusta as `window::Settings` de cada janela-filha (as abertas por
+    /// `open_window(...)`), recebendo o [`WindowSpec`] que a pediu. Sem isto,
+    /// filhas nascem com o default do iced — o que destoa num app borderless,
+    /// onde elas precisam do mesmo `decorations: false` da principal.
+    pub fn child_window(
+        mut self,
+        f: impl Fn(&WindowSpec, &mut window::Settings) + 'static,
+    ) -> Self {
+        self.child_settings = Some(Rc::new(f));
+        self
+    }
+
+    /// Embute uma fonte (bytes de um `.ttf`/`.otf`) no binário e a registra no
+    /// iced. Encadeável — chame uma vez por peso (regular, bold, …).
+    pub fn font(mut self, bytes: &'static [u8]) -> Self {
+        self.fonts.push(bytes);
+        self
+    }
+
+    /// Define a fonte padrão de todas as janelas (tipicamente uma embutida com
+    /// [`GlacierDaemon::font`]).
+    pub fn default_font(mut self, font: Font) -> Self {
+        self.default_font = Some(font);
         self
     }
 
@@ -77,33 +152,95 @@ impl GlacierDaemon {
         self
     }
 
+    /// Período do tick de hot-reload (checagem de arquivos alterados em disco).
+    /// Padrão: 500ms.
+    pub fn reload_period(mut self, period: Duration) -> Self {
+        self.reload_period = period;
+        self
+    }
+
+    /// Período do tick que expira toasts. Padrão: 400ms — mais curto deixa a
+    /// expiração mais pontual, ao custo de acordar o loop mais vezes.
+    pub fn toast_period(mut self, period: Duration) -> Self {
+        self.toast_period = period;
+        self
+    }
+
+    /// Observa cada mensagem já **despachada** na janela principal, com o motor
+    /// no estado resultante. É o gancho de persistência: a camada Luau não tem
+    /// I/O de arquivo, então salvar preferências (um "lembrar meu login") passa
+    /// por aqui — o script grava no contexto, e o app lê o contexto e persiste.
+    ///
+    /// Roda **depois** do dispatch, de propósito: o interesse é o estado novo,
+    /// não o velho.
+    pub fn on_message(mut self, f: impl Fn(&EngineMessage, &GlacierUI) + 'static) -> Self {
+        self.on_message = Some(Rc::new(f));
+        self
+    }
+
+    /// Roda antes de a janela principal fechar, com a geometria dela — para
+    /// persistir tamanho/posição e reabrir onde parou.
+    ///
+    /// A geometria é **consultada na hora** (uma ida ao runtime do iced), não
+    /// acumulada de eventos `Resized`/`Moved`. A diferença é prática: durante o
+    /// handshake de configuração do xdg-shell no Wayland chega um `Resized`
+    /// espúrio com o `min_size` da janela, e um valor rastreado de eventos
+    /// nasce envenenado com o mínimo antes de o usuário tocar em nada.
+    /// Perguntar "qual é o tamanho agora?" no instante de fechar não tem essa
+    /// janela de obsolescência.
+    ///
+    /// Só dispara se a janela principal tiver `exit_on_close_request: false`
+    /// (ver [`GlacierDaemon::main_window`]) — senão o iced a fecha sozinho, sem
+    /// passar por aqui.
+    pub fn on_close(mut self, f: impl Fn(&GlacierUI, WindowGeometry) + 'static) -> Self {
+        self.on_close = Some(Rc::new(f));
+        self
+    }
+
     /// Sobe o daemon e roda o loop do iced até a última janela fechar.
     pub fn run(self) -> iced::Result {
-        let GlacierDaemon { title, main_size, setup, reload_period, toast_period } = self;
+        let GlacierDaemon {
+            title,
+            main_settings,
+            child_settings,
+            setup,
+            fonts,
+            default_font,
+            on_message,
+            on_close,
+            reload_period,
+            toast_period,
+        } = self;
         let main_title = title.clone();
 
         // `boot` do iced: constrói o motor principal via `setup` e abre a janela
         // inicial. `window::open` devolve o `Id` de imediato, então já inserimos
-        // o motor em `windows` com essa chave (o daemon não abre janela sozinho).
+        // o motor em `windows` com essa chave (o daemon não abre janela sozinho),
+        // e guardamos esse `Id` como o da principal — ver `Runtime::main_id`.
         let boot = move || {
             let mut engine = GlacierUI::new();
             setup(&mut engine);
-            let settings = window::Settings {
-                size: Size::new(main_size.0, main_size.1),
-                ..window::Settings::default()
-            };
-            let (id, open) = window::open(settings);
-            let mut rt = Runtime::new(reload_period, toast_period);
+            let (id, open) = window::open(main_settings.clone());
+            let mut rt = Runtime::new(reload_period, toast_period, id);
+            rt.child_settings = child_settings.clone();
+            rt.on_message = on_message.clone();
+            rt.on_close = on_close.clone();
             rt.titles.insert(id, main_title.clone());
             rt.windows.insert(id, engine);
             (rt, open.map(DaemonMessage::Opened))
         };
 
-        iced::daemon(boot, Runtime::update, Runtime::view)
+        let mut app = iced::daemon(boot, Runtime::update, Runtime::view)
             .title(Runtime::title)
             .theme(Runtime::theme)
-            .subscription(Runtime::subscription)
-            .run()
+            .subscription(Runtime::subscription);
+        for bytes in fonts {
+            app = app.font(bytes);
+        }
+        if let Some(font) = default_font {
+            app = app.default_font(font);
+        }
+        app.run()
     }
 }
 
@@ -126,6 +263,13 @@ pub enum DaemonMessage {
     /// Uma janela foi fechada (via `window::close_events`): remove o motor e,
     /// se era a última, encerra o app.
     Closed(window::Id),
+    /// A OS/WM pediu para fechar uma janela (`window::close_requests`, ANTES do
+    /// fechamento). Na principal, dá a chance de [`GlacierDaemon::on_close`]
+    /// rodar com a geometria; nas demais, fecha direto.
+    CloseRequested(window::Id),
+    /// A geometria consultada em resposta a um `CloseRequested` da principal
+    /// chegou: entrega-a ao gancho `on_close` e então fecha a janela.
+    CloseWithGeometry(window::Id, Size, Option<Point>),
     /// Tick periódico aplicado a **todas** as janelas (hot-reload, expiração de
     /// toasts) — cada motor checa os próprios arquivos/toasts.
     TickAll(EngineMessage),
@@ -135,15 +279,29 @@ pub enum DaemonMessage {
 struct Runtime {
     windows: HashMap<window::Id, GlacierUI>,
     titles: HashMap<window::Id, String>,
+    /// `Id` da janela principal, conhecido já no `boot` (`window::open` o
+    /// devolve síncrono). Tê-lo em mãos evita um round-trip `window::latest()`
+    /// por ação de janela — e no Wayland esse adiamento **quebra** o arrasto:
+    /// o compositor exige que `window::drag` seja pedido com o serial do
+    /// pointer-grab ainda vivo, e um round-trip o perde, fazendo o
+    /// `onPress="window:drag"` da titlebar custom virar um no-op silencioso.
+    main_id: window::Id,
+    child_settings: Option<Rc<dyn Fn(&WindowSpec, &mut window::Settings)>>,
+    on_message: Option<Rc<dyn Fn(&EngineMessage, &GlacierUI)>>,
+    on_close: Option<Rc<dyn Fn(&GlacierUI, WindowGeometry)>>,
     reload_period: Duration,
     toast_period: Duration,
 }
 
 impl Runtime {
-    fn new(reload_period: Duration, toast_period: Duration) -> Self {
+    fn new(reload_period: Duration, toast_period: Duration, main_id: window::Id) -> Self {
         Self {
             windows: HashMap::new(),
             titles: HashMap::new(),
+            main_id,
+            child_settings: None,
+            on_message: None,
+            on_close: None,
             reload_period,
             toast_period,
         }
@@ -162,6 +320,14 @@ impl Runtime {
                     Task::none()
                 }
             }
+            // A WM pediu para fechar (Alt+F4, botão da barra, fim de sessão).
+            DaemonMessage::CloseRequested(id) => self.close(id),
+            DaemonMessage::CloseWithGeometry(id, size, position) => {
+                if let (Some(hook), Some(engine)) = (&self.on_close, self.windows.get(&id)) {
+                    hook(engine, WindowGeometry { size, position });
+                }
+                window::close(id)
+            }
             DaemonMessage::TickAll(msg) => {
                 // Aplica o tick a cada janela (clonando a mensagem por janela).
                 let ids: Vec<window::Id> = self.windows.keys().copied().collect();
@@ -171,14 +337,52 @@ impl Runtime {
         }
     }
 
+    /// Fecha a janela `id`. Na principal, e havendo um gancho `on_close`,
+    /// primeiro **consulta** a geometria de verdade (ver
+    /// [`GlacierDaemon::on_close`]) e só fecha depois de entregá-la.
+    fn close(&mut self, id: window::Id) -> Task<DaemonMessage> {
+        if id != self.main_id || self.on_close.is_none() {
+            return window::close(id);
+        }
+        window::size(id).then(move |size| {
+            window::position(id)
+                .map(move |position| DaemonMessage::CloseWithGeometry(id, size, position))
+        })
+    }
+
     /// Despacha `msg` ao motor da janela `id` e, em seguida, abre quaisquer
     /// janelas que aquele motor tenha pedido durante o `dispatch`.
     fn route(&mut self, id: window::Id, msg: EngineMessage) -> Task<DaemonMessage> {
+        // Controles de janela da titlebar custom (`window:drag`, `window:close`,
+        // `window:resize:se`, …) são tratados AQUI, contra o `Id` da janela em
+        // roteamento, e não dentro do motor — que, sem saber em qual janela vive,
+        // teria de resolvê-lo via `window::latest()` e perderia o pointer-grab
+        // serial no Wayland (ver `Runtime::main_id`). O `close` ainda passa por
+        // `Runtime::close`, para o gancho `on_close` poder salvar a geometria.
+        if let EngineMessage::UiClick(action) = &msg {
+            if let Some(cmd) = action.strip_prefix("window:") {
+                return match cmd {
+                    "close" => self.close(id),
+                    _ => window_control(id, cmd),
+                };
+            }
+        }
+
         // 1. despacha ao motor da janela (borrow escopado)
         let ui_task = match self.windows.get_mut(&id) {
             Some(engine) => engine.dispatch(&msg).map(move |m| DaemonMessage::Ui { id, msg: m }),
             None => return Task::none(),
         };
+
+        // Observador de persistência: depois do dispatch (o interesse é o estado
+        // resultante), e só na principal — é lá que vive o formulário cujo
+        // estado o app quer guardar.
+        if id == self.main_id {
+            if let (Some(hook), Some(engine)) = (&self.on_message, self.windows.get(&id)) {
+                hook(&msg, engine);
+            }
+        }
+
         let mut tasks = vec![ui_task];
 
         // 2. drena os pedidos de janela nova desse mesmo motor e abre cada um
@@ -213,10 +417,11 @@ impl Runtime {
             }
         }
 
-        // 4. se o motor pediu para fechar a própria janela, fecha (o
-        // `close_events` subsequente remove o motor; a última encerra o app)
+        // 4. se o motor pediu para fechar a própria janela (`close_window()` na
+        // Lua), fecha — pela mesma porta do botão da titlebar, para o gancho
+        // `on_close` da principal também valer aqui.
         if self.windows.get_mut(&id).map(|e| e.take_close_requested()).unwrap_or(false) {
-            tasks.push(window::close(id));
+            tasks.push(self.close(id));
         }
 
         Task::batch(tasks)
@@ -225,14 +430,20 @@ impl Runtime {
     /// Materializa um [`WindowSpec`] numa janela nova: constrói um motor fresco,
     /// abre a janela (o `Id` vem síncrono) e registra motor + título.
     fn open_child(&mut self, spec: WindowSpec) -> Task<DaemonMessage> {
-        let WindowSpec { source, title, size, resizable, data } = spec;
-        let (engine, fallback_title) = build_engine(source, &data);
-        let (w, h) = size.unwrap_or((640.0, 480.0));
-        let settings = window::Settings {
+        let (w, h) = spec.size.unwrap_or((640.0, 480.0));
+        let mut settings = window::Settings {
             size: Size::new(w, h),
-            resizable,
+            resizable: spec.resizable,
             ..window::Settings::default()
         };
+        // O app tem a última palavra sobre a aparência da filha (ex.: também
+        // borderless, num app com titlebar própria).
+        if let Some(f) = &self.child_settings {
+            f(&spec, &mut settings);
+        }
+
+        let WindowSpec { source, title, data, .. } = spec;
+        let (engine, fallback_title) = build_engine(source, &data);
         let (id, open) = window::open(settings);
         self.titles.insert(id, title.unwrap_or(fallback_title));
         self.windows.insert(id, engine);
@@ -274,6 +485,11 @@ impl Runtime {
                 crate::viewport_from_event(e, s, id).map(|msg| DaemonMessage::Ui { id, msg })
             }),
             window::close_events().map(DaemonMessage::Closed),
+            // O pedido de fechar da WM (Alt+F4, botão da barra, logout) — chega
+            // ANTES do fechamento, que é o único momento em que ainda dá para
+            // consultar a geometria da janela para o gancho `on_close`. Só tem
+            // efeito se a janela declarar `exit_on_close_request: false`.
+            window::close_requests().map(DaemonMessage::CloseRequested),
             iced::time::every(self.reload_period)
                 .map(|_| DaemonMessage::TickAll(EngineMessage::FileChanged(String::new()))),
             iced::time::every(self.toast_period)
@@ -340,6 +556,41 @@ fn file_stem(path: &str) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("janela")
         .to_string()
+}
+
+/// Traduz uma ação `window:<cmd>` da titlebar custom na `Task` do iced
+/// correspondente, dirigida ao `Id` **conhecido** da janela — não ao que um
+/// `window::latest()` devolveria depois. Ver [`Runtime::main_id`].
+fn window_control(id: window::Id, cmd: &str) -> Task<DaemonMessage> {
+    if let Some(dir) = cmd.strip_prefix("resize:") {
+        return match resize_direction(dir) {
+            Some(d) => window::drag_resize(id, d),
+            None => Task::none(),
+        };
+    }
+    match cmd {
+        "minimize" => window::minimize(id, true),
+        "maximize" | "toggle_maximize" => window::toggle_maximize(id),
+        "drag" => window::drag(id),
+        _ => Task::none(),
+    }
+}
+
+/// Direção de um puxador de redimensionamento (`window:resize:se`, …). Aceita as
+/// abreviações de bússola e os nomes por extenso.
+fn resize_direction(s: &str) -> Option<window::Direction> {
+    use window::Direction::*;
+    Some(match s.trim().to_ascii_lowercase().as_str() {
+        "n" | "north" | "top" => North,
+        "s" | "south" | "bottom" => South,
+        "e" | "east" | "right" => East,
+        "w" | "west" | "left" => West,
+        "ne" | "northeast" | "north-east" => NorthEast,
+        "nw" | "northwest" | "north-west" => NorthWest,
+        "se" | "southeast" | "south-east" => SouthEast,
+        "sw" | "southwest" | "south-west" => SouthWest,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

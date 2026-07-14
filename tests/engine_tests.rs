@@ -59,7 +59,7 @@ fn test_interpolation() {
     motor.define_data("user_name", "Bob");
     motor.define_data("user_role", "Admin");
 
-    let evaluated = motor.evaluated_templates.get("test_comp").unwrap();
+    let evaluated = motor.evaluated("test_comp").unwrap();
     if let NodeType::Text { content, .. } = &evaluated.kind {
         assert_eq!(content, "Welcome, Bob! Role: Admin");
     } else {
@@ -96,7 +96,7 @@ fn test_includes() {
     motor.register_component("test_card", card_path).unwrap();
     motor.register_component("test_main", main_path).unwrap();
 
-    let evaluated = motor.evaluated_templates.get("test_main").unwrap();
+    let evaluated = motor.evaluated("test_main").unwrap();
     assert_eq!(evaluated.kind, NodeType::Column);
     assert_eq!(evaluated.children.len(), 2);
 
@@ -149,7 +149,7 @@ fn test_if_else() {
     motor.define_data("usuario", "Ana");
     motor.define_data("papel", "user");
 
-    let ev = motor.evaluated_templates.get("cond").unwrap();
+    let ev = motor.evaluated("cond").unwrap();
     assert_eq!(ev.children.len(), 1, "só o ramo else deve aparecer");
     if let NodeType::Text { content, .. } = &ev.children[0].kind {
         assert_eq!(content, "Entre, por favor");
@@ -161,7 +161,7 @@ fn test_if_else() {
     motor.define_data("logado", "true");
     motor.define_data("papel", "admin");
 
-    let ev = motor.evaluated_templates.get("cond").unwrap();
+    let ev = motor.evaluated("cond").unwrap();
     assert_eq!(ev.children.len(), 2, "ramo if verdadeiro + bloco admin");
     if let NodeType::Text { content, .. } = &ev.children[0].kind {
         assert_eq!(content, "Olá, Ana");
@@ -218,10 +218,10 @@ fn test_import_recursivo() {
     motor.register_component("main", main_path).unwrap();
 
     // Os imports recursivos devem ter sido carregados automaticamente.
-    assert!(motor.parsed_templates.contains_key("Card"), "Card deveria ter sido importado");
-    assert!(motor.parsed_templates.contains_key("Badge"), "Badge deveria ter sido importado recursivamente");
+    assert!(motor.is_registered("Card"), "Card deveria ter sido importado");
+    assert!(motor.is_registered("Badge"), "Badge deveria ter sido importado recursivamente");
 
-    let evaluated = motor.evaluated_templates.get("main").unwrap();
+    let evaluated = motor.evaluated("main").unwrap();
     assert_eq!(evaluated.kind, NodeType::Column);
     // O Card expande para um Container; o import declarado não deve virar filho visível.
     assert_eq!(evaluated.children.len(), 1);
@@ -277,7 +277,7 @@ fn test_componente_por_nome() {
     motor.register_component("UserCard", card_path).unwrap();
     motor.register_component("test_main_comp", main_path).unwrap();
 
-    let evaluated = motor.evaluated_templates.get("test_main_comp").unwrap();
+    let evaluated = motor.evaluated("test_main_comp").unwrap();
     assert_eq!(evaluated.kind, NodeType::Column);
     assert_eq!(evaluated.children.len(), 2);
 
@@ -321,7 +321,7 @@ fn test_builtin_badge_disponivel_sem_registro() {
 
     motor.register_component("tela_badge", tela_path).unwrap();
 
-    let evaluated = motor.evaluated_templates.get("tela_badge").unwrap();
+    let evaluated = motor.evaluated("tela_badge").unwrap();
     assert_eq!(evaluated.kind, NodeType::Column);
     assert_eq!(evaluated.children.len(), 2);
 
@@ -350,8 +350,8 @@ fn test_builtin_badge_disponivel_sem_registro() {
     }
 
     // O contexto global NÃO foi poluído com defaults (chaves `badge_*`).
-    assert!(!motor.context_data.contains_key("badge_text"));
-    assert!(!motor.context_data.contains_key("badge_bg"));
+    assert!(!motor.context().contains_key("badge_text"));
+    assert!(!motor.context().contains_key("badge_bg"));
 
     std::fs::remove_file(tela_path).ok();
 }
@@ -401,7 +401,7 @@ fn test_atributo_numerico_templado() {
     motor.register_component("NumCard", card_path).unwrap();
     motor.register_component("test_num_main", main_path).unwrap();
 
-    let evaluated = motor.evaluated_templates.get("test_num_main").unwrap();
+    let evaluated = motor.evaluated("test_num_main").unwrap();
     // Com prop: size templado resolve para 28.
     match &evaluated.children[0].kind {
         NodeType::Text { size, .. } => assert_eq!(*size, Some(28.0)),
@@ -453,7 +453,7 @@ fn test_foreach_com_componente() {
     ]"#;
     motor.define_data("membros", data);
 
-    let evaluated = motor.evaluated_templates.get("test_lista").unwrap();
+    let evaluated = motor.evaluated("test_lista").unwrap();
     assert_eq!(evaluated.kind, NodeType::Column);
     assert_eq!(evaluated.children.len(), 2);
 
@@ -482,26 +482,26 @@ fn test_navegacao_historico() {
     let mut motor = GlacierUI::new();
 
     motor.set_initial_screen("home");
-    assert_eq!(motor.current_screen.as_deref(), Some("home"));
+    assert_eq!(motor.current_screen(), Some("home"));
 
     motor.navigate_to("config");
     motor.navigate_to("perfil");
-    assert_eq!(motor.current_screen.as_deref(), Some("perfil"));
+    assert_eq!(motor.current_screen(), Some("perfil"));
 
     // NavigateBack desempilha o histórico na ordem inversa.
     motor.navigate_back();
-    assert_eq!(motor.current_screen.as_deref(), Some("config"));
+    assert_eq!(motor.current_screen(), Some("config"));
     motor.navigate_back();
-    assert_eq!(motor.current_screen.as_deref(), Some("home"));
+    assert_eq!(motor.current_screen(), Some("home"));
 
     // Histórico vazio: navigate_back não muda a tela.
     motor.navigate_back();
-    assert_eq!(motor.current_screen.as_deref(), Some("home"));
+    assert_eq!(motor.current_screen(), Some("home"));
 
     // Navigate para a tela já ativa não empilha duplicado.
     motor.navigate_to("home");
     motor.navigate_back();
-    assert_eq!(motor.current_screen.as_deref(), Some("home"));
+    assert_eq!(motor.current_screen(), Some("home"));
 }
 
 #[test]
@@ -529,7 +529,7 @@ fn test_foreach() {
     ]"#;
     motor.define_data("items", data);
 
-    let evaluated = motor.evaluated_templates.get("test_for").unwrap();
+    let evaluated = motor.evaluated("test_for").unwrap();
     assert_eq!(evaluated.kind, NodeType::Column);
     assert_eq!(evaluated.children.len(), 2);
 
@@ -599,11 +599,11 @@ fn test_nested_component_action_namespacing() {
     motor.set_initial_screen("parent");
 
     // Both the child template (registered in cascade) and the parent exist.
-    assert!(motor.parsed_templates.contains_key("parent"));
-    assert!(motor.parsed_templates.contains_key("ChildComp"));
+    assert!(motor.is_registered("parent"));
+    assert!(motor.is_registered("ChildComp"));
 
     // The child's action got namespaced; the parent's stayed plain.
-    let evaluated = motor.evaluated_templates.get("parent").unwrap();
+    let evaluated = motor.evaluated("parent").unwrap();
     let mut clicks = Vec::new();
     collect_clicks(evaluated, &mut clicks);
     assert!(clicks.contains(&"parent_act".to_string()), "got {:?}", clicks);
@@ -722,7 +722,7 @@ fn test_gss_fill_and_max_width_resolve_from_class() {
     motor.load_stylesheet(gss).unwrap();
     motor.register_component("maxw", path).unwrap();
 
-    let n = motor.evaluated_templates.get("maxw").unwrap();
+    let n = motor.evaluated("maxw").unwrap();
     assert_eq!(n.width.as_deref(), Some("fill"), "width: fill applies from the class");
     assert_eq!(n.max_width, Some(640.0), "max-width applies from the class");
 
@@ -772,8 +772,8 @@ fn test_link_stylesheet_is_global() {
     motor.register_component("a", a_path).unwrap();
     motor.register_component("b", b_path).unwrap();
 
-    let a = motor.evaluated_templates.get("a").unwrap();
-    let b = motor.evaluated_templates.get("b").unwrap();
+    let a = motor.evaluated("a").unwrap().clone();
+    let b = motor.evaluated("b").unwrap().clone();
 
     assert_eq!(a.padding.as_deref(), Some("9"), "linked class overrides global padding in A");
     assert_eq!(text_color(&a.kind).as_deref(), Some("#abcabc"), "linked class color applies in A");
@@ -818,8 +818,8 @@ fn test_inline_style_block_default_is_global() {
     motor.register_component("a", a_path).unwrap();
     motor.register_component("b", b_path).unwrap();
 
-    let a = motor.evaluated_templates.get("a").unwrap();
-    let b = motor.evaluated_templates.get("b").unwrap();
+    let a = motor.evaluated("a").unwrap().clone();
+    let b = motor.evaluated("b").unwrap().clone();
 
     assert_eq!(a.padding.as_deref(), Some("9"), "inline <style> overrides global padding");
     assert_eq!(text_color(&a.kind).as_deref(), Some("#abcabc"), "inline class color applies in A");
@@ -864,8 +864,8 @@ fn test_inline_style_block_scoped_true_is_scoped() {
     motor.register_component("a", a_path).unwrap();
     motor.register_component("b", b_path).unwrap();
 
-    let a = motor.evaluated_templates.get("a").unwrap();
-    let b = motor.evaluated_templates.get("b").unwrap();
+    let a = motor.evaluated("a").unwrap().clone();
+    let b = motor.evaluated("b").unwrap().clone();
 
     // A: scoped `.box` overrides padding (9 vs global 5); `.scoped` provides color.
     assert_eq!(a.padding.as_deref(), Some("9"), "scoped class should override global padding");
@@ -903,7 +903,7 @@ fn test_inline_style_overrides_linked_by_document_order() {
 
     motor.register_component("ord", path).unwrap();
 
-    let n = motor.evaluated_templates.get("ord").unwrap();
+    let n = motor.evaluated("ord").unwrap();
     assert_eq!(text_color(&n.kind).as_deref(), Some("#bbbbbb"), "later inline <style> wins over the linked sheet");
     assert_eq!(n.padding.as_deref(), Some("3"), "padding still comes from the linked sheet");
 
@@ -922,7 +922,7 @@ fn test_inline_style_reloads_with_template() {
         r##"<style>.t { color: #010101; }</style><Text class="t" content="x" />"##,
     ).unwrap();
     motor.register_component("rel", path).unwrap();
-    let n = motor.evaluated_templates.get("rel").unwrap();
+    let n = motor.evaluated("rel").unwrap();
     assert_eq!(text_color(&n.kind).as_deref(), Some("#010101"));
 
     // Edit the inline style; bump mtime so the reload check picks it up.
@@ -934,7 +934,7 @@ fn test_inline_style_reloads_with_template() {
     let _ = filetime_touch(path);
     motor.check_reload();
 
-    let n = motor.evaluated_templates.get("rel").unwrap();
+    let n = motor.evaluated("rel").unwrap();
     assert_eq!(text_color(&n.kind).as_deref(), Some("#020202"), "inline style rebuilds when the template reloads");
 
     std::fs::remove_file(path).ok();
@@ -963,7 +963,7 @@ fn test_inline_attribute_wins_over_class() {
     motor.load_stylesheet(gss).unwrap();
     motor.register_component("inline", path).unwrap();
 
-    let n = motor.evaluated_templates.get("inline").unwrap();
+    let n = motor.evaluated("inline").unwrap();
     assert_eq!(text_color(&n.kind).as_deref(), Some("#ff0000"), "inline color wins");
     assert_eq!(n.padding.as_deref(), Some("3"), "padding comes from the class");
 
@@ -994,8 +994,8 @@ fn test_link_rel_import() {
     motor.register_component("parent", parent).unwrap();
 
     // The imported component must be registered and inlined with its prop.
-    assert!(motor.parsed_templates.contains_key("ChildLink"), "import should register the component");
-    let ev = motor.evaluated_templates.get("parent").unwrap();
+    assert!(motor.is_registered("ChildLink"), "import should register the component");
+    let ev = motor.evaluated("parent").unwrap();
     assert_eq!(ev.children.len(), 1);
     if let NodeType::Text { content, .. } = &ev.children[0].kind {
         assert_eq!(content, "child:42");
@@ -1035,6 +1035,8 @@ fn test_textarea_parses_and_syncs() {
     let tpl = "templates/test_textarea.gv";
     std::fs::write(tpl, xml).unwrap();
     motor.register_component("tacomp", tpl).unwrap();
+    // Só a tela ativa (ou um `keep_evaluated`) fica avaliada — ver reevaluate_all.
+    motor.set_initial_screen("tacomp");
     motor.define_data("dotenv", "FOO=1\nBAR=2");
     // A reevaluation seeds the editor buffer from the context without panicking.
     motor.reevaluate_all().unwrap();
@@ -1066,6 +1068,7 @@ fn test_select_parses_and_renders() {
     let tpl = "templates/test_select.gv";
     std::fs::write(tpl, xml).unwrap();
     motor.register_component("selcomp", tpl).unwrap();
+    motor.set_initial_screen("selcomp");
     motor.define_data(
         "repos",
         r##"[{"full_name":"org/a","clone_url":"https://x/a.git"},{"full_name":"org/b","clone_url":"https://x/b.git"}]"##,
@@ -1113,7 +1116,7 @@ fn test_if_else_inside_foreach() {
 
     motor.register_component("ifforeach", tpl).unwrap();
 
-    let ev = motor.evaluated_templates.get("ifforeach").unwrap();
+    let ev = motor.evaluated("ifforeach").unwrap();
     let texts: Vec<String> = ev
         .children
         .iter()
@@ -1159,7 +1162,7 @@ fn test_link_rel_data() {
     // Object field flattened to `app.title`.
     assert_eq!(motor.get_data("app.title").map(String::as_str), Some("Olá"));
 
-    let ev = motor.evaluated_templates.get("datacomp").unwrap();
+    let ev = motor.evaluated("datacomp").unwrap();
     // 1 title + 2 ForEach-expanded users.
     assert_eq!(ev.children.len(), 3, "title + two users");
     let names: Vec<String> = ev.children.iter().filter_map(|c| {
@@ -1192,11 +1195,11 @@ fn test_link_rel_theme() {
     ).unwrap();
 
     // Default theme before loading anything is Dark.
-    assert!(motor.custom_theme.is_none());
+    assert!(motor.custom_theme().is_none());
 
     motor.register_component("themecomp", tpl).unwrap();
 
-    assert!(motor.custom_theme.is_some(), "theme link should set a custom theme");
+    assert!(motor.custom_theme().is_some(), "theme link should set a custom theme");
     let bg = motor.theme().palette().background;
     assert!((bg.r - 16.0 / 255.0).abs() < 1e-6, "background red channel");
     assert!((bg.g - 32.0 / 255.0).abs() < 1e-6, "background green channel");
@@ -1291,7 +1294,7 @@ fn test_directives_as_attributes() {
     motor.define_data("usuario", "Ana");
     motor.define_data("papel", "user");
 
-    let ev = motor.evaluated_templates.get("cond_attr").unwrap();
+    let ev = motor.evaluated("cond_attr").unwrap();
     // O primeiro Text (if) é ocultado. O segundo Text (senao) é exibido.
     // O terceiro (if papel equals admin) é ocultado. O quarto (if papel notEquals admin) é exibido.
     assert_eq!(ev.children.len(), 2);
@@ -1310,7 +1313,7 @@ fn test_directives_as_attributes() {
     motor.define_data("logado", "true");
     motor.define_data("papel", "admin");
 
-    let ev = motor.evaluated_templates.get("cond_attr").unwrap();
+    let ev = motor.evaluated("cond_attr").unwrap();
     // O primeiro Text (if) é exibido. O segundo (senao) é ocultado.
     // O terceiro (if papel equals admin) é exibido. O quarto (if papel notEquals admin) é ocultado.
     assert_eq!(ev.children.len(), 2);
@@ -1352,7 +1355,7 @@ fn test_precedence_foreach_if_attributes() {
     ]).to_string();
     motor.define_data("usuarios", &json);
 
-    let ev = motor.evaluated_templates.get("precedence").unwrap();
+    let ev = motor.evaluated("precedence").unwrap();
     // Deve renderizar apenas "Clara" e "Mateus", pois "Sophia" tem ativo="false".
     assert_eq!(ev.children.len(), 2);
     if let NodeType::Text { content, .. } = &ev.children[0].kind {
@@ -1384,7 +1387,7 @@ fn test_unknown_extension_falls_back_to_xml() {
 
     motor.register_component("fallback", path).unwrap();
 
-    let ev = motor.evaluated_templates.get("fallback").unwrap();
+    let ev = motor.evaluated("fallback").unwrap();
     if let NodeType::Text { content, .. } = &ev.kind {
         assert_eq!(content, "via XML fallback");
     } else {
@@ -1441,7 +1444,7 @@ fn test_form_hydrates_scope_submit_and_next_focus() {
     motor.register(Box::new(FormTestComp)).unwrap();
     motor.set_initial_screen("formtest");
 
-    let evaluated = motor.evaluated_templates.get("formtest").unwrap();
+    let evaluated = motor.evaluated("formtest").unwrap();
     let mut inputs = Vec::new();
     collect_form_inputs(evaluated, &mut inputs);
     assert_eq!(inputs.len(), 2, "esperava 2 inputs ligados a formControl, veio {:?}",
@@ -1555,7 +1558,7 @@ fn test_formulario_login_example_template_parses_and_evaluates() {
         .register_component("formulario_login_smoke", "examples/formulario_login/formulario_login.gv")
         .expect("o template do exemplo formulario_login deve parsear e avaliar sem erro");
 
-    let evaluated = motor.evaluated_templates.get("formulario_login_smoke").unwrap();
+    let evaluated = motor.evaluated("formulario_login_smoke").unwrap();
     let mut inputs = Vec::new();
     collect_form_inputs(evaluated, &mut inputs);
     assert_eq!(
@@ -1600,7 +1603,7 @@ fn test_fragment_component_splices_if_else_branch() {
     .unwrap();
 
     motor.register_component("test_frag_main", main).unwrap();
-    let evaluated = motor.evaluated_templates.get("test_frag_main").unwrap();
+    let evaluated = motor.evaluated("test_frag_main").unwrap();
 
     assert_eq!(evaluated.kind, NodeType::Column);
     // Two spliced siblings — neither is a Fragment wrapper.
@@ -1656,11 +1659,11 @@ function inc() ctx.n = ctx.n + 1 end
     motor.set_initial_screen("scripted");
 
     // init() do <script> semeou o estado.
-    assert_eq!(motor.context_data.get("n").map(String::as_str), Some("0"));
+    assert_eq!(motor.context().get("n").map(String::as_str), Some("0"));
 
     // A ação "inc" roteia para a função Luau homônima do componente scriptado.
     let _ = motor.dispatch(&glacier_ui::EngineMessage::UiClick("inc".into()));
-    assert_eq!(motor.context_data.get("n").map(String::as_str), Some("1"));
+    assert_eq!(motor.context().get("n").map(String::as_str), Some("1"));
 
     std::fs::remove_file(path).ok();
 }
@@ -1762,7 +1765,7 @@ fn tooltip_parses_interpolates_and_renders() {
     motor.define_data("help_text", "Ajuda interpolada");
     motor.reevaluate_all().unwrap();
 
-    let evaluated = motor.evaluated_templates.get("tipcomp").unwrap();
+    let evaluated = motor.evaluated("tipcomp").unwrap();
     let button_node = &evaluated.children[0];
     assert_eq!(button_node.tooltip.as_deref(), Some("Ajuda interpolada"));
     let row_node = &evaluated.children[1];

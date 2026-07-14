@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::error::Result;
 use crate::parser::{UiNode, NodeType, NumAttr};
 use crate::stylesheet::{StyleSheet, StyleRule, StateStyles, resolve_classes, resolve_state_classes};
 
@@ -9,24 +10,56 @@ use crate::stylesheet::{StyleSheet, StyleRule, StateStyles, resolve_classes, res
 /// the root element (it would otherwise make the document multi-rooted). The
 /// markup parser ignores the script; its Lua body is interpreted at runtime by
 /// [`crate::luau::LuauComponent`].
+///
+/// O bloco é substituído por **tantas quebras de linha quantas ele ocupava**, em
+/// vez de simplesmente sumir. Sem isso, todo o markup abaixo de um `<script>`
+/// inline de 30 linhas subiria 30 linhas aos olhos do parser de XML — e um erro
+/// na linha 80 sairia reportado como linha 50, que é pior do que não ter linha
+/// nenhuma: manda o autor olhar para um trecho inocente.
 pub fn strip_script(xml: &str) -> (String, Option<String>) {
-    let lower = xml.to_ascii_lowercase();
-    if let Some(open_start) = lower.find("<script") {
-        // Find the end of the opening tag (supports `<script>` and `<script ...>`).
-        if let Some(gt_rel) = lower[open_start..].find('>') {
-            let body_start = open_start + gt_rel + 1;
-            if let Some(close_rel) = lower[body_start..].find("</script>") {
-                let body_end = body_start + close_rel;
-                let close_end = body_end + "</script>".len();
-                let script = xml[body_start..body_end].to_string();
-                let mut markup = String::with_capacity(xml.len());
-                markup.push_str(&xml[..open_start]);
-                markup.push_str(&xml[close_end..]);
-                return (markup, Some(script));
-            }
-        }
+    let Some(open_start) = find_script_open(xml) else {
+        return (xml.to_string(), None);
+    };
+    // Find the end of the opening tag (supports `<script>` and `<script ...>`).
+    let Some(gt_rel) = xml[open_start..].find('>') else {
+        return (xml.to_string(), None);
+    };
+    let body_start = open_start + gt_rel + 1;
+    let lower_tail = xml[body_start..].to_ascii_lowercase();
+    let Some(close_rel) = lower_tail.find("</script>") else {
+        return (xml.to_string(), None);
+    };
+
+    let body_end = body_start + close_rel;
+    let close_end = body_end + "</script>".len();
+    let script = xml[body_start..body_end].to_string();
+
+    let mut markup = String::with_capacity(xml.len());
+    markup.push_str(&xml[..open_start]);
+    for _ in 0..xml[open_start..close_end].matches('\n').count() {
+        markup.push('\n');
     }
-    (xml.to_string(), None)
+    markup.push_str(&xml[close_end..]);
+    (markup, Some(script))
+}
+
+/// Índice do `<script` que abre o bloco de script — ignorando um citado dentro
+/// de um comentário XML (`<!-- <script> -->`), que não é um bloco de verdade.
+fn find_script_open(xml: &str) -> Option<usize> {
+    let lower = xml.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(i) = lower[from..].find("<script").map(|i| from + i) {
+        // Dentro de um comentário? Basta olhar para trás: se o `<!--` mais
+        // recente ainda não foi fechado por um `-->`, estamos comentados.
+        let before = &lower[..i];
+        let open = before.rfind("<!--");
+        let closed = open.is_none_or(|o| before[o..].contains("-->"));
+        if closed {
+            return Some(i);
+        }
+        from = i + 7;
+    }
+    None
 }
 
 /// Normalizes bare directives like `else` or `senao` (without value) inside XML tags
@@ -260,7 +293,7 @@ fn expand_children(
     scope: Option<&str>,
     owner: Option<&str>,
     out: &mut Vec<UiNode>,
-) -> Result<(), String> {
+) -> Result<()> {
     // Tracks the result of the immediately preceding `<if>`, so an `<else>`
     // can bind to it. Reset by any other (non-else) node.
     let mut last_if: Option<bool> = None;
@@ -491,7 +524,7 @@ pub fn evaluate_node(
     templates: &HashMap<String, UiNode>,
     styles: &StyleContext,
     scope: Option<&str>,
-) -> Result<UiNode, String> {
+) -> Result<UiNode> {
     eval_owned(node, context, templates, styles, scope, None, None, None)
 }
 
@@ -535,7 +568,7 @@ fn eval_owned(
     // comum. Aninhamento: o componente interno recebe o do externo já mesclado.
     underlay: Option<&StyleRule>,
     underlay_states: Option<&StateStyles>,
-) -> Result<UiNode, String> {
+) -> Result<UiNode> {
     // A component reference — either the legacy `<Include src="..." />` or a tag
     // named after a registered component (e.g. `<PerfilCard ... />`) — is replaced
     // with the evaluated template root, with its attributes passed in as props.
@@ -545,8 +578,9 @@ fn eval_owned(
         _ => None,
     };
     if let Some((name, props)) = reference {
-        let template_ast = templates.get(name)
-            .ok_or_else(|| format!("Component '{}' not registered", name))?;
+        let template_ast = templates
+            .get(name)
+            .ok_or_else(|| crate::error::GlacierError::UnknownComponent(name.clone()))?;
 
         // Create a local context by copying the parent context and merging evaluated properties
         let mut local_context = context.clone();

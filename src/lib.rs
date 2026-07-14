@@ -1,6 +1,7 @@
 pub mod app;
 pub mod builtins;
 pub mod daemon;
+pub mod error;
 pub mod parser;
 pub mod eval;
 pub mod widget;
@@ -24,11 +25,12 @@ pub use iced;
 pub use iced::{Element, Font, Point, Size, Subscription, Task, window};
 
 pub use app::GlacierApp;
+pub use error::{Diagnostic, GlacierError, Result};
 pub use parser::{UiNode, NodeType};
 pub use eval::{evaluate_node, process_template, strip_script, normalize_bare_directives, StyleContext};
 pub use widget::{render_node, EngineMessage};
 pub use component::{BroadcastMessage, Component, Context, ContextVar, DialogAction, Effect, EffectOutcome, FetchResult, Nav, Template, WindowSource, WindowSpec};
-pub use daemon::{DaemonMessage, GlacierDaemon};
+pub use daemon::{DaemonMessage, GlacierDaemon, WindowGeometry};
 pub use luau::LuauComponent;
 pub use stylesheet::{StyleSheet, StyleRule};
 pub use forms::{Form, FormBuilder, FormControl, Validator};
@@ -38,30 +40,45 @@ pub use toasts::{ToastKind, ToastSpec};
 use std::collections::HashMap;
 use std::time::{SystemTime, Duration};
 
-/// The XML-to-UI rendering engine
+/// The XML-to-UI rendering engine.
+///
+/// **Estado interno encapsulado**: os campos são privados e o acesso passa por
+/// métodos ([`GlacierUI::context`], [`GlacierUI::evaluated`],
+/// [`GlacierUI::current_screen`], …). Não é cerimônia: metade deles são caches
+/// com invariantes acopladas (a árvore avaliada precisa ser jogada fora quando o
+/// contexto muda; `stylesheets` e `stylesheet_paths` são paralelos e têm de
+/// andar juntos), e um `pub` em cada um convida a quebrá-las de fora sem que o
+/// compilador diga nada.
 pub struct GlacierUI {
     /// Maps a component name (e.g. "perfil") to its XML file path
-    pub registered_components: HashMap<String, String>,
+    registered_components: HashMap<String, String>,
     /// Cache of parsed component AST trees
-    pub parsed_templates: HashMap<String, UiNode>,
-    /// Cache of fully evaluated component AST trees (placeholders substituted, includes resolved)
-    pub evaluated_templates: HashMap<String, UiNode>,
+    parsed_templates: HashMap<String, UiNode>,
+    /// Árvores **avaliadas** (placeholders substituídos, componentes inlinados),
+    /// por nome. Ao contrário de `parsed_templates`, este cache **não** guarda
+    /// todos os templates registrados: guarda os que estão de fato em uso — a
+    /// tela atual e os fixados por [`GlacierUI::keep_evaluated`]. Ver
+    /// [`GlacierUI::reevaluate_all`] para o porquê.
+    evaluated_templates: HashMap<String, UiNode>,
+    /// Templates que o app quer manter avaliados além da tela atual (ver
+    /// [`GlacierUI::keep_evaluated`]). Vazio no caso comum.
+    pinned: std::collections::HashSet<String>,
     /// In-memory context data for state binding
-    pub context_data: HashMap<String, String>,
+    context_data: HashMap<String, String>,
     /// File modification times to support hot reloading
-    pub file_mod_times: HashMap<String, SystemTime>,
+    file_mod_times: HashMap<String, SystemTime>,
     /// Name of the component currently shown as the active screen
-    pub current_screen: Option<String>,
+    current_screen: Option<String>,
     /// Navigation history (stack of previous screens) used by `navigate_back`
-    pub history: Vec<String>,
+    history: Vec<String>,
     /// Registered components (UI + behavior), keyed by component name.
-    pub components: HashMap<String, Box<dyn component::Component>>,
+    components: HashMap<String, Box<dyn component::Component>>,
     /// Globally-loaded `.gss` stylesheets, in ascending priority order (a class
     /// defined in a later sheet overrides the same class in an earlier one).
-    pub stylesheets: Vec<stylesheet::StyleSheet>,
+    stylesheets: Vec<stylesheet::StyleSheet>,
     /// Paths of loaded global `.gss` files (parallel to `stylesheets`), kept for
     /// hot-reload along with their last-seen modification times.
-    pub stylesheet_paths: Vec<String>,
+    stylesheet_paths: Vec<String>,
     /// Per-component (scoped) stylesheets declared via an inline
     /// `<style scoped="true">` block, keyed by component name. Applied on top
     /// of the global sheets, but only inside that component's subtree, in
@@ -69,10 +86,10 @@ pub struct GlacierUI {
     /// — `<link rel="stylesheet">` is always global (see [`GlacierUI::load_stylesheet`]).
     /// Rebuilt from the markup whenever the declaring template reloads, so it
     /// needs no separate path/mtime bookkeeping of its own.
-    pub component_stylesheets: HashMap<String, Vec<stylesheet::StyleSheet>>,
+    component_stylesheets: HashMap<String, Vec<stylesheet::StyleSheet>>,
     /// The custom `iced::Theme` loaded via `<link rel="theme">`, if any.
     /// Apps read it through [`GlacierUI::theme`].
-    pub custom_theme: Option<iced::Theme>,
+    custom_theme: Option<iced::Theme>,
     /// Path of the loaded theme file, kept for hot-reload.
     theme_path: Option<String>,
     /// Data files loaded via `<link rel="data">`, as `(context key, path)`,
@@ -91,7 +108,7 @@ pub struct GlacierUI {
     /// [`GlacierUI::render_current`] overlays it on top of the active
     /// screen; [`GlacierUI::dispatch`] clears it on a button click or a
     /// dismissible backdrop click.
-    pub dialog: Option<dialogs::DialogSpec>,
+    dialog: Option<dialogs::DialogSpec>,
     /// Toasts currently in exhibition (see [`toasts`]), oldest first.
     /// [`GlacierUI::render_current`] overlays them on top of the active
     /// screen (and the dialog, if any); each expires on its own once
@@ -204,6 +221,7 @@ impl GlacierUI {
             registered_components: HashMap::new(),
             parsed_templates: HashMap::new(),
             evaluated_templates: HashMap::new(),
+            pinned: std::collections::HashSet::new(),
             context_data: HashMap::new(),
             file_mod_times: HashMap::new(),
             current_screen: None,
@@ -262,13 +280,77 @@ impl GlacierUI {
         self.custom_theme.clone().unwrap_or(iced::Theme::Dark)
     }
 
+    // ── Acesso ao estado (os campos são privados; ver o doc do struct) ───────
+
+    /// Todo o contexto, só leitura. Para uma chave só, [`GlacierUI::get_data`].
+    pub fn context(&self) -> &HashMap<String, String> {
+        &self.context_data
+    }
+
+    /// Nome da tela ativa, se houver.
+    pub fn current_screen(&self) -> Option<&str> {
+        self.current_screen.as_deref()
+    }
+
+    /// Pilha de navegação (telas anteriores), da mais antiga para a mais recente.
+    pub fn history(&self) -> &[String] {
+        &self.history
+    }
+
+    /// O diálogo modal em exibição, se houver.
+    pub fn dialog(&self) -> Option<&dialogs::DialogSpec> {
+        self.dialog.as_ref()
+    }
+
+    /// O tema carregado por `<link rel="theme">`, se houver. Para o tema
+    /// *efetivo* (com o default), use [`GlacierUI::theme`].
+    pub fn custom_theme(&self) -> Option<&iced::Theme> {
+        self.custom_theme.as_ref()
+    }
+
+    /// Os `.gss` globais carregados, em ordem de prioridade crescente.
+    pub fn stylesheets(&self) -> &[stylesheet::StyleSheet] {
+        &self.stylesheets
+    }
+
+    /// `true` se `name` está registrado (tem template parseado).
+    pub fn is_registered(&self, name: &str) -> bool {
+        self.parsed_templates.contains_key(name)
+    }
+
+    /// A árvore **parseada** (não avaliada) de um componente registrado.
+    pub fn parsed(&self, name: &str) -> Option<&UiNode> {
+        self.parsed_templates.get(name)
+    }
+
+    /// A árvore **avaliada** de `name` — placeholders resolvidos contra o
+    /// contexto atual e componentes inlinados —, avaliando-a agora se ainda não
+    /// estiver em cache (daí o `&mut self`: ver [`GlacierUI::reevaluate_all`],
+    /// que só mantém avaliada a tela em uso).
+    pub fn evaluated(&mut self, name: &str) -> Result<&UiNode> {
+        if !self.evaluated_templates.contains_key(name) {
+            self.evaluate_into_cache(name)?;
+        }
+        self.evaluated_templates
+            .get(name)
+            .ok_or_else(|| GlacierError::UnknownComponent(name.to_string()))
+    }
+
+    /// Mantém `name` avaliado a cada reavaliação, mesmo não sendo a tela atual —
+    /// para o app raro que renderiza mais de um template ao mesmo tempo (ex.: um
+    /// painel lateral que vive fora da tela). Sem isto, só a tela ativa é
+    /// avaliada, e é assim que deve ser: ver [`GlacierUI::reevaluate_all`].
+    pub fn keep_evaluated(&mut self, name: &str) {
+        self.pinned.insert(name.to_string());
+    }
+
     /// Loads (or reloads) an `.gss` stylesheet from disk and re-evaluates all
     /// templates so the new classes take effect.
     ///
     /// Stylesheets are layered in load order: a class defined in a file loaded
     /// later overrides the same class from an earlier file. Loading a path that
     /// is already loaded replaces it in place (used by hot-reload).
-    pub fn load_stylesheet(&mut self, path: &str) -> Result<(), String> {
+    pub fn load_stylesheet(&mut self, path: &str) -> Result<()> {
         self.load_global_stylesheet_file(path)?;
         self.reevaluate_all()
     }
@@ -278,11 +360,12 @@ impl GlacierUI {
     /// public [`GlacierUI::load_stylesheet`] and by `<link rel="stylesheet">`
     /// encountered while processing a template's `<link>`s. Does not
     /// re-evaluate; callers batch that themselves.
-    fn load_global_stylesheet_file(&mut self, path: &str) -> Result<(), String> {
+    fn load_global_stylesheet_file(&mut self, path: &str) -> Result<()> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read stylesheet at '{}': {}", path, e))?;
-        let sheet = stylesheet::StyleSheet::parse(&content)
-            .map_err(|e| format!("Failed to parse stylesheet '{}': {}", path, e))?;
+            .map_err(|e| GlacierError::io("stylesheet", path, e))?;
+        // `parse_in`: o arquivo é a fonte, então a linha do erro é a linha dele
+        // (offset 1) e o caminho vai no diagnóstico.
+        let sheet = stylesheet::StyleSheet::parse_in(&content, Some(path), 1)?;
 
         let mod_time = std::fs::metadata(path)
             .and_then(|m| m.modified())
@@ -308,9 +391,15 @@ impl GlacierUI {
     }
 
     /// Sets the initial active screen, clearing any navigation history.
+    ///
+    /// Já avalia a tela: como só a tela ativa fica avaliada (ver
+    /// [`GlacierUI::reevaluate_all`]), definir qual é ela é o gatilho natural
+    /// para construí-la — e assim um `render_current()` logo depois funciona,
+    /// sem o app precisar saber que existe uma reavaliação a chamar.
     pub fn set_initial_screen(&mut self, name: &str) {
         self.current_screen = Some(name.to_string());
         self.history.clear();
+        let _ = self.reevaluate_all();
     }
 
     /// Navigates to a new screen, pushing the current one onto the history stack.
@@ -323,12 +412,14 @@ impl GlacierUI {
             self.history.push(current.clone());
         }
         self.current_screen = Some(name.to_string());
+        let _ = self.reevaluate_all();
     }
 
     /// Returns to the previous screen in the history, if any.
     pub fn navigate_back(&mut self) {
         if let Some(previous) = self.history.pop() {
             self.current_screen = Some(previous);
+            let _ = self.reevaluate_all();
         }
     }
 
@@ -376,9 +467,8 @@ impl GlacierUI {
     /// and any active toasts overlaid on top via [`dialogs::overlay`] and
     /// [`toasts::overlay`] — toasts on top of the dialog, since they should
     /// stay visible (and dismissible) even while a modal is up.
-    pub fn render_current(&self) -> Result<iced::Element<'_, EngineMessage>, String> {
-        let name = self.current_screen.as_ref()
-            .ok_or_else(|| "No active screen defined; call set_initial_screen first".to_string())?;
+    pub fn render_current(&self) -> Result<iced::Element<'_, EngineMessage>> {
+        let name = self.current_screen.as_ref().ok_or(GlacierError::NoActiveScreen)?;
         let screen = self.render(name)?;
         let with_dialog = match &self.dialog {
             Some(spec) => iced::widget::stack![screen, dialogs::overlay(spec, &self.theme())].into(),
@@ -402,7 +492,7 @@ impl GlacierUI {
     /// answers the action of the same name (see [`crate::luau`]). A template
     /// without a `<script>` is UI-only. Either way there is no separate
     /// registration call for scripted vs. plain components.
-    pub fn register_component(&mut self, name: &str, path: &str) -> Result<(), String> {
+    pub fn register_component(&mut self, name: &str, path: &str) -> Result<()> {
         self.register_component_inner(name, path)?;
         // Evaluate once, after the whole import graph has been loaded.
         let _ = self.reevaluate_all();
@@ -414,7 +504,7 @@ impl GlacierUI {
     /// The engine resolves and parses the template, seeds the context with the
     /// component's initial state via [`Component::init`], and stores the
     /// component so that [`GlacierUI::dispatch`] can later route actions to it.
-    pub fn register(&mut self, comp: Box<dyn component::Component>) -> Result<(), String> {
+    pub fn register(&mut self, comp: Box<dyn component::Component>) -> Result<()> {
         self.register_one(comp)?;
         // Evaluate once, after the whole component tree has been registered.
         self.reevaluate_all()
@@ -422,7 +512,7 @@ impl GlacierUI {
 
     /// Registers a single component and its `children()` recursively, without
     /// re-evaluating. Used by [`GlacierUI::register`].
-    fn register_one(&mut self, comp: Box<dyn component::Component>) -> Result<(), String> {
+    fn register_one(&mut self, comp: Box<dyn component::Component>) -> Result<()> {
         use component::Template;
 
         let name = comp.name().to_string();
@@ -432,7 +522,7 @@ impl GlacierUI {
         let (markup, path) = match comp.template() {
             Template::File(path) => {
                 let content = std::fs::read_to_string(&path)
-                    .map_err(|e| format!("Failed to read template file at '{}': {}", path, e))?;
+                    .map_err(|e| GlacierError::io("template", &path, e))?;
                 let mod_time = std::fs::metadata(&path)
                     .and_then(|m| m.modified())
                     .unwrap_or_else(|_| SystemTime::now());
@@ -446,7 +536,7 @@ impl GlacierUI {
         // Parse the XML markup, with any `<script>` block stripped — its Lua
         // body is run at runtime by `LuaComponent`, not here.
         let (ast, _script) = parse_markup(path.as_deref(), &markup)
-            .map_err(|e| format!("Failed to parse template for component '{}': {}", name, e))?;
+            .map_err(|e| e.in_component(&name))?;
         self.parsed_templates.insert(name.clone(), ast.clone());
         // An explicit registration of this name means it's no longer a lib
         // builtin (register_builtins re-adds its own names *after* this call, so
@@ -1076,12 +1166,12 @@ impl GlacierUI {
     }
 
     /// Parses and stores a component plus its imports, without re-evaluating.
-    fn register_component_inner(&mut self, name: &str, path: &str) -> Result<(), String> {
+    fn register_component_inner(&mut self, name: &str, path: &str) -> Result<()> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read template file at '{}': {}", path, e))?;
+            .map_err(|e| GlacierError::io("template", path, e))?;
 
         let (ast, _script) = parse_markup(Some(path), &content)
-            .map_err(|e| format!("Failed to parse template for component '{}': {}", name, e))?;
+            .map_err(|e| e.in_component(name))?;
 
         let mod_time = std::fs::metadata(path)
             .and_then(|m| m.modified())
@@ -1104,7 +1194,12 @@ impl GlacierUI {
         // as before). This is what unifies file-based registration — there is no
         // separate `register_luau`, and imported components can be scripted too.
         if luau::has_script(&content) {
-            let comp = luau::LuauComponent::from_file(path, name)?;
+            // O `luau` guarda o próprio canal de erro (String) porque suas
+            // mensagens vêm do mlua e já dizem arquivo/linha do Luau; aqui elas
+            // só ganham o envelope tipado, com o componente dono.
+            let comp = luau::LuauComponent::from_file(path, name).map_err(|message| {
+                GlacierError::Luau { component: name.to_string(), message }
+            })?;
             self.install_component(name, Box::new(comp));
         }
 
@@ -1116,7 +1211,7 @@ impl GlacierUI {
     /// template), `data` (merge JSON into the context) and `theme` (set the
     /// app theme). Re-run on hot-reload of the template, so stylesheet links
     /// are rebuilt for `component` (cleared when it declares none).
-    fn process_links(&mut self, component: &str, ast: &UiNode) -> Result<(), String> {
+    fn process_links(&mut self, component: &str, ast: &UiNode) -> Result<()> {
         let mut links = Vec::new();
         collect_links(ast, &mut links);
 
@@ -1133,18 +1228,24 @@ impl GlacierUI {
                     }
                 }
                 "data" => {
-                    let key = name.clone().ok_or_else(|| format!(
-                        "<link rel=\"data\" href=\"{}\"> needs an `as`/`name` attribute for the context key",
-                        href
-                    ))?;
+                    let key = name.clone().ok_or_else(|| GlacierError::Link {
+                        component: component.to_string(),
+                        message: format!(
+                            "<link rel=\"data\" href=\"{href}\"> precisa de um atributo `as`/`name` \
+                             com a chave de contexto em que os dados serão guardados"
+                        ),
+                    })?;
                     self.load_data_file(&key, href)?;
                 }
                 "theme" => self.load_theme_file(href)?,
                 other => {
-                    return Err(format!(
-                        "Unsupported <link rel=\"{}\"> (href=\"{}\"); expected stylesheet, import, component, data or theme",
-                        other, href
-                    ));
+                    return Err(GlacierError::Link {
+                        component: component.to_string(),
+                        message: format!(
+                            "rel=\"{other}\" (href=\"{href}\") não existe; os suportados são \
+                             stylesheet, import, component, data e theme"
+                        ),
+                    });
                 }
             }
         }
@@ -1158,19 +1259,27 @@ impl GlacierUI {
         let mut global_css = Vec::new();
         collect_inline_styles(ast, &mut scoped_css, &mut global_css);
 
+        // O arquivo do componente (quando ele veio de um) e a linha de cada
+        // `<style>` posicionam um erro do `.gss` inline no XML que o declarou:
+        // "home.xml:207", não "linha 3 de um texto que você não sabe qual é".
+        let file = self.registered_components.get(component).cloned();
+        let parse_inline = |css: &str, line: u32| -> Result<stylesheet::StyleSheet> {
+            stylesheet::StyleSheet::parse_in(css, file.as_deref(), line)
+                .map_err(|e| e.in_component(component))
+        };
+
         if scoped_css.is_empty() {
             self.component_stylesheets.remove(component);
         } else {
-            let sheets = scoped_css.iter()
-                .map(|css| stylesheet::StyleSheet::parse(css)
-                    .map_err(|e| format!("Failed to parse inline scoped <style> of '{}': {}", component, e)))
-                .collect::<Result<Vec<_>, _>>()?;
+            let sheets = scoped_css
+                .iter()
+                .map(|(css, line)| parse_inline(css, *line))
+                .collect::<Result<Vec<_>>>()?;
             self.component_stylesheets.insert(component.to_string(), sheets);
         }
 
-        for (idx, css) in global_css.iter().enumerate() {
-            let sheet = stylesheet::StyleSheet::parse(css)
-                .map_err(|e| format!("Failed to parse inline <style> of '{}': {}", component, e))?;
+        for (idx, (css, line)) in global_css.iter().enumerate() {
+            let sheet = parse_inline(css, *line)?;
             self.install_global_stylesheet(inline_style_key(component, idx), sheet);
         }
 
@@ -1180,11 +1289,11 @@ impl GlacierUI {
     /// Loads a JSON `data` file and merges it into the context under `key`:
     /// an object's top-level fields become `key.field`; an array or scalar is
     /// stored as `key`. Tracks the source for hot-reload.
-    fn load_data_file(&mut self, key: &str, path: &str) -> Result<(), String> {
+    fn load_data_file(&mut self, key: &str, path: &str) -> Result<()> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read data file '{}': {}", path, e))?;
+            .map_err(|e| GlacierError::io("arquivo de dados", path, e))?;
         let value: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| format!("Data file '{}' is not valid JSON: {}", path, e))?;
+            .map_err(|e| GlacierError::Json { path: path.to_string(), source: e })?;
 
         merge_json(&mut self.context_data, key, &value);
 
@@ -1200,11 +1309,10 @@ impl GlacierUI {
 
     /// Loads a JSON palette `theme` file and sets it as the app theme. Tracks
     /// the source for hot-reload.
-    fn load_theme_file(&mut self, path: &str) -> Result<(), String> {
+    fn load_theme_file(&mut self, path: &str) -> Result<()> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read theme file '{}': {}", path, e))?;
-        let theme = parse_theme(&content)
-            .map_err(|e| format!("Failed to parse theme '{}': {}", path, e))?;
+            .map_err(|e| GlacierError::io("tema", path, e))?;
+        let theme = parse_theme(&content, path)?;
 
         let mod_time = std::fs::metadata(path)
             .and_then(|m| m.modified())
@@ -1216,7 +1324,7 @@ impl GlacierUI {
     }
 
     /// Walks a parsed tree and registers every `<import>`ed component not yet loaded.
-    fn load_imports(&mut self, node: &UiNode) -> Result<(), String> {
+    fn load_imports(&mut self, node: &UiNode) -> Result<()> {
         if let NodeType::Import { name, from } = &node.kind {
             // Load if the name is free, or if it currently holds a builtin the
             // app is deliberately shadowing (an explicit `<import>` wins over a
@@ -1305,33 +1413,72 @@ impl GlacierUI {
         }
     }
 
-    pub fn reevaluate_all(&mut self) -> Result<(), String> {
-        // Qualquer sheet (global ou de escopo) com seletor de tag liga a
-        // resolução de estilo para nós sem class/id — calculado uma vez aqui
-        // para não pagar por nó no caso comum (nenhum seletor de tag).
-        let has_tag_rules = self.stylesheets.iter().any(|s| s.has_tag_rules())
-            || self.component_stylesheets.values().flatten().any(|s| s.has_tag_rules());
-        let styles = StyleContext {
-            global: &self.stylesheets,
-            by_component: &self.component_stylesheets,
-            viewport: Some(self.viewport),
-            has_tag_rules,
-        };
-        let mut evals = HashMap::new();
-        for (name, template_ast) in &self.parsed_templates {
+    /// Reavalia o que está **em uso** contra o contexto atual: a tela ativa e os
+    /// templates fixados com [`GlacierUI::keep_evaluated`]. Chamada depois de
+    /// toda mudança de contexto, estilo, markup ou navegação.
+    ///
+    /// O nome ficou por compatibilidade, mas o "all" é enganoso e caro: a versão
+    /// anterior avaliava **todos os templates registrados**, cada um como raiz.
+    /// Como avaliar um template inlina recursivamente todos os componentes que
+    /// ele usa, um app cuja tela importa 15 componentes reconstruía a árvore
+    /// inteira 16 vezes a cada tecla digitada — 15 delas para árvores que
+    /// ninguém renderiza, já que só a tela ativa vai para a tela. O custo era
+    /// O(templates × tamanho da árvore) quando o necessário é O(tamanho da
+    /// árvore).
+    ///
+    /// Os demais templates continuam disponíveis: [`GlacierUI::evaluated`] os
+    /// avalia sob demanda e memoiza até a próxima reavaliação. O cache é
+    /// **limpo** aqui (em vez de marcado como obsoleto) para que "estar no cache"
+    /// signifique, sem ambiguidade, "avaliado contra o contexto de agora" — um
+    /// cache que guarda árvores velhas é um render silenciosamente desatualizado
+    /// esperando para acontecer.
+    pub fn reevaluate_all(&mut self) -> Result<()> {
+        self.evaluated_templates.clear();
+
+        let names: Vec<String> = self
+            .current_screen
+            .iter()
+            .chain(self.pinned.iter())
+            .cloned()
+            .collect();
+        for name in names {
+            // Um nome fixado que ainda não foi registrado não é erro (o app pode
+            // fixá-lo antes de carregá-lo); a tela ativa idem, durante o boot.
+            if self.parsed_templates.contains_key(&name) {
+                self.evaluate_into_cache(&name)?;
+            }
+        }
+
+        self.sync_editors();
+        Ok(())
+    }
+
+    /// Avalia o template `name` contra o contexto atual e o guarda no cache.
+    /// Ponto único onde a avaliação acontece — [`GlacierUI::reevaluate_all`]
+    /// (ansiosa, para a tela ativa) e [`GlacierUI::evaluated`] (preguiçosa, sob
+    /// demanda) passam os dois por aqui.
+    fn evaluate_into_cache(&mut self, name: &str) -> Result<()> {
+        let evaluated = {
+            let ast = self
+                .parsed_templates
+                .get(name)
+                .ok_or_else(|| GlacierError::UnknownComponent(name.to_string()))?;
+            // Qualquer sheet (global ou de escopo) com seletor de tag liga a
+            // resolução de estilo para nós sem class/id — calculado uma vez aqui
+            // para não pagar por nó no caso comum (nenhum seletor de tag).
+            let has_tag_rules = self.stylesheets.iter().any(|s| s.has_tag_rules())
+                || self.component_stylesheets.values().flatten().any(|s| s.has_tag_rules());
+            let styles = StyleContext {
+                global: &self.stylesheets,
+                by_component: &self.component_stylesheets,
+                viewport: Some(self.viewport),
+                has_tag_rules,
+            };
             // The template's own name is the style scope, so its `<link>`ed
             // sheets apply to its subtree.
-            let evaluated_ast = evaluate_node(
-                template_ast,
-                &self.context_data,
-                &self.parsed_templates,
-                &styles,
-                Some(name),
-            )?;
-            evals.insert(name.clone(), evaluated_ast);
-        }
-        self.evaluated_templates = evals;
-        self.sync_editors();
+            evaluate_node(ast, &self.context_data, &self.parsed_templates, &styles, Some(name))?
+        };
+        self.evaluated_templates.insert(name.to_string(), evaluated);
         Ok(())
     }
 
@@ -1373,9 +1520,24 @@ impl GlacierUI {
     }
 
     /// Recursively evaluates the component and translates it into an Iced Element
-    pub fn render<'a>(&'a self, component_name: &str) -> Result<iced::Element<'a, EngineMessage>, String> {
-        let evaluated_ast = self.evaluated_templates.get(component_name)
-            .ok_or_else(|| format!("Component '{}' is not evaluated or registered", component_name))?;
+    /// Renderiza a árvore avaliada de `component_name` em widgets do iced.
+    ///
+    /// Só os templates **em uso** ficam avaliados (a tela atual e os fixados com
+    /// [`GlacierUI::keep_evaluated`]) — ver [`GlacierUI::reevaluate_all`]. Pedir
+    /// outro nome aqui devolve [`GlacierError::UnknownComponent`] em vez de
+    /// renderizar uma árvore velha em silêncio; o `&self` (exigido pelo `view`
+    /// do iced) impede avaliar na hora.
+    pub fn render<'a>(&'a self, component_name: &str) -> Result<iced::Element<'a, EngineMessage>> {
+        let evaluated_ast = self.evaluated_templates.get(component_name).ok_or_else(|| {
+            // Distingue "nome errado" de "template fora de uso": são causas
+            // diferentes, com saídas diferentes, e confundi-las é o que faz um
+            // erro de framework virar meia hora de depuração.
+            if self.parsed_templates.contains_key(component_name) {
+                GlacierError::NotEvaluated(component_name.to_string())
+            } else {
+                GlacierError::UnknownComponent(component_name.to_string())
+            }
+        })?;
 
         // Render the evaluated AST to Iced Widgets
         Ok(render_node(evaluated_ast, &self.context_data, &self.editors))
@@ -1504,13 +1666,16 @@ impl GlacierUI {
 }
 
 /// Parses a template's XML source into a [`UiNode`], returning the tree and its
-/// `<script>` body (if any). Templates are XML; `path` is kept in the signature
-/// (currently unused) so call sites can pass the source path for future
-/// diagnostics.
-fn parse_markup(_path: Option<&str>, content: &str) -> Result<(UiNode, Option<String>), String> {
+/// `<script>` body (if any). `path` é citado nos erros de sintaxe — as duas
+/// passadas de pré-processamento aqui (tirar o `<script>`, normalizar diretivas
+/// nuas) preservam a contagem de linhas de propósito, para a linha reportada ser
+/// a do arquivo que o autor escreveu.
+fn parse_markup(path: Option<&str>, content: &str) -> Result<(UiNode, Option<String>)> {
     let (markup, script) = eval::strip_script(content);
     let markup = eval::normalize_bare_directives(&markup);
-    Ok((UiNode::parse_xml(&markup)?, script))
+    // `content` (e não `markup`) como fonte dos trechos: o erro deve mostrar a
+    // linha que o autor escreveu, não a que o pré-processamento produziu.
+    Ok((UiNode::parse_xml_with_source(&markup, content, path)?, script))
 }
 
 /// Namespaced keys under which a resource's modification time is stored in
@@ -1562,13 +1727,20 @@ fn file_stem(path: &str) -> String {
 /// (layered on top of the global sheets, only inside this component), the
 /// rest (the default) into `global_out` (promoted to the global sheet set,
 /// same as a `<link rel="stylesheet">`). Blank bodies are skipped.
-fn collect_inline_styles(node: &UiNode, scoped_out: &mut Vec<String>, global_out: &mut Vec<String>) {
-    if let NodeType::Style { css, scoped } = &node.kind {
+/// Cada bloco vem com a **linha** do seu `<style>` no arquivo, que é o que
+/// traduz "linha 3 do CSS" em "linha 207 do home.xml" ao reportar um erro de
+/// GSS inline (ver [`stylesheet::parse_gss_in`]).
+fn collect_inline_styles(
+    node: &UiNode,
+    scoped_out: &mut Vec<(String, u32)>,
+    global_out: &mut Vec<(String, u32)>,
+) {
+    if let NodeType::Style { css, scoped, line } = &node.kind {
         if !css.trim().is_empty() {
             if *scoped {
-                scoped_out.push(css.clone());
+                scoped_out.push((css.clone(), *line));
             } else {
-                global_out.push(css.clone());
+                global_out.push((css.clone(), *line));
             }
         }
     }
@@ -1753,19 +1925,22 @@ fn json_to_string(value: &serde_json::Value) -> String {
 /// Parses a JSON palette file into an `iced::Theme`. The object must provide
 /// hex colors for `background`, `text`, `primary`, `success` and `danger`; an
 /// optional `name` labels the theme.
-fn parse_theme(content: &str) -> Result<iced::Theme, String> {
+fn parse_theme(content: &str, path: &str) -> Result<iced::Theme> {
     let value: serde_json::Value = serde_json::from_str(content)
-        .map_err(|e| format!("not valid JSON: {}", e))?;
-    let obj = value.as_object()
-        .ok_or_else(|| "theme must be a JSON object of colors".to_string())?;
+        .map_err(|e| GlacierError::Json { path: path.to_string(), source: e })?;
+    let bad = |message: String| GlacierError::Theme { path: path.to_string(), message };
+    let obj = value
+        .as_object()
+        .ok_or_else(|| bad("o tema precisa ser um objeto JSON de cores".to_string()))?;
 
     let name = obj.get("name").and_then(|n| n.as_str()).unwrap_or("custom").to_string();
-    let color = |field: &str| -> Result<iced::Color, String> {
-        let hex = obj.get(field)
+    let color = |field: &str| -> Result<iced::Color> {
+        let hex = obj
+            .get(field)
             .and_then(|v| v.as_str())
-            .ok_or_else(|| format!("missing color '{}'", field))?;
+            .ok_or_else(|| bad(format!("falta a cor '{field}'")))?;
         widget::parse_hex_color(hex)
-            .ok_or_else(|| format!("invalid hex color '{}' for '{}'", hex, field))
+            .ok_or_else(|| bad(format!("'{hex}' não é um hex válido para '{field}'")))
     };
 
     let palette = iced::theme::Palette {
@@ -1799,6 +1974,95 @@ fn resize_direction(s: &str) -> Option<iced::window::Direction> {
         "sw" | "southwest" | "south-west" => SouthWest,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod scoped_eval_tests {
+    use super::*;
+    use crate::component::{Component, Context, Template};
+
+    /// Componente de tela mínimo, para montar um motor com vários templates
+    /// registrados e observar quais deles a reavaliação de fato constrói.
+    struct Tela(&'static str);
+    impl Component for Tela {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn template(&self) -> Template {
+            Template::Inline("<Text content=\"{msg}\" />".to_string())
+        }
+        fn update(&mut self, _a: &str, _v: Option<&str>, _c: &mut Context) {}
+    }
+
+    // O ponto da avaliação escopada: registrar 3 telas e ativar 1 deve construir
+    // UMA árvore, não 3. Antes, cada mudança de contexto reconstruía todas —
+    // inclusive as que ninguém renderiza.
+    #[test]
+    fn so_a_tela_ativa_e_avaliada() {
+        let mut motor = GlacierUI::new();
+        motor.register(Box::new(Tela("a"))).unwrap();
+        motor.register(Box::new(Tela("b"))).unwrap();
+        motor.register(Box::new(Tela("c"))).unwrap();
+        motor.set_initial_screen("b");
+        motor.define_data("msg", "oi");
+
+        assert_eq!(
+            motor.evaluated_templates.keys().collect::<Vec<_>>(),
+            vec!["b"],
+            "só a tela ativa deve estar avaliada"
+        );
+        assert!(motor.render("b").is_ok());
+    }
+
+    // Os demais continuam alcançáveis: `evaluated()` avalia sob demanda.
+    #[test]
+    fn os_demais_sao_avaliados_sob_demanda() {
+        let mut motor = GlacierUI::new();
+        motor.register(Box::new(Tela("a"))).unwrap();
+        motor.register(Box::new(Tela("b"))).unwrap();
+        motor.set_initial_screen("a");
+        motor.define_data("msg", "oi");
+
+        assert!(motor.evaluated("b").is_ok(), "avaliado na hora que foi pedido");
+        // E o cache é invalidado por uma mudança de contexto, para não servir
+        // uma árvore velha depois.
+        motor.define_data("msg", "tchau");
+        assert!(!motor.evaluated_templates.contains_key("b"));
+    }
+
+    // `keep_evaluated` mantém um template avaliado junto com a tela — o escape
+    // hatch para o app que renderiza mais de uma árvore ao mesmo tempo.
+    #[test]
+    fn keep_evaluated_fixa_um_template() {
+        let mut motor = GlacierUI::new();
+        motor.register(Box::new(Tela("a"))).unwrap();
+        motor.register(Box::new(Tela("b"))).unwrap();
+        motor.keep_evaluated("b");
+        motor.set_initial_screen("a");
+        motor.define_data("msg", "oi");
+
+        assert!(motor.render("a").is_ok());
+        assert!(motor.render("b").is_ok(), "o fixado sobrevive à reavaliação");
+    }
+
+    // Renderizar um template registrado mas fora de uso não devolve uma árvore
+    // velha em silêncio — devolve um erro que diz como sair.
+    #[test]
+    fn render_de_template_fora_de_uso_explica_a_saida() {
+        let mut motor = GlacierUI::new();
+        motor.register(Box::new(Tela("a"))).unwrap();
+        motor.register(Box::new(Tela("b"))).unwrap();
+        motor.set_initial_screen("a");
+
+        // `Element` não é Debug, então `unwrap_err()` não serve — casamos o Err.
+        let Err(err) = motor.render("b") else { panic!("deveria falhar") };
+        assert!(matches!(err, GlacierError::NotEvaluated(_)), "{err}");
+        assert!(err.to_string().contains("keep_evaluated"), "{err}");
+
+        // Nome que não existe é outro erro (outra causa, outra saída).
+        let Err(err) = motor.render("nao_existe") else { panic!("deveria falhar") };
+        assert!(matches!(err, GlacierError::UnknownComponent(_)), "{err}");
+    }
 }
 
 #[cfg(test)]

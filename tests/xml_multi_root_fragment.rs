@@ -42,7 +42,7 @@ fn navitem_if_else_por_atributo_em_componente_multi_raiz() {
     motor.define_data("view", "projects");
     motor.reevaluate_all().unwrap();
 
-    let ev = motor.evaluated_templates.get("shell").unwrap();
+    let ev = motor.evaluated("shell").unwrap();
     // A raiz avaliada deve ser a Column com 3 botões (um por NavItem).
     let col = ev;
     assert_eq!(col.kind, NodeType::Column, "raiz deve ser Column, veio {:?}", col.kind);
