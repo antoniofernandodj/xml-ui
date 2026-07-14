@@ -27,6 +27,10 @@ abriu uma segunda rodada de trabalho.
 | `c5d7a77` | **0.40.0** | dirty-tracking: rastreamento de leituras + cache de subárvores |
 | `87a199a` | — | chore: Cargo.lock |
 | `0090a27` | **0.40.1** | fix: var de item vazava para as dependências do template |
+| `2b9eb8c` | — | docs: este relatório |
+| `37b717f` | **0.41.0** | erro tipado até o Luau; `render_inputs` (invalidação via compilador); clippy 62→0; doc 5 links quebrados |
+| `5347ac9` | — | style: rustfmt no repo inteiro (commit isolado) |
+| `08fca4a` | — | docs: CHANGELOG.md + bump 0.41.0 |
 
 Diffstat total (`f0361b5..HEAD`): **11 arquivos, +2764 / −581**. Os maiores:
 `eval.rs` (+744), `lib.rs` (+735), `stylesheet.rs` (+650), `parser.rs` (+355),
@@ -316,6 +320,72 @@ a sidebar são reaproveitadas.
    dirty-tracking; a pergunta do usuário expôs isso. Se ele não tivesse
    perguntado, a diferença teria ficado enterrada num commit.
 
+---
+
+## Parte 3 — Fechando a conta (0.41.0)
+
+Depois de tudo publicado, o usuário perguntou se a lib era **de fato** robusta.
+Medi de novo os mesmos indicadores da primeira avaliação, e a resposta honesta era
+"para o rustploy sim; como biblioteca pública, ainda não" — faltava o cinto de
+segurança. Ele mandou fechar tudo.
+
+### O erro tipado estava pela metade
+
+`LuauComponent::from_file`/`from_source` são **públicos e reexportados**, e ainda
+devolviam `Result<_, String>`. Eu embrulhava no `lib.rs`, então quem usava o motor
+via o tipo certo — mas quem usasse a API do Luau direto, não. Agora devolvem
+`GlacierError::Luau`. Por dentro a construção segue com `String`, e isso é
+deliberado: as mensagens vêm do mlua e já dizem arquivo e linha **do Luau**, que é
+a informação que importa. O tipo entra onde tem valor: no contrato público.
+
+### A dívida que eu mesmo criei: a invalidação do cache
+
+Era o ponto mais importante desta rodada, e eu o tinha **nomeado como dívida** no
+commit da 0.40: o cache só enxerga chaves de contexto, então folha de estilo,
+viewport e markup precisavam de oito chamadas manuais de
+`invalidate_eval_cache()`. Funcionava — e era exatamente o tipo de invariante que
+sobrevive à revisão e morre seis meses depois.
+
+Pior: ao ir consertar, encontrei **uma delas já furada**. O hot-reload de `.gss`
+escrevia direto em `stylesheets[idx]`, sem passar pelo ponto de invalidação; só
+não servia estilo velho porque um `invalidate` genérico vinha depois, por sorte.
+A bomba já estava armada.
+
+Novo módulo `render_inputs.rs`: folhas, templates e viewport viram campos
+**privados** noutro módulo, e toda mutação passa por um método que incrementa uma
+`epoch`. O cache guarda a época em que foi construído e se descarta sozinho. A
+invariante saiu das minhas mãos e foi para as do compilador — que, ao remover os
+campos, acusou os **36 call-sites** de uma vez, um inventário que eu não teria
+conseguido montar sozinho.
+
+Detalhe que só apareceu ao escrever o teste: `set_viewport` **não pode** avançar a
+época em todo resize. Arrastar a borda da janela emitiria um `Resized` por pixel, e
+cada um jogaria fora o cache inteiro — a "otimização" ficaria mais lenta que não
+ter cache. Só avança se o resize **cruza** um breakpoint de `@media`.
+
+### Clippy, doc, CI, CHANGELOG
+
+- **Clippy 62 → 0**, com `-D warnings` passando.
+- **`cargo doc -D warnings`** achou **5 links quebrados de verdade** na
+  documentação — inclusive um `EngineMessage::LuaStream` que **não existe** (é
+  `LuauStream`) e dois links de doc pública apontando para itens privados. O gate
+  pagou por si antes mesmo de rodar em CI.
+- **rustfmt no repo inteiro** (32 arquivos). Commit **isolado**: reformatação
+  misturada a lógica é uma revisão impossível.
+- **CI** (GitHub Actions): build, testes, clippy `-D warnings`, `fmt --check`,
+  `cargo doc -D warnings`.
+- **CHANGELOG.md** cobrindo 0.38.0 → 0.41.0, com as quebras e como migrar. Foram
+  três quebras de API num dia; sem isso, quem não é o autor descobre na compilação.
+
+### Observação de método
+
+Quase apaguei todo o trabalho não commitado: fui rodar `cargo fmt` e reverter com
+`git checkout -- .` para *medir* o tamanho do diff, com 16 arquivos sujos na
+árvore. O guarda-corpo do ambiente barrou. A forma certa era a óbvia: **commitar
+primeiro, formatar depois** — que é o que acabou virando dois commits limpos.
+
+---
+
 ## O que ficou pendente
 
 - **Nós fora das fronteiras memoizadas** (o cromo do shell, ~105 nós) ainda são
@@ -324,7 +394,11 @@ a sidebar são reaproveitadas.
 - **Verificação interativa**: drag-and-drop, janela filha e persistência de
   geometria não foram exercitados (a sessão é Wayland; só há `import`, que é X11).
   O caminho de código é o mesmo de antes, mas quem confirma é abrir o app.
-- CI, `CHANGELOG.md` e `deny(missing_docs)` seguem pendentes (ver `ROADMAP.md`).
+- **`deny(missing_docs)`** segue pendente (ver `ROADMAP.md`).
+- **Nenhum benchmark no repositório.** Os números deste relatório vieram de uma
+  bancada temporária que foi removida. Há testes travando o *comportamento* (uma
+  chave não lida não reconstrói a árvore), mas nada travando o *custo* — uma
+  regressão de performance passaria batida pelo CI.
 
 
 next: "agora resolve o 1,6ms residual memoizando subárvores arbitrárias"
