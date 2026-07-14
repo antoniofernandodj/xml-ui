@@ -173,8 +173,139 @@ pub fn normalize_bare_directives(xml: &str) -> String {
     result
 }
 
+/// O contexto **durante a avaliação**: a base (o contexto do motor) mais uma
+/// cadeia de camadas com as variáveis locais — as vars de um item de `for-each`
+/// (`{item.nome}`) e as props de um componente.
+///
+/// Existe para não **clonar a base**. A versão anterior fazia
+/// `let mut local_context = context.clone()` por **item** de lista: com 45 linhas
+/// na tela e um log de 100 KB no contexto, isso é copiar ~5 MB de string por
+/// reavaliação — e a reavaliação roda a cada tecla e a cada mensagem do SSE. Era
+/// o que fazia uma árvore de 600 nós custar 6,5 ms quando os nós em si custam
+/// uma fração disso.
+///
+/// A busca vai da camada mais **interna** para a mais externa e só então na base,
+/// então uma var local sombreia uma chave global de mesmo nome — exatamente o que
+/// o `insert` sobre o clone fazia. As camadas têm poucas entradas (os campos de
+/// um item), então a varredura linear é mais barata que um `HashMap`.
+#[derive(Clone, Copy)]
+pub struct EvalCtx<'a> {
+    base: &'a HashMap<String, String>,
+    /// A camada mais interna; cada uma aponta para a de fora (lista ligada na
+    /// pilha, sem alocação).
+    layer: Option<&'a Layer<'a>>,
+}
+
+/// Um conjunto de variáveis locais empilhado sobre o contexto. Ver [`EvalCtx`].
+pub struct Layer<'a> {
+    vars: Vec<(String, String)>,
+    outer: Option<&'a Layer<'a>>,
+}
+
+impl<'a> Layer<'a> {
+    fn new(outer: Option<&'a Layer<'a>>) -> Self {
+        Self { vars: Vec::new(), outer }
+    }
+
+    fn set(&mut self, key: String, value: String) {
+        // Uma chave repetida na MESMA camada sobrescreve (semântica de `insert`).
+        match self.vars.iter_mut().find(|(k, _)| *k == key) {
+            Some(slot) => slot.1 = value,
+            None => self.vars.push((key, value)),
+        }
+    }
+
+    fn get(&self, key: &str) -> Option<&str> {
+        let mut cur = Some(self);
+        while let Some(l) = cur {
+            if let Some((_, v)) = l.vars.iter().find(|(k, _)| k == key) {
+                return Some(v);
+            }
+            cur = l.outer;
+        }
+        None
+    }
+}
+
+impl<'a> EvalCtx<'a> {
+    /// Contexto de avaliação sobre `base`, sem nenhuma camada local.
+    pub fn new(base: &'a HashMap<String, String>) -> Self {
+        Self { base, layer: None }
+    }
+
+    /// O valor de `key`: camadas locais (da mais interna para a mais externa)
+    /// primeiro, base depois.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        match self.layer.and_then(|l| l.get(key)) {
+            Some(v) => Some(v),
+            None => self.base.get(key).map(String::as_str),
+        }
+    }
+
+    /// O mesmo contexto com `layer` empilhada por cima (a camada precisa viver
+    /// no frame do chamador — é isso que torna a operação O(1), sem cópia).
+    fn with<'c>(&self, layer: &'c Layer<'c>) -> EvalCtx<'c>
+    where
+        'a: 'c,
+    {
+        EvalCtx { base: self.base, layer: Some(layer) }
+    }
+
+    /// A camada corrente, para uma nova ser encadeada sob ela.
+    fn layer(&self) -> Option<&'a Layer<'a>> {
+        self.layer
+    }
+}
+
+/// Monta a camada de variáveis de **um item** de `for-each`: `{var.campo}` para
+/// cada campo de um objeto, ou `{var}` para um escalar. Devolve também a
+/// identidade do item (o valor de `reorder_key`), de que o drag-and-drop precisa.
+///
+/// Substitui o antigo `context.clone()` + `insert` por item — ver [`EvalCtx`].
+fn item_layer<'b>(
+    item: &serde_json::Value,
+    var: &str,
+    reorder_key: Option<&str>,
+    context: &EvalCtx<'b>,
+) -> (Layer<'b>, Option<String>) {
+    let mut layer = Layer::new(context.layer());
+    let mut this_key: Option<String> = None;
+
+    match item {
+        serde_json::Value::Object(obj) => {
+            for (key, val) in obj {
+                let str_val = match val {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                if reorder_key == Some(key.as_str()) {
+                    this_key = Some(str_val.clone());
+                }
+                layer.set(format!("{var}.{key}"), str_val);
+            }
+        }
+        serde_json::Value::String(s) => layer.set(var.to_string(), s.clone()),
+        other => layer.set(var.to_string(), other.to_string()),
+    }
+
+    // Drag highlight: expõe se ESTE item é o que está sendo arrastado, para o
+    // template poder estilizar a linha agarrada (ver `crate::DRAG_KEY_CONTEXT`).
+    if let Some(key) = &this_key {
+        let dragging = context.get(crate::DRAG_KEY_CONTEXT) == Some(key.as_str());
+        layer.set(format!("{var}.__dragging"), dragging.to_string());
+    }
+
+    (layer, this_key)
+}
+
 /// Process string template by replacing `{key}` placeholders with values from context
 pub fn process_template(template: &str, context: &HashMap<String, String>) -> String {
+    process_tpl(template, &EvalCtx::new(context))
+}
+
+/// O `process_template` de verdade, sobre o [`EvalCtx`] (o público acima é a
+/// casca para quem só tem um `HashMap` em mãos).
+fn process_tpl(template: &str, context: &EvalCtx) -> String {
     let mut result = String::new();
     let mut chars = template.chars().peekable();
     while let Some(c) = chars.next() {
@@ -231,14 +362,14 @@ fn eval_condition(
     cond: &str,
     equals: &Option<String>,
     not_equals: &Option<String>,
-    context: &HashMap<String, String>,
+    context: &EvalCtx,
 ) -> bool {
-    let value = process_template(cond, context);
+    let value = process_tpl(cond, context);
     if let Some(eq) = equals {
-        return value == process_template(eq, context);
+        return value == process_tpl(eq, context);
     }
     if let Some(ne) = not_equals {
-        return value != process_template(ne, context);
+        return value != process_tpl(ne, context);
     }
     is_truthy(&value)
 }
@@ -287,7 +418,7 @@ impl<'a> StyleContext<'a> {
 #[allow(clippy::too_many_arguments)]
 fn expand_children(
     children: &[UiNode],
-    context: &HashMap<String, String>,
+    context: &EvalCtx,
     templates: &HashMap<String, UiNode>,
     styles: &StyleContext,
     scope: Option<&str>,
@@ -305,11 +436,11 @@ fn expand_children(
         // 1. Process for-each attribute directive (outer precedence)
         if let Some(items) = &child.for_each {
             let var = child.for_each_var.as_deref().unwrap_or("item");
-            let items_evaluated = process_template(items, context);
+            let items_evaluated = process_tpl(items, context);
             // Drag-and-drop: resolved once per for-each, reused by every item.
-            let reorder_key = child.reorder_key.as_ref().map(|s| process_template(s, context));
+            let reorder_key = child.reorder_key.as_ref().map(|s| process_tpl(s, context));
             let on_reorder = child.on_reorder.as_ref()
-                .map(|s| namespace_action(process_template(s, context), owner));
+                .map(|s| namespace_action(process_tpl(s, context), owner));
             if let Some(json_str) = context.get(&items_evaluated) {
                 if let Ok(serde_json::Value::Array(arr)) =
                     serde_json::from_str::<serde_json::Value>(json_str)
@@ -322,32 +453,12 @@ fn expand_children(
                         None => Vec::new(),
                     };
                     for item in arr {
-                        let mut local_context = context.clone();
-                        let mut this_key: Option<String> = None;
-                        match &item {
-                            serde_json::Value::Object(obj) => {
-                                for (key, val) in obj {
-                                    let str_val = match val {
-                                        serde_json::Value::String(s) => s.clone(),
-                                        other => other.to_string(),
-                                    };
-                                    if reorder_key.as_deref() == Some(key.as_str()) {
-                                        this_key = Some(str_val.clone());
-                                    }
-                                    local_context.insert(format!("{}.{}", var, key), str_val);
-                                }
-                            }
-                            serde_json::Value::String(s) => {
-                                local_context.insert(var.to_string(), s.clone());
-                            }
-                            other => {
-                                local_context.insert(var.to_string(), other.to_string());
-                            }
-                        }
-                        // Drag highlight: expose whether THIS item is the one
-                        // being dragged, so the template can style the grabbed
-                        // row (see `crate::DRAG_KEY_CONTEXT`).
-                        set_dragging_flag(&mut local_context, var, this_key.as_deref());
+                        // Variáveis do item numa CAMADA sobre o contexto, sem
+                        // clonar a base (ver `EvalCtx`).
+                        let (layer, this_key) =
+                            item_layer(&item, var, reorder_key.as_deref(), context);
+                        let item_ctx = context.with(&layer);
+
                         // Clone the child without the for_each directive
                         let mut clone = child.clone();
                         clone.for_each = None;
@@ -369,7 +480,7 @@ fn expand_children(
                         // Expand the single child in the new context (which will evaluate its if condition if present)
                         expand_children(
                             std::slice::from_ref(&clone),
-                            &local_context,
+                            &item_ctx,
                             templates,
                             styles,
                             scope,
@@ -415,12 +526,12 @@ fn expand_children(
             // `<import>`/`<link>`/`<style>` declarations are skipped above.
             NodeType::Import { .. } | NodeType::Link { .. } | NodeType::Style { .. } => {}
             NodeType::ForEach { items, var } => {
-                let items_evaluated = process_template(items, context);
+                let items_evaluated = process_tpl(items, context);
                 // Drag-and-drop: `onReorder`/`reorderKey` on the `<ForEach>` tag
                 // itself (a plain node attribute, same as `onPress`/`cursor`).
-                let reorder_key = child.reorder_key.as_ref().map(|s| process_template(s, context));
+                let reorder_key = child.reorder_key.as_ref().map(|s| process_tpl(s, context));
                 let on_reorder = child.on_reorder.as_ref()
-                    .map(|s| namespace_action(process_template(s, context), owner));
+                    .map(|s| namespace_action(process_tpl(s, context), owner));
                 if let Some(json_str) = context.get(&items_evaluated) {
                     if let Ok(serde_json::Value::Array(arr)) =
                         serde_json::from_str::<serde_json::Value>(json_str)
@@ -432,31 +543,12 @@ fn expand_children(
                             None => Vec::new(),
                         };
                         for item in arr {
-                            let mut local_context = context.clone();
-                            let mut this_key: Option<String> = None;
-                            match &item {
-                                serde_json::Value::Object(obj) => {
-                                    for (key, val) in obj {
-                                        let str_val = match val {
-                                            serde_json::Value::String(s) => s.clone(),
-                                            other => other.to_string(),
-                                        };
-                                        if reorder_key.as_deref() == Some(key.as_str()) {
-                                            this_key = Some(str_val.clone());
-                                        }
-                                        local_context.insert(format!("{}.{}", var, key), str_val);
-                                    }
-                                }
-                                serde_json::Value::String(s) => {
-                                    local_context.insert(var.clone(), s.clone());
-                                }
-                                other => {
-                                    local_context.insert(var.clone(), other.to_string());
-                                }
-                            }
-                            // Drag highlight: expose whether THIS item is the
-                            // one being dragged (see `crate::DRAG_KEY_CONTEXT`).
-                            set_dragging_flag(&mut local_context, var, this_key.as_deref());
+                            // Variáveis do item numa CAMADA sobre o contexto, sem
+                            // clonar a base (ver `EvalCtx`).
+                            let (layer, this_key) =
+                                item_layer(&item, var, reorder_key.as_deref(), context);
+                            let item_ctx = context.with(&layer);
+
                             // The `<ForEach>` tag's body isn't a single node like
                             // the attribute form's — clone its children so the
                             // hydration below has somewhere of its own to live.
@@ -468,7 +560,7 @@ fn expand_children(
                             // nested `if`/`else`/`ForEach` are honoured per item.
                             expand_children(
                                 &body,
-                                &local_context,
+                                &item_ctx,
                                 templates,
                                 styles,
                                 scope,
@@ -525,7 +617,10 @@ pub fn evaluate_node(
     styles: &StyleContext,
     scope: Option<&str>,
 ) -> Result<UiNode> {
-    eval_owned(node, context, templates, styles, scope, None, None, None)
+    // A fronteira: o motor tem um `HashMap`; a avaliação por dentro trabalha
+    // sobre o [`EvalCtx`] em camadas, para não clonar a base por item de lista.
+    let ctx = EvalCtx::new(context);
+    eval_owned(node, &ctx, templates, styles, scope, None, None, None)
 }
 
 /// Prefixes an action with its owning component, so `dispatch` can route it.
@@ -557,7 +652,7 @@ fn namespace_action(action: String, owner: Option<&str>) -> String {
 #[allow(clippy::too_many_arguments)]
 fn eval_owned(
     node: &UiNode,
-    context: &HashMap<String, String>,
+    context: &EvalCtx,
     templates: &HashMap<String, UiNode>,
     styles: &StyleContext,
     scope: Option<&str>,
@@ -582,12 +677,15 @@ fn eval_owned(
             .get(name)
             .ok_or_else(|| crate::error::GlacierError::UnknownComponent(name.clone()))?;
 
-        // Create a local context by copying the parent context and merging evaluated properties
-        let mut local_context = context.clone();
+        // As props do componente entram numa CAMADA sobre o contexto do uso (que
+        // o template do componente enxerga por baixo), sem clonar a base — ver
+        // [`EvalCtx`]. Uma prop de mesmo nome que uma chave global a sombreia,
+        // como antes.
+        let mut layer = Layer::new(context.layer());
         for (key, val_template) in props {
-            let evaluated_val = process_template(val_template, context);
-            local_context.insert(key.clone(), evaluated_val);
+            layer.set(key.clone(), process_tpl(val_template, context));
         }
+        let local_context = context.with(&layer);
 
         // Underlay de tag-de-componente: `Card {}` (minúsculo) casa o *nome* do
         // componente no seu uso. Como o componente é inlinado, o estilo é
@@ -633,9 +731,9 @@ fn eval_owned(
         if needs_lookup {
             let active = styles.active(scope);
             let processed = node.class.as_deref()
-                .map(|c| process_template(c, context))
+                .map(|c| process_tpl(c, context))
                 .unwrap_or_default();
-            let id = node.id.as_deref().map(|i| process_template(i, context));
+            let id = node.id.as_deref().map(|i| process_tpl(i, context));
             base.merge_from(&resolve_classes(tag, &processed, id.as_deref(), &active, styles.viewport));
             states.merge_from(&resolve_state_classes(tag, &processed, id.as_deref(), &active, styles.viewport));
         }
@@ -649,7 +747,7 @@ fn eval_owned(
         node.numeric_templates
             .iter()
             .find(|(a, _)| *a == attr)
-            .and_then(|(_, t)| process_template(t, context).trim().parse::<f32>().ok())
+            .and_then(|(_, t)| process_tpl(t, context).trim().parse::<f32>().ok())
     };
 
     // Evaluate current node attributes
@@ -659,89 +757,89 @@ fn eval_owned(
         NodeType::Row => NodeType::Row,
         NodeType::Text { content, size, bold, color } => {
             NodeType::Text {
-                content: process_template(content, context),
+                content: process_tpl(content, context),
                 size: num_template(NumAttr::Size).or(*size).or(style.size),
                 bold: *bold || style.bold.unwrap_or(false),
                 color: color.as_ref()
-                    .map(|c| process_template(c, context))
+                    .map(|c| process_tpl(c, context))
                     .or_else(|| style.color.clone()),
             }
         }
         NodeType::Button { text, on_click, navigate_to, navigate_back, color } => {
             NodeType::Button {
-                text: process_template(text, context),
+                text: process_tpl(text, context),
                 on_click: on_click.as_ref()
-                    .map(|o| namespace_action(process_template(o, context), owner)),
-                navigate_to: navigate_to.as_ref().map(|n| process_template(n, context)),
+                    .map(|o| namespace_action(process_tpl(o, context), owner)),
+                navigate_to: navigate_to.as_ref().map(|n| process_tpl(n, context)),
                 navigate_back: *navigate_back,
                 color: color.as_ref()
-                    .map(|c| process_template(c, context))
+                    .map(|c| process_tpl(c, context))
                     .or_else(|| style.color.clone()),
             }
         }
         NodeType::TextInput { placeholder, value_var, on_change, secure } => {
             NodeType::TextInput {
-                placeholder: process_template(placeholder, context),
-                value_var: process_template(value_var, context),
-                on_change: namespace_action(process_template(on_change, context), owner),
+                placeholder: process_tpl(placeholder, context),
+                value_var: process_tpl(value_var, context),
+                on_change: namespace_action(process_tpl(on_change, context), owner),
                 secure: *secure,
             }
         }
         NodeType::TextArea { placeholder, value_var, on_change, readonly } => {
             NodeType::TextArea {
-                placeholder: process_template(placeholder, context),
-                value_var: process_template(value_var, context),
-                on_change: namespace_action(process_template(on_change, context), owner),
+                placeholder: process_tpl(placeholder, context),
+                value_var: process_tpl(value_var, context),
+                on_change: namespace_action(process_tpl(on_change, context), owner),
                 readonly: *readonly,
             }
         }
         NodeType::Image { source, clip_circle } => {
             NodeType::Image {
-                source: process_template(source, context),
+                source: process_tpl(source, context),
                 clip_circle: *clip_circle,
             }
         }
         NodeType::Svg { source, color } => {
             NodeType::Svg {
-                source: process_template(source, context),
+                source: process_tpl(source, context),
                 color: color.as_ref()
-                    .map(|c| process_template(c, context))
+                    .map(|c| process_tpl(c, context))
                     .or_else(|| style.color.clone()),
             }
         }
         NodeType::Scrollable { direction } => NodeType::Scrollable { direction: direction.clone() },
         NodeType::Checkbox { label, checked_var, on_toggle } => {
             NodeType::Checkbox {
-                label: process_template(label, context),
-                checked_var: process_template(checked_var, context),
-                on_toggle: namespace_action(process_template(on_toggle, context), owner),
+                label: process_tpl(label, context),
+                checked_var: process_tpl(checked_var, context),
+                on_toggle: namespace_action(process_tpl(on_toggle, context), owner),
             }
         }
         NodeType::Toggle { label, checked_var, on_toggle } => {
             NodeType::Toggle {
-                label: process_template(label, context),
-                checked_var: process_template(checked_var, context),
-                on_toggle: namespace_action(process_template(on_toggle, context), owner),
+                label: process_tpl(label, context),
+                checked_var: process_tpl(checked_var, context),
+                on_toggle: namespace_action(process_tpl(on_toggle, context), owner),
             }
         }
         NodeType::Rule { horizontal } => NodeType::Rule { horizontal: *horizontal },
         NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, color } => {
             NodeType::Select {
-                options: process_template(options, context),
-                value_var: process_template(value_var, context),
-                on_change: namespace_action(process_template(on_change, context), owner),
-                placeholder: process_template(placeholder, context),
+                options: process_tpl(options, context),
+                value_var: process_tpl(value_var, context),
+                on_change: namespace_action(process_tpl(on_change, context), owner),
+                placeholder: process_tpl(placeholder, context),
                 label_field: label_field.clone(),
                 value_field: value_field.clone(),
                 color: color.as_ref()
-                    .map(|c| process_template(c, context))
+                    .map(|c| process_tpl(c, context))
                     .or_else(|| style.color.clone()),
             }
         }
         NodeType::Form { on_submit, name } => {
             NodeType::Form {
-                on_submit: on_submit.as_ref().map(|s| namespace_action(process_template(s, context), owner)),
-                name: name.as_ref().map(|n| process_template(n, context)),
+                on_submit: on_submit.as_ref().map(|s| namespace_action(process_tpl(s, context), owner)),
+                name: name.as_ref().map(|n| process_tpl(n, context)),
             }
         }
         // A `Fragment` carries through evaluation as-is; its children are
@@ -760,7 +858,7 @@ fn eval_owned(
     let resolve = |inline: &Option<String>, class: &Option<String>| -> Option<String> {
         inline
             .as_ref()
-            .map(|s| process_template(s, context))
+            .map(|s| process_tpl(s, context))
             .or_else(|| class.clone())
     };
 
@@ -779,13 +877,13 @@ fn eval_owned(
     let text_align_eval = resolve(&node.text_align, &style.text_align);
     // `on_press` is behavior, not a style field; interpolate it directly so
     // actions like `onPress="window:{cmd}"` can bind context values.
-    let on_press_eval = node.on_press.as_ref().map(|s| process_template(s, context));
-    let on_double_click_eval = node.on_double_click.as_ref().map(|s| process_template(s, context));
+    let on_press_eval = node.on_press.as_ref().map(|s| process_tpl(s, context));
+    let on_double_click_eval = node.on_double_click.as_ref().map(|s| process_tpl(s, context));
     let cursor_eval = resolve(&node.cursor, &style.cursor);
     let text_color_eval = resolve(&node.text_color, &style.text_color);
     // `tooltip` é conteúdo, não estilo (sem equivalente `.classe { }`, como
     // `on_press`) — interpolado direto pra suportar `tooltip="{var}"`.
-    let tooltip_eval = node.tooltip.as_ref().map(|s| process_template(s, context));
+    let tooltip_eval = node.tooltip.as_ref().map(|s| process_tpl(s, context));
     let tooltip_position_eval = node.tooltip_position.clone();
     let max_width_eval = num_template(NumAttr::MaxWidth).or(node.max_width).or(style.max_width);
     let max_height_eval = num_template(NumAttr::MaxHeight).or(node.max_height).or(style.max_height);
@@ -882,7 +980,7 @@ fn eval_owned(
         drag_order: node.drag_order.clone(),
         drag_on_reorder: node.drag_on_reorder.clone(),
         drag_reorder_key: node.drag_reorder_key.clone(),
-        form_control: node.form_control.as_ref().map(|s| process_template(s, context)),
+        form_control: node.form_control.as_ref().map(|s| process_tpl(s, context)),
         // Hydrated (if at all) by the enclosing `<Form>`'s post-pass above, on
         // this very (already evaluated) node — carried through as a default of
         // `None` here, same as the drag_* fields are for a plain for-each item.
@@ -921,29 +1019,6 @@ fn hydrate_form_controls(nodes: &mut [UiNode], order: &[String], scope: &str, on
         }
         hydrate_form_controls(&mut node.children, order, scope, on_submit);
     }
-}
-
-/// Finds the first `drag_handle=true` descendant across `nodes` (a repeated
-/// for-each item, possibly several sibling roots) and hydrates it with the
-/// full payload needed to start a drag from that handle. Every top-level node
-/// in `nodes` also gets the lighter hover-target identity
-/// (`drag_list`/`drag_item_key`), since any of them dropping-over should be a
-/// valid target. Stops at the first handle found (one handle per item).
-/// Injects `{var}.__dragging` = `"true"`/`"false"` into a reorderable list
-/// item's local context, telling the template whether this exact row is the
-/// one currently held (its `this_key` matches [`crate::DRAG_KEY_CONTEXT`]).
-/// No-op for non-reorderable items (`this_key` is `None`), where the flag
-/// would be meaningless. Always sets the key when reorderable so a stale
-/// `"true"` from a previous drag can't linger on a re-render.
-fn set_dragging_flag(local_context: &mut HashMap<String, String>, var: &str, this_key: Option<&str>) {
-    let Some(this_key) = this_key else { return };
-    let dragging = local_context
-        .get(crate::DRAG_KEY_CONTEXT)
-        .is_some_and(|k| k == this_key);
-    local_context.insert(
-        format!("{var}.__dragging"),
-        if dragging { "true".to_string() } else { "false".to_string() },
-    );
 }
 
 fn hydrate_drag_item(
