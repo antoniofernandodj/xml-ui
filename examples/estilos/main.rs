@@ -15,7 +15,9 @@ use glacier_ui::{Component, Context, GlacierDaemon, Template};
 struct Estilos;
 
 impl Component for Estilos {
-    fn name(&self) -> &str { "estilos" }
+    fn name(&self) -> &str {
+        "estilos"
+    }
 
     fn template(&self) -> Template {
         Template::File("examples/estilos/estilos.gv".into())
@@ -26,7 +28,8 @@ impl Component for Estilos {
     }
 
     fn update(&mut self, action: &str, _value: Option<&str>, ctx: &mut Context) {
-        let atual: i32 = ctx.get("valor")
+        let atual: i32 = ctx
+            .get("valor")
             .and_then(|v| v.parse::<i32>().ok())
             .unwrap_or(0);
 

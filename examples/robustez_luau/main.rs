@@ -15,7 +15,9 @@ fn main() -> iced::Result {
     GlacierDaemon::new()
         .title("Glacier - robustez da camada Luau")
         .main(|motor| {
-            if let Err(e) = motor.register_component("robustez", "examples/robustez_luau/robustez.gv") {
+            if let Err(e) =
+                motor.register_component("robustez", "examples/robustez_luau/robustez.gv")
+            {
                 eprintln!("Erro ao registrar: {}", e);
             }
             motor.set_initial_screen("robustez");

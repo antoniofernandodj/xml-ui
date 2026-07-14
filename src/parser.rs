@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use roxmltree::Node;
 use crate::error::{Diagnostic, GlacierError, Result};
 use crate::stylesheet::StyleRule;
+use roxmltree::Node;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
@@ -476,7 +476,7 @@ impl UiNode {
         }
 
         let tag = node.tag_name().name();
-        
+
         // Parse standard layout/style attributes
         let width = Self::get_attr(&node, &["width", "largura", "w"]);
         let height = Self::get_attr(&node, &["height", "altura", "h"]);
@@ -484,40 +484,123 @@ impl UiNode {
         let align_x = Self::get_attr(&node, &["alignX", "align_x", "align-x", "alinhamento_x"]);
         let align_y = Self::get_attr(&node, &["alignY", "align_y", "align-y", "alinhamento_y"]);
         let mut numeric_templates: Vec<(NumAttr, String)> = Vec::new();
-        let spacing = Self::get_attr_num(&node, &["spacing", "espacamento"], NumAttr::Spacing, &mut numeric_templates);
+        let spacing = Self::get_attr_num(
+            &node,
+            &["spacing", "espacamento"],
+            NumAttr::Spacing,
+            &mut numeric_templates,
+        );
         let background = Self::get_attr(&node, &["background", "bg", "fundo"]);
-        let border_radius = Self::get_attr_num(&node, &["borderRadius", "border_radius", "border-radius", "raio_borda"], NumAttr::BorderRadius, &mut numeric_templates);
-        let border_width = Self::get_attr_num(&node, &["borderWidth", "border_width", "border-width", "largura_borda"], NumAttr::BorderWidth, &mut numeric_templates);
-        let border_color = Self::get_attr(&node, &["borderColor", "border_color", "border-color", "cor_borda"]);
+        let border_radius = Self::get_attr_num(
+            &node,
+            &[
+                "borderRadius",
+                "border_radius",
+                "border-radius",
+                "raio_borda",
+            ],
+            NumAttr::BorderRadius,
+            &mut numeric_templates,
+        );
+        let border_width = Self::get_attr_num(
+            &node,
+            &[
+                "borderWidth",
+                "border_width",
+                "border-width",
+                "largura_borda",
+            ],
+            NumAttr::BorderWidth,
+            &mut numeric_templates,
+        );
+        let border_color = Self::get_attr(
+            &node,
+            &["borderColor", "border_color", "border-color", "cor_borda"],
+        );
         let class = Self::get_attr(&node, &["class", "classe"]);
         let id = Self::get_attr(&node, &["id", "identificador"]);
         let font = Self::get_attr(&node, &["font", "fonte", "fontFamily", "font-family"]);
         let gradient = Self::get_attr(&node, &["gradient", "gradiente"]);
-        let text_align = Self::get_attr(&node, &["textAlign", "text_align", "text-align", "alinhamento_texto"]);
-        let on_press = Self::get_attr(&node, &["onPress", "on_press", "on-press", "aoPressionar", "ao_pressionar"]);
-        let on_double_click = Self::get_attr(&node, &["onDoubleClick", "on_double_click", "on-double-click", "aoClicarDuplo"]);
+        let text_align = Self::get_attr(
+            &node,
+            &["textAlign", "text_align", "text-align", "alinhamento_texto"],
+        );
+        let on_press = Self::get_attr(
+            &node,
+            &[
+                "onPress",
+                "on_press",
+                "on-press",
+                "aoPressionar",
+                "ao_pressionar",
+            ],
+        );
+        let on_double_click = Self::get_attr(
+            &node,
+            &[
+                "onDoubleClick",
+                "on_double_click",
+                "on-double-click",
+                "aoClicarDuplo",
+            ],
+        );
         let cursor = Self::get_attr(&node, &["cursor", "cursor_", "cursorIcon"]);
-        let text_color = Self::get_attr(&node, &["textColor", "text_color", "text-color", "cor_texto"]);
+        let text_color = Self::get_attr(
+            &node,
+            &["textColor", "text_color", "text-color", "cor_texto"],
+        );
         let tooltip = Self::get_attr(&node, &["tooltip", "title", "dica"]);
-        let tooltip_position = Self::get_attr(&node, &["tooltipPosition", "tooltip_position", "tooltip-position"]);
-        let max_width = Self::get_attr_num(&node, &["maxWidth", "max_width", "max-width", "largura_max"], NumAttr::MaxWidth, &mut numeric_templates);
-        let max_height = Self::get_attr_num(&node, &["maxHeight", "max_height", "max-height", "altura_max"], NumAttr::MaxHeight, &mut numeric_templates);
+        let tooltip_position = Self::get_attr(
+            &node,
+            &["tooltipPosition", "tooltip_position", "tooltip-position"],
+        );
+        let max_width = Self::get_attr_num(
+            &node,
+            &["maxWidth", "max_width", "max-width", "largura_max"],
+            NumAttr::MaxWidth,
+            &mut numeric_templates,
+        );
+        let max_height = Self::get_attr_num(
+            &node,
+            &["maxHeight", "max_height", "max-height", "altura_max"],
+            NumAttr::MaxHeight,
+            &mut numeric_templates,
+        );
         let hidden = Self::get_attr(&node, &["hidden", "oculto"])
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1");
         let disabled = Self::get_attr(&node, &["disabled", "desabilitado"])
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1");
-        let form_control = Self::get_attr(&node, &["formControl", "form_control", "form-control", "controleForm", "controle_form"]);
+        let form_control = Self::get_attr(
+            &node,
+            &[
+                "formControl",
+                "form_control",
+                "form-control",
+                "controleForm",
+                "controle_form",
+            ],
+        );
 
         // Structural directives as attributes (Vue/Angular style)
         let if_cond = Self::get_attr(&node, &["if", "se"]);
         let if_equals = Self::get_attr(&node, &["equals", "eq", "igual_a"]);
-        let if_not_equals = Self::get_attr(&node, &["notEquals", "not_equals", "ne", "diferente_de"]);
+        let if_not_equals =
+            Self::get_attr(&node, &["notEquals", "not_equals", "ne", "diferente_de"]);
         let is_else = node.has_attribute("else") || node.has_attribute("senao");
         let for_each = Self::get_attr(&node, &["for-each", "forEach", "foreach", "each", "repeat"]);
         let for_each_var = Self::get_attr(&node, &["var", "variavel"]);
-        let on_reorder = Self::get_attr(&node, &["onReorder", "on_reorder", "on-reorder", "aoReordenar"]);
-        let reorder_key = Self::get_attr(&node, &["reorderKey", "reorder_key", "reorder-key", "chaveReordenar"]);
-        let drag_handle = Self::get_attr_bool(&node, &["dragHandle", "drag_handle", "drag-handle", "alcaArraste"]);
+        let on_reorder = Self::get_attr(
+            &node,
+            &["onReorder", "on_reorder", "on-reorder", "aoReordenar"],
+        );
+        let reorder_key = Self::get_attr(
+            &node,
+            &["reorderKey", "reorder_key", "reorder-key", "chaveReordenar"],
+        );
+        let drag_handle = Self::get_attr_bool(
+            &node,
+            &["dragHandle", "drag_handle", "drag-handle", "alcaArraste"],
+        );
 
         let kind = match tag {
             "Container" | "container" => NodeType::Container,
@@ -533,25 +616,63 @@ impl UiNode {
                 let content = if !child_content.is_empty() {
                     child_content
                 } else {
-                    Self::get_attr(&node, &["content", "conteudo", "text", "texto"]).unwrap_or_default()
+                    Self::get_attr(&node, &["content", "conteudo", "text", "texto"])
+                        .unwrap_or_default()
                 };
-                let size = Self::get_attr_num(&node, &["size", "tamanho"], NumAttr::Size, &mut numeric_templates);
+                let size = Self::get_attr_num(
+                    &node,
+                    &["size", "tamanho"],
+                    NumAttr::Size,
+                    &mut numeric_templates,
+                );
                 let bold = Self::get_attr_bool(&node, &["bold", "negrito"]);
                 let color = Self::get_attr(&node, &["color", "cor"]);
-                NodeType::Text { content, size, bold, color }
+                NodeType::Text {
+                    content,
+                    size,
+                    bold,
+                    color,
+                }
             }
             "Button" | "button" | "Botao" | "botao" => {
-                let text = Self::get_attr(&node, &["text", "texto", "content", "conteudo"]).unwrap_or_default();
-                let on_click = Self::get_attr(&node, &["onClick", "on_click", "on-click", "aoClicar", "ao_clicar"]);
-                let navigate_to = Self::get_attr(&node, &["navigateTo", "navigate_to", "navigate-to", "irPara", "ir_para"]);
-                let navigate_back = Self::get_attr_bool(&node, &["navigateBack", "navigate_back", "navigate-back", "voltar"]);
+                let text = Self::get_attr(&node, &["text", "texto", "content", "conteudo"])
+                    .unwrap_or_default();
+                let on_click = Self::get_attr(
+                    &node,
+                    &["onClick", "on_click", "on-click", "aoClicar", "ao_clicar"],
+                );
+                let navigate_to = Self::get_attr(
+                    &node,
+                    &[
+                        "navigateTo",
+                        "navigate_to",
+                        "navigate-to",
+                        "irPara",
+                        "ir_para",
+                    ],
+                );
+                let navigate_back = Self::get_attr_bool(
+                    &node,
+                    &["navigateBack", "navigate_back", "navigate-back", "voltar"],
+                );
                 let color = Self::get_attr(&node, &["color", "cor"]);
-                NodeType::Button { text, on_click, navigate_to, navigate_back, color }
+                NodeType::Button {
+                    text,
+                    on_click,
+                    navigate_to,
+                    navigate_back,
+                    color,
+                }
             }
             "TextInput" | "textinput" | "Input" | "input" | "EntradaTexto" | "entrada_texto" => {
-                let placeholder = Self::get_attr(&node, &["placeholder", "dica"]).unwrap_or_default();
+                let placeholder =
+                    Self::get_attr(&node, &["placeholder", "dica"]).unwrap_or_default();
                 let mut value_var = Self::get_attr(&node, &["value", "valor"]).unwrap_or_default();
-                let mut on_change = Self::get_attr(&node, &["onChange", "on_change", "on-change", "aoMudar", "ao_mudar"]).unwrap_or_default();
+                let mut on_change = Self::get_attr(
+                    &node,
+                    &["onChange", "on_change", "on-change", "aoMudar", "ao_mudar"],
+                )
+                .unwrap_or_default();
                 // `formControl="username"` without an explicit `value`/`onChange`
                 // binds both to the control name, so `Form::sync_to_context`'s
                 // `ctx.set(name, ...)` round-trips straight back into this input.
@@ -564,23 +685,55 @@ impl UiNode {
                     }
                 }
                 let secure = Self::get_attr_bool(&node, &["secure", "password", "seguro", "senha"]);
-                NodeType::TextInput { placeholder, value_var, on_change, secure }
+                NodeType::TextInput {
+                    placeholder,
+                    value_var,
+                    on_change,
+                    secure,
+                }
             }
-            "TextArea" | "textarea" | "TextEditor" | "texteditor" | "Editor" | "editor" | "AreaTexto" | "area_texto" => {
-                let placeholder = Self::get_attr(&node, &["placeholder", "dica"]).unwrap_or_default();
+            "TextArea" | "textarea" | "TextEditor" | "texteditor" | "Editor" | "editor"
+            | "AreaTexto" | "area_texto" => {
+                let placeholder =
+                    Self::get_attr(&node, &["placeholder", "dica"]).unwrap_or_default();
                 let value_var = Self::get_attr(&node, &["value", "valor"]).unwrap_or_default();
-                let on_change = Self::get_attr(&node, &["onChange", "on_change", "on-change", "aoMudar", "ao_mudar"]).unwrap_or_default();
-                let readonly = Self::get_attr_bool(&node, &["readonly", "read_only", "read-only", "somenteLeitura", "somente_leitura"]);
-                NodeType::TextArea { placeholder, value_var, on_change, readonly }
+                let on_change = Self::get_attr(
+                    &node,
+                    &["onChange", "on_change", "on-change", "aoMudar", "ao_mudar"],
+                )
+                .unwrap_or_default();
+                let readonly = Self::get_attr_bool(
+                    &node,
+                    &[
+                        "readonly",
+                        "read_only",
+                        "read-only",
+                        "somenteLeitura",
+                        "somente_leitura",
+                    ],
+                );
+                NodeType::TextArea {
+                    placeholder,
+                    value_var,
+                    on_change,
+                    readonly,
+                }
             }
             "Image" | "image" | "Imagem" | "imagem" => {
-                let source = Self::get_attr(&node, &["source", "src", "origem", "caminho"]).unwrap_or_default();
+                let source = Self::get_attr(&node, &["source", "src", "origem", "caminho"])
+                    .unwrap_or_default();
                 let clip = Self::get_attr(&node, &["clip", "corte"]);
-                let clip_circle = clip.map(|s| s.eq_ignore_ascii_case("Circle") || s.eq_ignore_ascii_case("circle")).unwrap_or(false);
-                NodeType::Image { source, clip_circle }
+                let clip_circle = clip
+                    .map(|s| s.eq_ignore_ascii_case("Circle") || s.eq_ignore_ascii_case("circle"))
+                    .unwrap_or(false);
+                NodeType::Image {
+                    source,
+                    clip_circle,
+                }
             }
             "Svg" | "svg" | "Icon" | "icon" | "Icone" | "icone" => {
-                let source = Self::get_attr(&node, &["source", "src", "origem", "caminho"]).unwrap_or_default();
+                let source = Self::get_attr(&node, &["source", "src", "origem", "caminho"])
+                    .unwrap_or_default();
                 let color = Self::get_attr(&node, &["color", "cor"]);
                 NodeType::Svg { source, color }
             }
@@ -590,16 +743,36 @@ impl UiNode {
                 NodeType::Scrollable { direction }
             }
             "Checkbox" | "checkbox" | "Check" | "check" => {
-                let label = Self::get_attr(&node, &["label", "text", "texto", "rotulo"]).unwrap_or_default();
-                let checked_var = Self::get_attr(&node, &["checked", "value", "valor", "marcado"]).unwrap_or_default();
-                let on_toggle = Self::get_attr(&node, &["onToggle", "on_toggle", "on-toggle", "onChange", "aoMudar"]).unwrap_or_default();
-                NodeType::Checkbox { label, checked_var, on_toggle }
+                let label = Self::get_attr(&node, &["label", "text", "texto", "rotulo"])
+                    .unwrap_or_default();
+                let checked_var = Self::get_attr(&node, &["checked", "value", "valor", "marcado"])
+                    .unwrap_or_default();
+                let on_toggle = Self::get_attr(
+                    &node,
+                    &["onToggle", "on_toggle", "on-toggle", "onChange", "aoMudar"],
+                )
+                .unwrap_or_default();
+                NodeType::Checkbox {
+                    label,
+                    checked_var,
+                    on_toggle,
+                }
             }
             "Toggle" | "toggle" | "Toggler" | "toggler" | "Switch" | "switch" => {
-                let label = Self::get_attr(&node, &["label", "text", "texto", "rotulo"]).unwrap_or_default();
-                let checked_var = Self::get_attr(&node, &["checked", "value", "valor", "marcado"]).unwrap_or_default();
-                let on_toggle = Self::get_attr(&node, &["onToggle", "on_toggle", "on-toggle", "onChange", "aoMudar"]).unwrap_or_default();
-                NodeType::Toggle { label, checked_var, on_toggle }
+                let label = Self::get_attr(&node, &["label", "text", "texto", "rotulo"])
+                    .unwrap_or_default();
+                let checked_var = Self::get_attr(&node, &["checked", "value", "valor", "marcado"])
+                    .unwrap_or_default();
+                let on_toggle = Self::get_attr(
+                    &node,
+                    &["onToggle", "on_toggle", "on-toggle", "onChange", "aoMudar"],
+                )
+                .unwrap_or_default();
+                NodeType::Toggle {
+                    label,
+                    checked_var,
+                    on_toggle,
+                }
             }
             "Rule" | "rule" | "Divider" | "divider" | "Divisoria" | "divisoria" => {
                 let horizontal = Self::get_attr(&node, &["direction", "direcao", "axis", "eixo"])
@@ -609,17 +782,72 @@ impl UiNode {
             }
             "Select" | "select" | "Dropdown" | "dropdown" | "PickList" | "picklist"
             | "ComboBox" | "combobox" | "Combo" | "combo" | "Seletor" | "seletor" => {
-                let options = Self::get_attr(&node, &["options", "items", "itens", "source", "origem", "opcoes"]).unwrap_or_default();
-                let value_var = Self::get_attr(&node, &["value", "valor", "selected", "selecionado"]).unwrap_or_default();
-                let on_change = Self::get_attr(&node, &["onChange", "on_change", "on-change", "onSelect", "aoMudar", "ao_mudar"]).unwrap_or_default();
-                let placeholder = Self::get_attr(&node, &["placeholder", "dica"]).unwrap_or_default();
-                let label_field = Self::get_attr(&node, &["labelField", "label_field", "label-field", "labelKey", "campo_rotulo"]).unwrap_or_else(|| "label".to_string());
-                let value_field = Self::get_attr(&node, &["valueField", "value_field", "value-field", "valueKey", "campo_valor"]).unwrap_or_else(|| "value".to_string());
+                let options = Self::get_attr(
+                    &node,
+                    &["options", "items", "itens", "source", "origem", "opcoes"],
+                )
+                .unwrap_or_default();
+                let value_var =
+                    Self::get_attr(&node, &["value", "valor", "selected", "selecionado"])
+                        .unwrap_or_default();
+                let on_change = Self::get_attr(
+                    &node,
+                    &[
+                        "onChange",
+                        "on_change",
+                        "on-change",
+                        "onSelect",
+                        "aoMudar",
+                        "ao_mudar",
+                    ],
+                )
+                .unwrap_or_default();
+                let placeholder =
+                    Self::get_attr(&node, &["placeholder", "dica"]).unwrap_or_default();
+                let label_field = Self::get_attr(
+                    &node,
+                    &[
+                        "labelField",
+                        "label_field",
+                        "label-field",
+                        "labelKey",
+                        "campo_rotulo",
+                    ],
+                )
+                .unwrap_or_else(|| "label".to_string());
+                let value_field = Self::get_attr(
+                    &node,
+                    &[
+                        "valueField",
+                        "value_field",
+                        "value-field",
+                        "valueKey",
+                        "campo_valor",
+                    ],
+                )
+                .unwrap_or_else(|| "value".to_string());
                 let color = Self::get_attr(&node, &["color", "cor"]);
-                NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, color }
+                NodeType::Select {
+                    options,
+                    value_var,
+                    on_change,
+                    placeholder,
+                    label_field,
+                    value_field,
+                    color,
+                }
             }
             "Form" | "form" | "Formulario" | "formulario" => {
-                let on_submit = Self::get_attr(&node, &["onSubmit", "on_submit", "on-submit", "aoSubmeter", "ao_submeter"]);
+                let on_submit = Self::get_attr(
+                    &node,
+                    &[
+                        "onSubmit",
+                        "on_submit",
+                        "on-submit",
+                        "aoSubmeter",
+                        "ao_submeter",
+                    ],
+                );
                 let name = Self::get_attr(&node, &["name", "nome"]);
                 NodeType::Form { on_submit, name }
             }
@@ -637,25 +865,35 @@ impl UiNode {
             }
             "import" | "Import" | "importar" | "Importar" => {
                 let name = Self::get_attr(&node, &["name", "nome", "as"]).unwrap_or_default();
-                let from = Self::get_attr(&node, &["from", "de", "src", "path", "caminho"]).unwrap_or_default();
+                let from = Self::get_attr(&node, &["from", "de", "src", "path", "caminho"])
+                    .unwrap_or_default();
                 NodeType::Import { name, from }
             }
             "ForEach" | "foreach" | "For" | "for" => {
-                let items = Self::get_attr(&node, &["items", "itens", "source", "origem"]).unwrap_or_default();
+                let items = Self::get_attr(&node, &["items", "itens", "source", "origem"])
+                    .unwrap_or_default();
                 let var = Self::get_attr(&node, &["var", "variavel"]).unwrap_or_default();
                 NodeType::ForEach { items, var }
             }
             "If" | "if" | "Se" | "se" => {
-                let cond = Self::get_attr(&node, &["cond", "condition", "when", "quando", "condicao"]).unwrap_or_default();
+                let cond =
+                    Self::get_attr(&node, &["cond", "condition", "when", "quando", "condicao"])
+                        .unwrap_or_default();
                 let equals = Self::get_attr(&node, &["equals", "eq", "igual_a"]);
-                let not_equals = Self::get_attr(&node, &["notEquals", "not_equals", "ne", "diferente_de"]);
-                NodeType::If { cond, equals, not_equals }
+                let not_equals =
+                    Self::get_attr(&node, &["notEquals", "not_equals", "ne", "diferente_de"]);
+                NodeType::If {
+                    cond,
+                    equals,
+                    not_equals,
+                }
             }
             "Else" | "else" | "Senao" | "senao" => NodeType::Else,
             "link" | "Link" => {
                 let rel = Self::get_attr(&node, &["rel", "tipo"])
                     .unwrap_or_else(|| "stylesheet".to_string());
-                let href = Self::get_attr(&node, &["href", "src", "from", "caminho"]).unwrap_or_default();
+                let href =
+                    Self::get_attr(&node, &["href", "src", "from", "caminho"]).unwrap_or_default();
                 let name = Self::get_attr(&node, &["as", "name", "nome"]);
                 NodeType::Link { rel, href, name }
             }
@@ -665,7 +903,11 @@ impl UiNode {
                 // `<style>...</style>` is inline `.gss` source, global by default
                 // unless marked `scoped="true"`.
                 if let Some(href) = Self::get_attr(&node, &["href", "src", "from", "caminho"]) {
-                    NodeType::Link { rel: "stylesheet".to_string(), href, name: None }
+                    NodeType::Link {
+                        rel: "stylesheet".to_string(),
+                        href,
+                        name: None,
+                    }
                 } else {
                     // O corpo veio blindado em CDATA (ver `protect_style_bodies`),
                     // e o roxmltree entrega CDATA como nó de texto comum — então
@@ -713,7 +955,12 @@ impl UiNode {
                 let text = Self::normalize_text(child.text().unwrap_or_default());
                 if !text.is_empty() {
                     children.push(empty_node(
-                        NodeType::Text { content: text, size: None, bold: false, color: None },
+                        NodeType::Text {
+                            content: text,
+                            size: None,
+                            bold: false,
+                            color: None,
+                        },
                         Vec::new(),
                     ));
                 }
@@ -815,15 +1062,17 @@ impl UiNode {
         // normalizer then preserves it as a hard space (see `normalize_text`).
         let prepared = protect_style_bodies(&xml.replace("&nbsp;", "\u{00A0}"));
         let wrapped = format!("{FRAGMENT_OPEN}{prepared}</__glacier_fragment__>");
-        let doc = roxmltree::Document::parse(&wrapped)
-            .map_err(|e| xml_error(e, source, file))?;
+        let doc = roxmltree::Document::parse(&wrapped).map_err(|e| xml_error(e, source, file))?;
         let fragment = doc.root_element();
 
         let mut decls = Vec::new();
         let mut roots: Vec<Self> = Vec::new();
         for child in fragment.children() {
             if let Some(node) = Self::from_node(child) {
-                if matches!(node.kind, NodeType::Import { .. } | NodeType::Link { .. } | NodeType::Style { .. }) {
+                if matches!(
+                    node.kind,
+                    NodeType::Import { .. } | NodeType::Link { .. } | NodeType::Style { .. }
+                ) {
                     decls.push(node);
                 } else {
                     roots.push(node);
@@ -907,7 +1156,9 @@ fn xml_message(err: &roxmltree::Error) -> String {
         E::InvalidComment(_) => "comentário XML mal formado".to_string(),
         other => {
             let raw = other.to_string();
-            raw.rsplit_once(" at ").map_or(raw.as_str(), |(head, _)| head).to_string()
+            raw.rsplit_once(" at ")
+                .map_or(raw.as_str(), |(head, _)| head)
+                .to_string()
         }
     }
 }
@@ -972,12 +1223,16 @@ fn protect_style_bodies(xml: &str) -> String {
             return out;
         };
         if let Some(c) = comment
-            && c < open {
-                let end = rest[c..].find("-->").map(|e| c + e + 3).unwrap_or(rest.len());
-                out.push_str(&rest[..end]);
-                rest = &rest[end..];
-                continue;
-            }
+            && c < open
+        {
+            let end = rest[c..]
+                .find("-->")
+                .map(|e| c + e + 3)
+                .unwrap_or(rest.len());
+            out.push_str(&rest[..end]);
+            rest = &rest[end..];
+            continue;
+        }
 
         // `<style ...>` — o corpo começa depois do `>` da tag de abertura. Uma
         // tag vazia (`<style href="..."/>`) não tem corpo a proteger.
@@ -1040,7 +1295,10 @@ fn find_style_close(s: &str) -> Option<usize> {
     let bytes = s.as_bytes();
     let mut from = 0;
     while let Some(i) = s[from..].find("</").map(|i| from + i) {
-        if bytes.get(i + 2..i + 7).is_some_and(|n| n.eq_ignore_ascii_case(b"style")) {
+        if bytes
+            .get(i + 2..i + 7)
+            .is_some_and(|n| n.eq_ignore_ascii_case(b"style"))
+        {
             return Some(i);
         }
         from = i + 2;
@@ -1069,7 +1327,8 @@ mod diagnostic_tests {
     // Um `<` literal no CSS (seletor imaginário, expressão) idem: é CSS, não XML.
     #[test]
     fn menor_que_literal_no_css_nao_quebra_o_parse() {
-        let xml = "<Column><style>.a { width: 10; } /* a < b */</style><Text content=\"x\"/></Column>";
+        let xml =
+            "<Column><style>.a { width: 10; } /* a < b */</style><Text content=\"x\"/></Column>";
         assert!(UiNode::parse_xml(xml).is_ok());
     }
 
@@ -1079,7 +1338,8 @@ mod diagnostic_tests {
     // entrava em pânico. Agora a comparação é em bytes.
     #[test]
     fn caractere_multibyte_apos_menor_que_nao_entra_em_panico() {
-        let xml = "<Column>\n  <!-- ── separador ────── -->\n  <Text content=\"ação\" />\n</Column>";
+        let xml =
+            "<Column>\n  <!-- ── separador ────── -->\n  <Text content=\"ação\" />\n</Column>";
         assert!(UiNode::parse_xml(xml).is_ok());
     }
 
@@ -1088,7 +1348,11 @@ mod diagnostic_tests {
     fn style_sem_corpo_segue_virando_link() {
         let xml = "<Column><style href=\"a.gss\" /><Text content=\"x\"/></Column>";
         let root = UiNode::parse_xml(xml).unwrap();
-        assert!(root.children.iter().any(|c| matches!(&c.kind, NodeType::Link { href, .. } if href == "a.gss")));
+        assert!(
+            root.children
+                .iter()
+                .any(|c| matches!(&c.kind, NodeType::Link { href, .. } if href == "a.gss"))
+        );
     }
 
     // O erro precisa apontar o arquivo, a linha REAL e a coluna, e trazer a
@@ -1161,7 +1425,10 @@ mod loose_text_tests {
     fn text_node_does_not_double_wrap() {
         let root = UiNode::parse_xml("<Text>ola</Text>").unwrap();
         assert_eq!(text_of(&root), Some("ola"));
-        assert!(root.children.is_empty(), "text child was consumed, not re-wrapped");
+        assert!(
+            root.children.is_empty(),
+            "text child was consumed, not re-wrapped"
+        );
     }
 
     // Whitespace-only text between elements is dropped, not turned into an
@@ -1259,4 +1526,3 @@ pub(crate) fn empty_node(kind: NodeType, children: Vec<UiNode>) -> UiNode {
         form_next_focus: None,
     }
 }
-

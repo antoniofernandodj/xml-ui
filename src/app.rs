@@ -38,10 +38,9 @@ pub trait GlacierApp: Sized + 'static {
     /// [`init`](GlacierApp::init), [`update`](GlacierApp::update),
     /// [`view`](GlacierApp::view) and [`subscription`](GlacierApp::subscription)
     /// already wired in.
-    fn bootstrap()
-    -> iced::Application<impl iced::Program<State = Self, Message = Self::Message, Theme = iced::Theme>>
-    {
-        iced::application(Self::init, Self::update, Self::view)
-            .subscription(Self::subscription)
+    fn bootstrap() -> iced::Application<
+        impl iced::Program<State = Self, Message = Self::Message, Theme = iced::Theme>,
+    > {
+        iced::application(Self::init, Self::update, Self::view).subscription(Self::subscription)
     }
 }

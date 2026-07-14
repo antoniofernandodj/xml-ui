@@ -1,18 +1,18 @@
 pub mod app;
 pub mod builtins;
-pub mod daemon;
-pub mod error;
-pub mod parser;
-pub mod eval;
-pub mod render_inputs;
-pub mod widget;
 pub mod component;
+pub mod daemon;
+pub mod dialogs;
+pub mod error;
+pub mod eval;
+pub mod forms;
 pub mod luau;
 pub mod net;
+pub mod parser;
+pub mod render_inputs;
 pub mod stylesheet;
-pub mod forms;
-pub mod dialogs;
 pub mod toasts;
+pub mod widget;
 
 /// Re-exported so a host app can depend on `glacier-ui` alone: `iced` types
 /// (`Task`, `Element`, `Theme`, `Font`, ...) and `iced::application` itself
@@ -26,20 +26,26 @@ pub use iced;
 pub use iced::{Element, Font, Point, Size, Subscription, Task, window};
 
 pub use app::GlacierApp;
-pub use error::{Diagnostic, GlacierError, Result};
-pub use parser::{UiNode, NodeType};
-pub use eval::{evaluate_node, evaluate_template, process_template, strip_script, normalize_bare_directives, EvalCache, StyleContext};
-pub use widget::{render_node, EngineMessage};
-pub use component::{BroadcastMessage, Component, Context, ContextVar, DialogAction, Effect, EffectOutcome, FetchResult, Nav, Template, WindowSource, WindowSpec};
+pub use component::{
+    BroadcastMessage, Component, Context, ContextVar, DialogAction, Effect, EffectOutcome,
+    FetchResult, Nav, Template, WindowSource, WindowSpec,
+};
 pub use daemon::{DaemonMessage, GlacierDaemon, WindowGeometry};
-pub use luau::LuauComponent;
-pub use stylesheet::{StyleSheet, StyleRule};
-pub use forms::{Form, FormBuilder, FormControl, Validator};
 pub use dialogs::{ButtonRole, DialogButton, DialogIcon, DialogSpec};
+pub use error::{Diagnostic, GlacierError, Result};
+pub use eval::{
+    EvalCache, StyleContext, evaluate_node, evaluate_template, normalize_bare_directives,
+    process_template, strip_script,
+};
+pub use forms::{Form, FormBuilder, FormControl, Validator};
+pub use luau::LuauComponent;
+pub use parser::{NodeType, UiNode};
+pub use stylesheet::{StyleRule, StyleSheet};
 pub use toasts::{ToastKind, ToastSpec};
+pub use widget::{EngineMessage, render_node};
 
 use std::collections::HashMap;
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 
 /// The XML-to-UI rendering engine.
 ///
@@ -267,8 +273,9 @@ impl GlacierUI {
     fn register_builtins(&mut self) {
         for comp in builtins::builtin_components() {
             let name = comp.name().to_string();
-            self.register_one(comp)
-                .unwrap_or_else(|e| panic!("built-in component '{}' failed to register: {}", name, e));
+            self.register_one(comp).unwrap_or_else(|e| {
+                panic!("built-in component '{}' failed to register: {}", name, e)
+            });
             self.builtin_component_names.insert(name);
         }
     }
@@ -361,8 +368,8 @@ impl GlacierUI {
     /// encountered while processing a template's `<link>`s. Does not
     /// re-evaluate; callers batch that themselves.
     fn load_global_stylesheet_file(&mut self, path: &str) -> Result<()> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| GlacierError::io("stylesheet", path, e))?;
+        let content =
+            std::fs::read_to_string(path).map_err(|e| GlacierError::io("stylesheet", path, e))?;
         // `parse_in`: o arquivo é a fonte, então a linha do erro é a linha dele
         // (offset 1) e o caminho vai no diagnóstico.
         let sheet = stylesheet::StyleSheet::parse_in(&content, Some(path), 1)?;
@@ -442,7 +449,11 @@ impl GlacierUI {
     pub fn show_toast(&mut self, spec: toasts::ToastSpec) -> u64 {
         let id = self.next_toast_id;
         self.next_toast_id += 1;
-        self.toasts.push(ActiveToast { id, spec, shown_at: std::time::Instant::now() });
+        self.toasts.push(ActiveToast {
+            id,
+            spec,
+            shown_at: std::time::Instant::now(),
+        });
         id
     }
 
@@ -457,7 +468,8 @@ impl GlacierUI {
     /// [`GlacierUI::toast_subscription`]).
     fn prune_expired_toasts(&mut self) {
         let now = std::time::Instant::now();
-        self.toasts.retain(|t| now.duration_since(t.shown_at) < t.spec.duration);
+        self.toasts
+            .retain(|t| now.duration_since(t.shown_at) < t.spec.duration);
     }
 
     /// Renders the current active screen, with the active dialog (if any)
@@ -465,10 +477,15 @@ impl GlacierUI {
     /// [`toasts::overlay`] — toasts on top of the dialog, since they should
     /// stay visible (and dismissible) even while a modal is up.
     pub fn render_current(&self) -> Result<iced::Element<'_, EngineMessage>> {
-        let name = self.current_screen.as_ref().ok_or(GlacierError::NoActiveScreen)?;
+        let name = self
+            .current_screen
+            .as_ref()
+            .ok_or(GlacierError::NoActiveScreen)?;
         let screen = self.render(name)?;
         let with_dialog = match &self.dialog {
-            Some(spec) => iced::widget::stack![screen, dialogs::overlay(spec, &self.theme())].into(),
+            Some(spec) => {
+                iced::widget::stack![screen, dialogs::overlay(spec, &self.theme())].into()
+            }
             None => screen,
         };
         Ok(if self.toasts.is_empty() {
@@ -523,7 +540,8 @@ impl GlacierUI {
                 let mod_time = std::fs::metadata(&path)
                     .and_then(|m| m.modified())
                     .unwrap_or_else(|_| SystemTime::now());
-                self.registered_components.insert(name.clone(), path.clone());
+                self.registered_components
+                    .insert(name.clone(), path.clone());
                 self.file_mod_times.insert(name.clone(), mod_time);
                 (content, Some(path))
             }
@@ -532,8 +550,8 @@ impl GlacierUI {
 
         // Parse the XML markup, with any `<script>` block stripped — its Lua
         // body is run at runtime by `LuaComponent`, not here.
-        let (ast, _script) = parse_markup(path.as_deref(), &markup)
-            .map_err(|e| e.in_component(&name))?;
+        let (ast, _script) =
+            parse_markup(path.as_deref(), &markup).map_err(|e| e.in_component(&name))?;
         self.inputs.insert_template(name.clone(), ast.clone());
         // An explicit registration of this name means it's no longer a lib
         // builtin (register_builtins re-adds its own names *after* this call, so
@@ -594,7 +612,11 @@ impl GlacierUI {
             // fluxos OAuth: o script guarda a URL no contexto e a markup faz
             // `on_click="open:minha_url"`.
             if let Some(target) = a.strip_prefix("open:") {
-                let url = self.context_data.get(target).cloned().unwrap_or_else(|| target.to_string());
+                let url = self
+                    .context_data
+                    .get(target)
+                    .cloned()
+                    .unwrap_or_else(|| target.to_string());
                 open_url(&url);
                 return iced::Task::none();
             }
@@ -707,9 +729,9 @@ impl GlacierUI {
                 }
                 return iced::Task::none();
             }
-            EngineMessage::UiInputChanged { action, value } => (
-                action.as_str(), Some(value.as_str())
-            ),
+            EngineMessage::UiInputChanged { action, value } => {
+                (action.as_str(), Some(value.as_str()))
+            }
             EngineMessage::Navigate(s) => {
                 self.navigate_to(s);
                 let _ = self.reevaluate_all();
@@ -800,7 +822,13 @@ impl GlacierUI {
             // no component ever sees them, same as `window:*` above; only
             // `DragEnd` reaches the owning `Component`, via a synthetic
             // `UiInputChanged` carrying the final order as JSON.
-            EngineMessage::DragStart { list, reorder_key, on_reorder, order, key } => {
+            EngineMessage::DragStart {
+                list,
+                reorder_key,
+                on_reorder,
+                order,
+                key,
+            } => {
                 self.drag = Some(DragState {
                     list: list.clone(),
                     reorder_key: reorder_key.clone(),
@@ -812,7 +840,8 @@ impl GlacierUI {
                 // items can style themselves (`{var}.__dragging`, injected per
                 // item by the for-each expansion). Re-evaluate right away so
                 // the highlight shows on grab, not only after the first hover.
-                self.context_data.insert(DRAG_KEY_CONTEXT.to_string(), key.clone());
+                self.context_data
+                    .insert(DRAG_KEY_CONTEXT.to_string(), key.clone());
                 let _ = self.reevaluate_all();
                 return iced::Task::none();
             }
@@ -836,7 +865,12 @@ impl GlacierUI {
                 };
                 if moved {
                     let drag = self.drag.as_ref().expect("checked above");
-                    reorder_context_json(&mut self.context_data, &drag.list, &drag.reorder_key, &drag.order);
+                    reorder_context_json(
+                        &mut self.context_data,
+                        &drag.list,
+                        &drag.reorder_key,
+                        &drag.order,
+                    );
                     let _ = self.reevaluate_all();
                 }
                 return iced::Task::none();
@@ -846,7 +880,8 @@ impl GlacierUI {
                 // once the item is released (see `DragStart`).
                 self.context_data.remove(DRAG_KEY_CONTEXT);
                 if let Some(drag) = self.drag.take() {
-                    let value = serde_json::to_string(&drag.order).unwrap_or_else(|_| "[]".to_string());
+                    let value =
+                        serde_json::to_string(&drag.order).unwrap_or_else(|_| "[]".to_string());
                     return self.dispatch(&EngineMessage::UiInputChanged {
                         action: drag.on_reorder,
                         value,
@@ -873,7 +908,12 @@ impl GlacierUI {
                     None => submit_task,
                 };
             }
-            EngineMessage::UiEditorAction { binding, on_change, action, readonly } => {
+            EngineMessage::UiEditorAction {
+                binding,
+                on_change,
+                action,
+                readonly,
+            } => {
                 // Read-only (<textarea readonly>): ignora EDIÇÕES (digitar/apagar/
                 // colar), mantendo navegação/seleção/scroll — o texto continua
                 // selecionável, copiável e rolável, só não é alterável.
@@ -938,7 +978,9 @@ impl GlacierUI {
             },
         };
 
-        self.run_on_owner(&owner, false, move |comp, ctx| route(comp, &bare_action, ctx))
+        self.run_on_owner(&owner, false, move |comp, ctx| {
+            route(comp, &bare_action, ctx)
+        })
     }
 
     /// Borrows the component named `owner`, runs `run` against it and a fresh
@@ -962,11 +1004,37 @@ impl GlacierUI {
     ) -> iced::Task<EngineMessage> {
         // Disjoint per-field borrows (`components` vs `context_data`) are
         // accepted by the borrow checker when done inline like this.
-        let (nav, effects, dialog, toasts, fetches, streams, stream_cmds, timers, windows, broadcasts, close_self, editor_appends) = if let Some(comp) = self.components.get_mut(owner) {
+        let (
+            nav,
+            effects,
+            dialog,
+            toasts,
+            fetches,
+            streams,
+            stream_cmds,
+            timers,
+            windows,
+            broadcasts,
+            close_self,
+            editor_appends,
+        ) = if let Some(comp) = self.components.get_mut(owner) {
             let mut ctx = component::Context::new(&mut self.context_data);
             ctx.set_viewport(self.inputs.viewport());
             run(comp.as_mut(), &mut ctx);
-            (ctx.nav, ctx.effects, ctx.dialog, ctx.toasts, ctx.fetches, ctx.streams, ctx.stream_cmds, ctx.timers, ctx.windows, ctx.broadcasts, ctx.close_self, ctx.editor_appends)
+            (
+                ctx.nav,
+                ctx.effects,
+                ctx.dialog,
+                ctx.toasts,
+                ctx.fetches,
+                ctx.streams,
+                ctx.stream_cmds,
+                ctx.timers,
+                ctx.windows,
+                ctx.broadcasts,
+                ctx.close_self,
+                ctx.editor_appends,
+            )
         } else {
             return iced::Task::none();
         };
@@ -1044,9 +1112,14 @@ impl GlacierUI {
         for req in fetches {
             let id = req.id;
             let owner_name = owner.to_string();
-            tasks.push(iced::Task::perform(crate::net::perform(req), move |result| {
-                EngineMessage::LuauResume { owner: owner_name.clone(), id, result }
-            }));
+            tasks.push(iced::Task::perform(
+                crate::net::perform(req),
+                move |result| EngineMessage::LuauResume {
+                    owner: owner_name.clone(),
+                    id,
+                    result,
+                },
+            ));
         }
 
         // Each `after(ms, fn)` becomes a `tokio::time::sleep` task; on firing it
@@ -1059,7 +1132,10 @@ impl GlacierUI {
             let dur = std::time::Duration::from_millis(t.delay_ms);
             tasks.push(iced::Task::perform(
                 async move { tokio::time::sleep(dur).await },
-                move |()| EngineMessage::LuauTimer { owner: owner_name.clone(), id },
+                move |()| EngineMessage::LuauTimer {
+                    owner: owner_name.clone(),
+                    id,
+                },
             ));
         }
 
@@ -1129,7 +1205,9 @@ impl GlacierUI {
         let Some(owner) = self.current_screen.clone() else {
             return iced::Task::none();
         };
-        self.run_on_owner(&owner, false, |comp, ctx| comp.on_broadcast(event, payload, ctx))
+        self.run_on_owner(&owner, false, |comp, ctx| {
+            comp.on_broadcast(event, payload, ctx)
+        })
     }
 
     /// Aggregates the [`Component::subscription`] of every registered component
@@ -1165,17 +1243,18 @@ impl GlacierUI {
 
     /// Parses and stores a component plus its imports, without re-evaluating.
     fn register_component_inner(&mut self, name: &str, path: &str) -> Result<()> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| GlacierError::io("template", path, e))?;
+        let content =
+            std::fs::read_to_string(path).map_err(|e| GlacierError::io("template", path, e))?;
 
-        let (ast, _script) = parse_markup(Some(path), &content)
-            .map_err(|e| e.in_component(name))?;
+        let (ast, _script) =
+            parse_markup(Some(path), &content).map_err(|e| e.in_component(name))?;
 
         let mod_time = std::fs::metadata(path)
             .and_then(|m| m.modified())
             .unwrap_or_else(|_| SystemTime::now());
 
-        self.registered_components.insert(name.to_string(), path.to_string());
+        self.registered_components
+            .insert(name.to_string(), path.to_string());
         self.inputs.insert_template(name.to_string(), ast.clone());
         self.file_mod_times.insert(name.to_string(), mod_time);
         // An explicit registration overrides any lib builtin of this name.
@@ -1281,8 +1360,11 @@ impl GlacierUI {
     fn load_data_file(&mut self, key: &str, path: &str) -> Result<()> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| GlacierError::io("arquivo de dados", path, e))?;
-        let value: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| GlacierError::Json { path: path.to_string(), source: e })?;
+        let value: serde_json::Value =
+            serde_json::from_str(&content).map_err(|e| GlacierError::Json {
+                path: path.to_string(),
+                source: e,
+            })?;
 
         merge_json(&mut self.context_data, key, &value);
 
@@ -1299,8 +1381,8 @@ impl GlacierUI {
     /// Loads a JSON palette `theme` file and sets it as the app theme. Tracks
     /// the source for hot-reload.
     fn load_theme_file(&mut self, path: &str) -> Result<()> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| GlacierError::io("tema", path, e))?;
+        let content =
+            std::fs::read_to_string(path).map_err(|e| GlacierError::io("tema", path, e))?;
         let theme = parse_theme(&content, path)?;
 
         let mod_time = std::fs::metadata(path)
@@ -1553,7 +1635,10 @@ impl GlacierUI {
             let ctx_val = self.context_data.get(&b).cloned().unwrap_or_default();
             let last = self.editor_synced.get(&b);
             if !self.editors.contains_key(&b) || last != Some(&ctx_val) {
-                self.editors.insert(b.clone(), iced::widget::text_editor::Content::with_text(&ctx_val));
+                self.editors.insert(
+                    b.clone(),
+                    iced::widget::text_editor::Content::with_text(&ctx_val),
+                );
                 self.editor_synced.insert(b, ctx_val);
             }
         }
@@ -1568,19 +1653,26 @@ impl GlacierUI {
     /// renderizar uma árvore velha em silêncio; o `&self` (exigido pelo `view`
     /// do iced) impede avaliar na hora.
     pub fn render<'a>(&'a self, component_name: &str) -> Result<iced::Element<'a, EngineMessage>> {
-        let evaluated_ast = self.evaluated_templates.get(component_name).ok_or_else(|| {
-            // Distingue "nome errado" de "template fora de uso": são causas
-            // diferentes, com saídas diferentes, e confundi-las é o que faz um
-            // erro de framework virar meia hora de depuração.
-            if self.inputs.has_template(component_name) {
-                GlacierError::NotEvaluated(component_name.to_string())
-            } else {
-                GlacierError::UnknownComponent(component_name.to_string())
-            }
-        })?;
+        let evaluated_ast = self
+            .evaluated_templates
+            .get(component_name)
+            .ok_or_else(|| {
+                // Distingue "nome errado" de "template fora de uso": são causas
+                // diferentes, com saídas diferentes, e confundi-las é o que faz um
+                // erro de framework virar meia hora de depuração.
+                if self.inputs.has_template(component_name) {
+                    GlacierError::NotEvaluated(component_name.to_string())
+                } else {
+                    GlacierError::UnknownComponent(component_name.to_string())
+                }
+            })?;
 
         // Render the evaluated AST to Iced Widgets
-        Ok(render_node(evaluated_ast, &self.context_data, &self.editors))
+        Ok(render_node(
+            evaluated_ast,
+            &self.context_data,
+            &self.editors,
+        ))
     }
 
     /// Checks registered XML files for changes and re-parses them if modified.
@@ -1591,17 +1683,19 @@ impl GlacierUI {
 
         for (name, path) in &self.registered_components {
             if let Ok(metadata) = std::fs::metadata(path)
-                && let Ok(modified) = metadata.modified() {
-                    let last_modified = self.file_mod_times.get(name);
-                    if last_modified.is_none_or(|&last| modified > last) {
-                        // File changed, reload it (XML).
-                        if let Ok(content) = std::fs::read_to_string(path)
-                            && let Ok((new_ast, _script)) = parse_markup(Some(path.as_str()), &content) {
-                                updates.push((name.clone(), new_ast, modified));
-                                reloaded.push(name.clone());
-                            }
+                && let Ok(modified) = metadata.modified()
+            {
+                let last_modified = self.file_mod_times.get(name);
+                if last_modified.is_none_or(|&last| modified > last) {
+                    // File changed, reload it (XML).
+                    if let Ok(content) = std::fs::read_to_string(path)
+                        && let Ok((new_ast, _script)) = parse_markup(Some(path.as_str()), &content)
+                    {
+                        updates.push((name.clone(), new_ast, modified));
+                        reloaded.push(name.clone());
                     }
                 }
+            }
         }
 
         // Detect changed `.gss` files the same way. Only global sheets carry a
@@ -1615,15 +1709,19 @@ impl GlacierUI {
             if let Ok(modified) = std::fs::metadata(path).and_then(|m| m.modified()) {
                 let last_modified = self.file_mod_times.get(&stylesheet_key(path));
                 if last_modified.is_none_or(|&last| modified > last)
-                    && let Ok(content) = std::fs::read_to_string(path) {
-                        match stylesheet::StyleSheet::parse(&content) {
-                            Ok(sheet) => {
-                                sheet_updates.push((path.clone(), sheet, modified));
-                                reloaded.push(path.clone());
-                            }
-                            Err(e) => eprintln!("Stylesheet '{}' has an error, keeping the previous version: {}", path, e),
+                    && let Ok(content) = std::fs::read_to_string(path)
+                {
+                    match stylesheet::StyleSheet::parse(&content) {
+                        Ok(sheet) => {
+                            sheet_updates.push((path.clone(), sheet, modified));
+                            reloaded.push(path.clone());
                         }
+                        Err(e) => eprintln!(
+                            "Stylesheet '{}' has an error, keeping the previous version: {}",
+                            path, e
+                        ),
                     }
+                }
             }
         }
 
@@ -1652,14 +1750,20 @@ impl GlacierUI {
         // Reload a changed `<link rel="data">` JSON file (re-merged into context).
         for (key, path) in self.data_sources.clone() {
             if let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) {
-                let changed = self.file_mod_times.get(&data_key(&path)).is_none_or(|&last| modified > last);
+                let changed = self
+                    .file_mod_times
+                    .get(&data_key(&path))
+                    .is_none_or(|&last| modified > last);
                 if changed {
                     match self.load_data_file(&key, &path) {
                         Ok(()) => {
                             reloaded.push(path.clone());
                             dirty = true;
                         }
-                        Err(e) => eprintln!("Data file '{}' has an error, keeping the previous version: {}", path, e),
+                        Err(e) => eprintln!(
+                            "Data file '{}' has an error, keeping the previous version: {}",
+                            path, e
+                        ),
                     }
                 }
             }
@@ -1667,18 +1771,25 @@ impl GlacierUI {
 
         // Reload a changed `<link rel="theme">` palette file.
         if let Some(path) = self.theme_path.clone()
-            && let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) {
-                let changed = self.file_mod_times.get(&theme_key(&path)).is_none_or(|&last| modified > last);
-                if changed {
-                    match self.load_theme_file(&path) {
-                        Ok(()) => {
-                            reloaded.push(path.clone());
-                            dirty = true;
-                        }
-                        Err(e) => eprintln!("Theme '{}' has an error, keeping the previous version: {}", path, e),
+            && let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified())
+        {
+            let changed = self
+                .file_mod_times
+                .get(&theme_key(&path))
+                .is_none_or(|&last| modified > last);
+            if changed {
+                match self.load_theme_file(&path) {
+                    Ok(()) => {
+                        reloaded.push(path.clone());
+                        dirty = true;
                     }
+                    Err(e) => eprintln!(
+                        "Theme '{}' has an error, keeping the previous version: {}",
+                        path, e
+                    ),
                 }
             }
+        }
 
         if dirty {
             // Re-evaluate all templates against the new markup/styles/data. O
@@ -1715,7 +1826,10 @@ fn parse_markup(path: Option<&str>, content: &str) -> Result<(UiNode, Option<Str
     let markup = eval::normalize_bare_directives(&markup);
     // `content` (e não `markup`) como fonte dos trechos: o erro deve mostrar a
     // linha que o autor escreveu, não a que o pré-processamento produziu.
-    Ok((UiNode::parse_xml_with_source(&markup, content, path)?, script))
+    Ok((
+        UiNode::parse_xml_with_source(&markup, content, path)?,
+        script,
+    ))
 }
 
 /// Namespaced keys under which a resource's modification time is stored in
@@ -1743,9 +1857,11 @@ fn theme_key(path: &str) -> String {
 /// the engine can keep a stateful editor buffer per binding.
 fn collect_textarea_bindings(node: &UiNode, out: &mut Vec<String>) {
     if let NodeType::TextArea { value_var, .. } = &node.kind
-        && !value_var.is_empty() && !out.contains(value_var) {
-            out.push(value_var.clone());
-        }
+        && !value_var.is_empty()
+        && !out.contains(value_var)
+    {
+        out.push(value_var.clone());
+    }
     for child in &node.children {
         collect_textarea_bindings(child, out);
     }
@@ -1775,13 +1891,14 @@ fn collect_inline_styles(
     global_out: &mut Vec<(String, u32)>,
 ) {
     if let NodeType::Style { css, scoped, line } = &node.kind
-        && !css.trim().is_empty() {
-            if *scoped {
-                scoped_out.push((css.clone(), *line));
-            } else {
-                global_out.push((css.clone(), *line));
-            }
+        && !css.trim().is_empty()
+    {
+        if *scoped {
+            scoped_out.push((css.clone(), *line));
+        } else {
+            global_out.push((css.clone(), *line));
         }
+    }
     for child in &node.children {
         collect_inline_styles(child, scoped_out, global_out);
     }
@@ -1791,9 +1908,10 @@ fn collect_inline_styles(
 /// document order. Links with an empty `href` are skipped.
 fn collect_links(node: &UiNode, out: &mut Vec<(String, String, Option<String>)>) {
     if let NodeType::Link { rel, href, name } = &node.kind
-        && !href.is_empty() {
-            out.push((rel.clone(), href.clone(), name.clone()));
-        }
+        && !href.is_empty()
+    {
+        out.push((rel.clone(), href.clone(), name.clone()));
+    }
     for child in &node.children {
         collect_links(child, out);
     }
@@ -1812,14 +1930,16 @@ fn build_stream(key: &net::StreamKey) -> impl iced::futures::Stream<Item = Engin
     let owner = key.owner.clone();
     let id = key.id;
     let events = match key.kind {
-        component::StreamKind::Sse => {
-            net::sse(key.url.clone(), key.headers.clone()).left_stream()
-        }
+        component::StreamKind::Sse => net::sse(key.url.clone(), key.headers.clone()).left_stream(),
         component::StreamKind::Ws => {
             net::websocket(key.url.clone(), key.headers.clone()).right_stream()
         }
     };
-    events.map(move |event| EngineMessage::LuauStream { owner: owner.clone(), id, event })
+    events.map(move |event| EngineMessage::LuauStream {
+        owner: owner.clone(),
+        id,
+        event,
+    })
 }
 
 /// Abre `url` no navegador padrão do SO (best-effort, não bloqueante). Usado
@@ -1873,11 +1993,17 @@ fn tab_focus_from_event(
     _status: iced::event::Status,
     _window: iced::window::Id,
 ) -> Option<EngineMessage> {
-    use iced::keyboard::{key::Named, Event as Kbd, Key};
+    use iced::keyboard::{Event as Kbd, Key, key::Named};
     match event {
-        iced::Event::Keyboard(Kbd::KeyPressed { key: Key::Named(Named::Tab), modifiers, .. }) => {
-            Some(if modifiers.shift() { EngineMessage::FocusPrev } else { EngineMessage::FocusNext })
-        }
+        iced::Event::Keyboard(Kbd::KeyPressed {
+            key: Key::Named(Named::Tab),
+            modifiers,
+            ..
+        }) => Some(if modifiers.shift() {
+            EngineMessage::FocusPrev
+        } else {
+            EngineMessage::FocusNext
+        }),
         _ => None,
     }
 }
@@ -1891,9 +2017,10 @@ fn viewport_from_event(
     _window: iced::window::Id,
 ) -> Option<EngineMessage> {
     match event {
-        iced::Event::Window(iced::window::Event::Resized(size)) => {
-            Some(EngineMessage::Viewport { width: size.width, height: size.height })
-        }
+        iced::Event::Window(iced::window::Event::Resized(size)) => Some(EngineMessage::Viewport {
+            width: size.width,
+            height: size.height,
+        }),
         _ => None,
     }
 }
@@ -1909,21 +2036,30 @@ fn reorder_context_json(
     reorder_key: &str,
     order: &[String],
 ) {
-    let Some(json_str) = context.get(list) else { return };
-    let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(json_str) else { return };
+    let Some(json_str) = context.get(list) else {
+        return;
+    };
+    let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(json_str)
+    else {
+        return;
+    };
 
     let mut by_key: HashMap<String, serde_json::Value> = HashMap::new();
     let mut leftovers: Vec<serde_json::Value> = Vec::new();
     for item in arr {
-        match item.get(reorder_key).and_then(|v| v.as_str()).map(String::from) {
-            Some(k) => { by_key.insert(k, item); }
+        match item
+            .get(reorder_key)
+            .and_then(|v| v.as_str())
+            .map(String::from)
+        {
+            Some(k) => {
+                by_key.insert(k, item);
+            }
             None => leftovers.push(item),
         }
     }
-    let mut reordered: Vec<serde_json::Value> = order
-        .iter()
-        .filter_map(|k| by_key.remove(k))
-        .collect();
+    let mut reordered: Vec<serde_json::Value> =
+        order.iter().filter_map(|k| by_key.remove(k)).collect();
     reordered.extend(by_key.into_values());
     reordered.extend(leftovers);
 
@@ -1965,14 +2101,24 @@ fn json_to_string(value: &serde_json::Value) -> String {
 /// hex colors for `background`, `text`, `primary`, `success` and `danger`; an
 /// optional `name` labels the theme.
 fn parse_theme(content: &str, path: &str) -> Result<iced::Theme> {
-    let value: serde_json::Value = serde_json::from_str(content)
-        .map_err(|e| GlacierError::Json { path: path.to_string(), source: e })?;
-    let bad = |message: String| GlacierError::Theme { path: path.to_string(), message };
+    let value: serde_json::Value =
+        serde_json::from_str(content).map_err(|e| GlacierError::Json {
+            path: path.to_string(),
+            source: e,
+        })?;
+    let bad = |message: String| GlacierError::Theme {
+        path: path.to_string(),
+        message,
+    };
     let obj = value
         .as_object()
         .ok_or_else(|| bad("o tema precisa ser um objeto JSON de cores".to_string()))?;
 
-    let name = obj.get("name").and_then(|n| n.as_str()).unwrap_or("custom").to_string();
+    let name = obj
+        .get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or("custom")
+        .to_string();
     let color = |field: &str| -> Result<iced::Color> {
         let hex = obj
             .get(field)
@@ -1989,8 +2135,7 @@ fn parse_theme(content: &str, path: &str) -> Result<iced::Theme> {
         success: color("success")?,
         // `warning` was added to the palette in iced 0.14; keep it optional in
         // the theme JSON and fall back to a sensible amber when absent.
-        warning: color("warning")
-            .unwrap_or_else(|_| widget::parse_hex_color("#D29922").unwrap()),
+        warning: color("warning").unwrap_or_else(|_| widget::parse_hex_color("#D29922").unwrap()),
         danger: color("danger")?,
     };
     Ok(iced::Theme::custom(name, palette))
@@ -2097,7 +2242,10 @@ mod dirty_tracking_tests {
 
         m.define_data("titulo", "depois");
         let c = conteudo(&mut m);
-        assert!(c.contains(&"titulo: depois".to_string()), "o cache serviu a árvore velha: {c:?}");
+        assert!(
+            c.contains(&"titulo: depois".to_string()),
+            "o cache serviu a árvore velha: {c:?}"
+        );
         // E a mudança tem de atravessar a fronteira do componente: `titulo` chega
         // lá dentro como a prop `rotulo`, então a subárvore memoizada dele
         // precisa ter sido invalidada pela mudança da PROP, não da chave.
@@ -2118,9 +2266,18 @@ mod dirty_tracking_tests {
 
         m.define_data("linhas", r#"[{"nome":"a"},{"nome":"B!"}]"#);
         let c = conteudo(&mut m);
-        assert!(c.contains(&"a".to_string()), "o item intacto deve continuar lá: {c:?}");
-        assert!(c.contains(&"B!".to_string()), "o item alterado deve refletir: {c:?}");
-        assert!(!c.contains(&"b".to_string()), "o valor velho não pode sobreviver: {c:?}");
+        assert!(
+            c.contains(&"a".to_string()),
+            "o item intacto deve continuar lá: {c:?}"
+        );
+        assert!(
+            c.contains(&"B!".to_string()),
+            "o item alterado deve refletir: {c:?}"
+        );
+        assert!(
+            !c.contains(&"b".to_string()),
+            "o valor velho não pode sobreviver: {c:?}"
+        );
     }
 
     // 3. Remover um item o tira da árvore (e a entrada órfã do cache é varrida,
@@ -2135,7 +2292,10 @@ mod dirty_tracking_tests {
 
         m.define_data("linhas", r#"[{"nome":"a"}]"#);
         let c = conteudo(&mut m);
-        assert!(!c.contains(&"b".to_string()), "o item removido continuou na árvore: {c:?}");
+        assert!(
+            !c.contains(&"b".to_string()),
+            "o item removido continuou na árvore: {c:?}"
+        );
     }
 
     // 4. O ganho: mudar uma chave que NINGUÉM lê não reconstrói nada. Se este
@@ -2195,7 +2355,10 @@ mod dirty_tracking_tests {
         m.load_stylesheet(gss.to_str().unwrap()).unwrap();
         m.register(Box::new(TelaClasse)).unwrap();
         m.set_initial_screen("tela_classe");
-        assert_eq!(m.evaluated("tela_classe").unwrap().padding.as_deref(), Some("4"));
+        assert_eq!(
+            m.evaluated("tela_classe").unwrap().padding.as_deref(),
+            Some("4")
+        );
 
         // Mesmo template, mesmo contexto — só o estilo mudou.
         std::fs::write(&gss, ".alvo { padding: 99; }").unwrap();
@@ -2221,13 +2384,21 @@ mod dirty_tracking_tests {
         let e0 = inputs.epoch();
 
         // Sem `@media` no sheet, um resize não muda estilo nenhum.
-        assert!(!inputs.set_viewport((800.0, 600.0)), "resize sem @media não cruza nada");
-        assert_eq!(inputs.epoch(), e0, "resize inócuo não pode invalidar o cache");
+        assert!(
+            !inputs.set_viewport((800.0, 600.0)),
+            "resize sem @media não cruza nada"
+        );
+        assert_eq!(
+            inputs.epoch(),
+            e0,
+            "resize inócuo não pode invalidar o cache"
+        );
 
         // Uma folha nova muda o estilo de qualquer nó: a época avança.
         inputs.install_stylesheet(
             "app.gss".into(),
-            stylesheet::StyleSheet::parse("@media (max-width: 500) { .a { padding: 1; } }").unwrap(),
+            stylesheet::StyleSheet::parse("@media (max-width: 500) { .a { padding: 1; } }")
+                .unwrap(),
         );
         let e1 = inputs.epoch();
         assert!(e1 > e0, "instalar folha tem de avançar a época");
@@ -2239,7 +2410,11 @@ mod dirty_tracking_tests {
         // Mas mover de 400 para 450 (ambos abaixo de 500) não muda nada.
         let e2 = inputs.epoch();
         assert!(!inputs.set_viewport((450.0, 600.0)));
-        assert_eq!(inputs.epoch(), e2, "resize dentro da mesma faixa não invalida");
+        assert_eq!(
+            inputs.epoch(),
+            e2,
+            "resize dentro da mesma faixa não invalida"
+        );
     }
 
     struct TelaClasse;
@@ -2301,7 +2476,10 @@ mod scoped_eval_tests {
         motor.set_initial_screen("a");
         motor.define_data("msg", "oi");
 
-        assert!(motor.evaluated("b").is_ok(), "avaliado na hora que foi pedido");
+        assert!(
+            motor.evaluated("b").is_ok(),
+            "avaliado na hora que foi pedido"
+        );
         // E o cache é invalidado por uma mudança de contexto, para não servir
         // uma árvore velha depois.
         motor.define_data("msg", "tchau");
@@ -2320,7 +2498,10 @@ mod scoped_eval_tests {
         motor.define_data("msg", "oi");
 
         assert!(motor.render("a").is_ok());
-        assert!(motor.render("b").is_ok(), "o fixado sobrevive à reavaliação");
+        assert!(
+            motor.render("b").is_ok(),
+            "o fixado sobrevive à reavaliação"
+        );
     }
 
     // Renderizar um template registrado mas fora de uso não devolve uma árvore
@@ -2333,12 +2514,16 @@ mod scoped_eval_tests {
         motor.set_initial_screen("a");
 
         // `Element` não é Debug, então `unwrap_err()` não serve — casamos o Err.
-        let Err(err) = motor.render("b") else { panic!("deveria falhar") };
+        let Err(err) = motor.render("b") else {
+            panic!("deveria falhar")
+        };
         assert!(matches!(err, GlacierError::NotEvaluated(_)), "{err}");
         assert!(err.to_string().contains("keep_evaluated"), "{err}");
 
         // Nome que não existe é outro erro (outra causa, outra saída).
-        let Err(err) = motor.render("nao_existe") else { panic!("deveria falhar") };
+        let Err(err) = motor.render("nao_existe") else {
+            panic!("deveria falhar")
+        };
         assert!(matches!(err, GlacierError::UnknownComponent(_)), "{err}");
     }
 }
@@ -2357,7 +2542,9 @@ mod editor_append_tests {
 
         motor.apply_editor_appends(vec![("logs".to_string(), "linha 1\n".to_string())]);
         assert!(
-            motor.get_data("logs").is_some_and(|s| s.contains("linha 1")),
+            motor
+                .get_data("logs")
+                .is_some_and(|s| s.contains("linha 1")),
             "1º append deve refletir no ctx"
         );
 
@@ -2365,7 +2552,10 @@ mod editor_append_tests {
         let after = motor.get_data("logs").cloned().unwrap_or_default();
         let p1 = after.find("linha 1");
         let p2 = after.find("linha 2");
-        assert!(p1.is_some() && p2.is_some(), "ambas as linhas devem existir: {after:?}");
+        assert!(
+            p1.is_some() && p2.is_some(),
+            "ambas as linhas devem existir: {after:?}"
+        );
         assert!(p1 < p2, "linha 2 deve vir depois da linha 1");
 
         // ctx == editor_synced → a próxima reavaliação não reconstrói o Content.
@@ -2389,7 +2579,10 @@ mod effect_outcome_tests {
 
         let only_toast = EffectOutcome::toast(ToastSpec::success("done"));
         assert!(only_toast.patch.is_empty());
-        assert_eq!(only_toast.toast.as_ref().map(|t| t.kind), Some(ToastKind::Success));
+        assert_eq!(
+            only_toast.toast.as_ref().map(|t| t.kind),
+            Some(ToastKind::Success)
+        );
 
         let both = EffectOutcome::data(vec![("k".to_string(), "v".to_string())])
             .with_toast(ToastSpec::error("boom"));

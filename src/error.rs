@@ -248,7 +248,11 @@ impl GlacierError {
     /// Atalho para [`GlacierError::Io`], usado por todo call-site de
     /// `fs::read_to_string` no motor.
     pub(crate) fn io(what: &'static str, path: impl Into<String>, source: std::io::Error) -> Self {
-        Self::Io { what, path: path.into(), source }
+        Self::Io {
+            what,
+            path: path.into(),
+            source,
+        }
     }
 
     /// O diagnóstico posicional deste erro, quando ele tem um (XML/GSS). Deixa
@@ -266,9 +270,10 @@ impl GlacierError {
     /// parser — que só vê texto — não sabe.
     pub(crate) fn in_component(mut self, name: &str) -> Self {
         if let Self::Xml(d) | Self::Gss(d) = &mut self
-            && d.component.is_none() {
-                d.component = Some(name.to_string());
-            }
+            && d.component.is_none()
+        {
+            d.component = Some(name.to_string());
+        }
         self
     }
 }

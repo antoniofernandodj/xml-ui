@@ -24,7 +24,9 @@ use glacier_ui::{Component, Context, GlacierDaemon, Template};
 struct PseudoEstados;
 
 impl Component for PseudoEstados {
-    fn name(&self) -> &str { "pseudo_estados" }
+    fn name(&self) -> &str {
+        "pseudo_estados"
+    }
 
     fn template(&self) -> Template {
         Template::File("examples/pseudo_estados/pseudo_estados.gv".into())
@@ -44,7 +46,8 @@ impl Component for PseudoEstados {
         match action {
             // TextInput/Select/Checkbox/Toggle usam o próprio nome da chave
             // de contexto como ação — o handler só faz o round-trip.
-            "texto" | "cor_selecionada" | "marcado" | "marcado_travado" | "ligado" | "ligado_travado" => {
+            "texto" | "cor_selecionada" | "marcado" | "marcado_travado" | "ligado"
+            | "ligado_travado" => {
                 ctx.set(action, value.unwrap_or_default());
             }
             "enviar" => {

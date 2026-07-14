@@ -82,8 +82,8 @@
 //! com checklist e armadilhas, em `BUILTINS.md`.
 mod badge;
 
-use crate::component::Component;
 use crate::builtins::badge::Badge;
+use crate::component::Component;
 
 /// Todos os componentes embutidos, na ordem em que o motor os registra.
 ///

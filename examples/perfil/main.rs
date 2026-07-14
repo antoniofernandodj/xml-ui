@@ -24,14 +24,10 @@ impl Component for Perfil {
     }
 
     fn init(&mut self, ctx: &mut Context) {
-        let user_name =
-            ContextVar::new("user_name", "Clara Silva");
-        let user_role =
-            ContextVar::new("user_role", "Engenheira de Software Senior");
-        let texto_botao =
-            ContextVar::new("texto_botao", "Seguir");
-        let btn_color =
-            ContextVar::new("btn_color", "#313244"); // Sleek base button color
+        let user_name = ContextVar::new("user_name", "Clara Silva");
+        let user_role = ContextVar::new("user_role", "Engenheira de Software Senior");
+        let texto_botao = ContextVar::new("texto_botao", "Seguir");
+        let btn_color = ContextVar::new("btn_color", "#313244"); // Sleek base button color
 
         ctx.set_var(&user_name);
         ctx.set_var(&user_role);

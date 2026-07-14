@@ -16,7 +16,7 @@
 //!     .with_button(DialogButton::yes("confirmar_exclusao")));
 //! ```
 
-use iced::widget::{button, column, container, mouse_area, row, text, Space};
+use iced::widget::{Space, button, column, container, mouse_area, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Vector};
 
 use crate::widget::EngineMessage;
@@ -82,20 +82,40 @@ pub struct DialogButton {
 impl DialogButton {
     /// Um botão com rótulo, ação e papel explícitos.
     pub fn new(label: impl Into<String>, action: impl Into<String>, role: ButtonRole) -> Self {
-        Self { label: label.into(), action: action.into(), role }
+        Self {
+            label: label.into(),
+            action: action.into(),
+            role,
+        }
     }
 
     /// Atalhos para os botões padrão de um `QMessageBox`. O rótulo é fixo em
     /// inglês (como os `StandardButton` do Qt); use [`DialogButton::new`]
     /// para rótulos localizados.
-    pub fn ok(action: impl Into<String>) -> Self { Self::new("OK", action, ButtonRole::Accept) }
-    pub fn yes(action: impl Into<String>) -> Self { Self::new("Yes", action, ButtonRole::Accept) }
-    pub fn no(action: impl Into<String>) -> Self { Self::new("No", action, ButtonRole::Neutral) }
-    pub fn cancel(action: impl Into<String>) -> Self { Self::new("Cancel", action, ButtonRole::Neutral) }
-    pub fn save(action: impl Into<String>) -> Self { Self::new("Save", action, ButtonRole::Accept) }
-    pub fn discard(action: impl Into<String>) -> Self { Self::new("Discard", action, ButtonRole::Destructive) }
-    pub fn retry(action: impl Into<String>) -> Self { Self::new("Retry", action, ButtonRole::Accept) }
-    pub fn close(action: impl Into<String>) -> Self { Self::new("Close", action, ButtonRole::Neutral) }
+    pub fn ok(action: impl Into<String>) -> Self {
+        Self::new("OK", action, ButtonRole::Accept)
+    }
+    pub fn yes(action: impl Into<String>) -> Self {
+        Self::new("Yes", action, ButtonRole::Accept)
+    }
+    pub fn no(action: impl Into<String>) -> Self {
+        Self::new("No", action, ButtonRole::Neutral)
+    }
+    pub fn cancel(action: impl Into<String>) -> Self {
+        Self::new("Cancel", action, ButtonRole::Neutral)
+    }
+    pub fn save(action: impl Into<String>) -> Self {
+        Self::new("Save", action, ButtonRole::Accept)
+    }
+    pub fn discard(action: impl Into<String>) -> Self {
+        Self::new("Discard", action, ButtonRole::Destructive)
+    }
+    pub fn retry(action: impl Into<String>) -> Self {
+        Self::new("Retry", action, ButtonRole::Accept)
+    }
+    pub fn close(action: impl Into<String>) -> Self {
+        Self::new("Close", action, ButtonRole::Neutral)
+    }
 }
 
 /// A especificação de um diálogo modal: ícone, título, mensagem, um texto de
@@ -199,7 +219,11 @@ pub fn overlay<'a>(spec: &'a DialogSpec, theme: &iced::Theme) -> Element<'a, Eng
 
     let mut header = row![].spacing(10).align_y(Alignment::Center);
     if spec.icon != DialogIcon::None {
-        header = header.push(text(spec.icon.glyph()).size(22).color(spec.icon.color(palette)));
+        header = header.push(
+            text(spec.icon.glyph())
+                .size(22)
+                .color(spec.icon.color(palette)),
+        );
     }
     header = header.push(text(spec.title.as_str()).size(18));
 
@@ -237,7 +261,11 @@ pub fn overlay<'a>(spec: &'a DialogSpec, theme: &iced::Theme) -> Element<'a, Eng
         .padding(20)
         .style(move |_theme: &iced::Theme| container::Style {
             background: Some(Background::Color(card_bg)),
-            border: Border { radius: iced::border::Radius::new(8.0), width: 1.0, color: card_border },
+            border: Border {
+                radius: iced::border::Radius::new(8.0),
+                width: 1.0,
+                color: card_border,
+            },
             shadow: Shadow {
                 color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
                 offset: Vector::new(0.0, 4.0),

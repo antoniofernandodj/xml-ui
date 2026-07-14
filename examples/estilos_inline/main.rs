@@ -15,7 +15,9 @@ struct Estilos {
 }
 
 impl Component for Estilos {
-    fn name(&self) -> &str { "estilos_inline" }
+    fn name(&self) -> &str {
+        "estilos_inline"
+    }
 
     fn template(&self) -> Template {
         Template::File("examples/estilos_inline/estilos_inline.gv".into())

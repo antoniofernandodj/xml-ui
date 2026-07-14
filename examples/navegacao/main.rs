@@ -23,9 +23,10 @@ impl Component for Tela {
 
     fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {
         if action == "mudar_nome"
-            && let Some(v) = value {
-                ctx.set("user_name", v);
-            }
+            && let Some(v) = value
+        {
+            ctx.set("user_name", v);
+        }
     }
 }
 
@@ -34,9 +35,18 @@ fn main() -> iced::Result {
         .title("Glacier - Navegação")
         .main(|motor| {
             let telas: [Tela; 3] = [
-                Tela { nome: "home", template: "examples/navegacao/nav_home.gv" },
-                Tela { nome: "perfil", template: "examples/navegacao/nav_perfil.gv" },
-                Tela { nome: "config", template: "examples/navegacao/nav_config.gv" },
+                Tela {
+                    nome: "home",
+                    template: "examples/navegacao/nav_home.gv",
+                },
+                Tela {
+                    nome: "perfil",
+                    template: "examples/navegacao/nav_perfil.gv",
+                },
+                Tela {
+                    nome: "config",
+                    template: "examples/navegacao/nav_config.gv",
+                },
             ];
             for tela in telas {
                 let nome = tela.nome;

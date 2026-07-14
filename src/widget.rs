@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use iced::widget::{
-    button, column, row, text, container, text_input, text_editor, image, svg, scrollable,
-    checkbox, toggler, rule, pick_list, mouse_area, Space, Tooltip,
-};
 use iced::widget::tooltip::Position as TooltipPosition;
+use iced::widget::{
+    Space, Tooltip, button, checkbox, column, container, image, mouse_area, pick_list, row, rule,
+    scrollable, svg, text, text_editor, text_input, toggler,
+};
+use std::collections::HashMap;
 
 /// One option of a `<Select>`: `label` is shown, `value` is dispatched. Equality
 /// (used by `pick_list` to mark the current selection) is by `value` only.
@@ -19,18 +19,26 @@ impl SelectOption {
     fn from_json(item: &serde_json::Value, label_field: &str, value_field: &str) -> Self {
         match item {
             serde_json::Value::Object(o) => {
-                let get = |k: &str| o.get(k).map(|v| match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                });
+                let get = |k: &str| {
+                    o.get(k).map(|v| match v {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    })
+                };
                 let label = get(label_field).unwrap_or_default();
                 let value = get(value_field).unwrap_or_else(|| label.clone());
                 Self { label, value }
             }
-            serde_json::Value::String(s) => Self { label: s.clone(), value: s.clone() },
+            serde_json::Value::String(s) => Self {
+                label: s.clone(),
+                value: s.clone(),
+            },
             other => {
                 let s = other.to_string();
-                Self { label: s.clone(), value: s }
+                Self {
+                    label: s.clone(),
+                    value: s,
+                }
             }
         }
     }
@@ -52,24 +60,30 @@ impl PartialEq for SelectOption {
 /// Owned by [`crate::GlacierUI`] and borrowed during render so the editors keep
 /// their content/cursor across frames (glacier is otherwise stateless).
 pub type EditorMap = HashMap<String, text_editor::Content>;
-use iced::{Element, Length, Alignment, Color, Border, Padding, Background, Font, Gradient};
-use iced::gradient::Linear;
+use crate::parser::{NodeType, UiNode};
 use iced::Radians;
-use crate::parser::{UiNode, NodeType};
+use iced::gradient::Linear;
+use iced::{Alignment, Background, Border, Color, Element, Font, Gradient, Length, Padding};
 
 /// Selects an `iced::Font` from a `font="..."` hint. `mono`/`monospace`/`code`
 /// map to the monospaced font; anything else returns `None` (default font).
 fn font_for(hint: &Option<String>) -> Option<Font> {
     match hint.as_deref().map(|s| s.to_ascii_lowercase()) {
         Some(ref s) if s == "mono" || s == "monospace" || s == "code" => Some(Font::MONOSPACE),
-        Some(ref s) if s == "bold" => Some(Font { weight: iced::font::Weight::Bold, ..Default::default() }),
+        Some(ref s) if s == "bold" => Some(Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        }),
         _ => None,
     }
 }
 
 /// Whether a context string should count as "checked"/true.
 fn is_truthy(s: &str) -> bool {
-    matches!(s.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on" | "sim")
+    matches!(
+        s.trim().to_ascii_lowercase().as_str(),
+        "true" | "1" | "yes" | "on" | "sim"
+    )
 }
 
 /// Maps `start`/`center`/`end` (and aliases) to a horizontal text alignment.
@@ -93,10 +107,11 @@ fn parse_gradient(spec: &str) -> Option<Gradient> {
     // An optional leading numeric token is the angle in degrees.
     if let Some(first) = tokens.peek()
         && !first.starts_with('#')
-            && let Ok(a) = first.trim_end_matches("deg").parse::<f32>() {
-                angle_deg = a;
-                tokens.next();
-            }
+        && let Ok(a) = first.trim_end_matches("deg").parse::<f32>()
+    {
+        angle_deg = a;
+        tokens.next();
+    }
     let colors: Vec<Color> = tokens.filter_map(parse_hex_color).collect();
     if colors.len() < 2 {
         return None;
@@ -114,17 +129,28 @@ fn background_for(node: &UiNode) -> Option<Background> {
     if let Some(g) = node.gradient.as_ref().and_then(|s| parse_gradient(s)) {
         return Some(Background::Gradient(g));
     }
-    node.background.as_ref().and_then(|bg| parse_hex_color(bg)).map(Background::Color)
+    node.background
+        .as_ref()
+        .and_then(|bg| parse_hex_color(bg))
+        .map(Background::Color)
 }
 
 #[derive(Debug, Clone)]
 pub enum EngineMessage {
     UiClick(String),
-    UiInputChanged { action: String, value: String },
+    UiInputChanged {
+        action: String,
+        value: String,
+    },
     /// An edit on a `<TextArea>`: `binding` is its `value` key, `action` is the
     /// editor action to apply to the kept `Content`, `on_change` is the action
     /// dispatched (with the new full text) after applying it.
-    UiEditorAction { binding: String, on_change: String, action: text_editor::Action, readonly: bool },
+    UiEditorAction {
+        binding: String,
+        on_change: String,
+        action: text_editor::Action,
+        readonly: bool,
+    },
     /// Navigate to the given screen (button with `navigateTo`).
     Navigate(String),
     /// Go back to the previous screen (button with `navigateBack`).
@@ -143,10 +169,19 @@ pub enum EngineMessage {
     /// Mouse-press on a reorderable item's `dragHandle`. `order` is the full
     /// identity snapshot (every item's `reorderKey` value, in current order) at
     /// the moment the drag started; `key` is this item's own identity.
-    DragStart { list: String, reorder_key: String, on_reorder: String, order: Vec<String>, key: String },
+    DragStart {
+        list: String,
+        reorder_key: String,
+        on_reorder: String,
+        order: Vec<String>,
+        key: String,
+    },
     /// Cursor entered another item of the same reorderable list while a drag is
     /// in progress — moves `key` to that item's position in the live order.
-    DragHover { list: String, key: String },
+    DragHover {
+        list: String,
+        key: String,
+    },
     /// Left mouse button released anywhere (global subscription): ends the
     /// drag in progress, if any, dispatching `on_reorder` with the final order.
     DragEnd,
@@ -159,7 +194,10 @@ pub enum EngineMessage {
     /// be filled with Enter alone. `next_focus` is the next input's stable id
     /// string (built by `form_input_id`), resolved into a real
     /// `iced::widget::text_input` focus by `GlacierUI::dispatch`.
-    UiSubmit { action: String, next_focus: Option<String> },
+    UiSubmit {
+        action: String,
+        next_focus: Option<String>,
+    },
     /// A button of the active [`crate::dialogs::DialogSpec`] was clicked.
     /// Closes the dialog; `action` is then routed to the owning component's
     /// `update()` just like a normal `UiClick`.
@@ -183,20 +221,34 @@ pub enum EngineMessage {
     /// Window was resized (global window-event subscription): updates the
     /// engine's tracked viewport and re-evaluates so `@media` blocks re-resolve.
     /// `width`/`height` are logical px.
-    Viewport { width: f32, height: f32 },
+    Viewport {
+        width: f32,
+        height: f32,
+    },
     /// A `fetch` requested by a component's Lua (`crate::lua`) finished: resume
     /// the suspended coroutine `id` on component `owner` with the HTTP result.
-    LuauResume { owner: String, id: u64, result: crate::component::FetchResult },
+    LuauResume {
+        owner: String,
+        id: u64,
+        result: crate::component::FetchResult,
+    },
     /// An event from a long-lived stream (`sse`/`websocket`) opened by a
     /// component's Lua: routed to `owner` so it can call the registered handler
     /// (`on_message`, …). `StreamEvent::Ready` also hands the engine the
     /// outbound command channel for WebSocket sends. See
     /// [`crate::GlacierUI::subscription`] and [`crate::net`].
-    LuauStream { owner: String, id: u64, event: crate::net::StreamEvent },
+    LuauStream {
+        owner: String,
+        id: u64,
+        event: crate::net::StreamEvent,
+    },
     /// Um temporizador pedido por `after(ms, fn)` na Lua de um componente
     /// venceu: chama [`crate::Component::resume_timer`] com o `id` do
     /// temporizador em `owner`. Ver [`crate::component::PendingTimer`].
-    LuauTimer { owner: String, id: u64 },
+    LuauTimer {
+        owner: String,
+        id: u64,
+    },
 }
 
 /// The stable focus id of a form-bound `TextInput`: `scope` is the enclosing
@@ -306,32 +358,50 @@ pub fn render_node<'a>(
     // fantasma); este retorno cobre os demais caminhos (raiz, filho único de
     // Container/Scrollable/MouseArea) com um `Space` de tamanho zero.
     if node.hidden == Some(true) {
-        return Space::new().width(Length::Shrink).height(Length::Shrink).into();
+        return Space::new()
+            .width(Length::Shrink)
+            .height(Length::Shrink)
+            .into();
     }
     let mut element: Element<'a, EngineMessage> = match &node.kind {
-        NodeType::Text { content, size, bold, color } => {
+        NodeType::Text {
+            content,
+            size,
+            bold,
+            color,
+        } => {
             let mut t = text(content.as_str());
             if let Some(s) = size {
                 t = t.size(*s);
             }
             // `bold` and `font` both influence the font; bold wins, else the hint.
             if *bold {
-                t = t.font(Font { weight: iced::font::Weight::Bold, ..Default::default() });
+                t = t.font(Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                });
             } else if let Some(f) = font_for(&node.font) {
                 t = t.font(f);
             }
             if let Some(c_str) = color
-                && let Some(col) = parse_hex_color(c_str) {
-                    t = t.color(col);
-                }
+                && let Some(col) = parse_hex_color(c_str)
+            {
+                t = t.color(col);
+            }
             if let Some(align) = parse_text_align(&node.text_align) {
                 t = t.align_x(align);
             }
             t.width(parse_length(&node.width))
-             .height(parse_length(&node.height))
-             .into()
+                .height(parse_length(&node.height))
+                .into()
         }
-        NodeType::Button { text: btn_text, on_click, navigate_to, navigate_back, color } => {
+        NodeType::Button {
+            text: btn_text,
+            on_click,
+            navigate_to,
+            navigate_back,
+            color,
+        } => {
             let mut t = text(btn_text.as_str());
             if let Some(f) = font_for(&node.font) {
                 t = t.font(f);
@@ -362,81 +432,94 @@ pub fn render_node<'a>(
             }
 
             if let Some(c_str) = color
-                && let Some(col) = parse_hex_color(c_str) {
-                    let br_radius = node.border_radius.unwrap_or(0.0);
-                    let br_width = node.border_width.unwrap_or(0.0);
-                    let br_color = node.border_color.as_ref()
-                        .and_then(|c| parse_hex_color(c))
-                        .unwrap_or(Color::TRANSPARENT);
-                    // Cor do rótulo: `textColor`/`.classe { text-color }`, senão
-                    // branco (default histórico). O `color` do botão é o fundo.
-                    let label_col = node.text_color.as_deref()
+                && let Some(col) = parse_hex_color(c_str)
+            {
+                let br_radius = node.border_radius.unwrap_or(0.0);
+                let br_width = node.border_width.unwrap_or(0.0);
+                let br_color = node
+                    .border_color
+                    .as_ref()
+                    .and_then(|c| parse_hex_color(c))
+                    .unwrap_or(Color::TRANSPARENT);
+                // Cor do rótulo: `textColor`/`.classe { text-color }`, senão
+                // branco (default histórico). O `color` do botão é o fundo.
+                let label_col = node
+                    .text_color
+                    .as_deref()
+                    .and_then(parse_hex_color)
+                    .unwrap_or(Color::WHITE);
+                // Overlays por pseudo-estado (`.classe:hover/:active/:disabled { }`),
+                // já resolvidos em `eval.rs`; `None` quando o `.gss` não declara
+                // aquele estado — nesse caso cai no auto-derive histórico
+                // (±10% de luminância) ou, para `disabled`, 50% de alfa.
+                let hover_ov = node.hover_style.as_deref().cloned();
+                let active_ov = node.active_style.as_deref().cloned();
+                let disabled_ov = node.disabled_style.as_deref().cloned();
+                btn = btn.style(move |_theme, status| {
+                    use iced::widget::button::Status;
+                    let overlay = match status {
+                        Status::Hovered => hover_ov.as_ref(),
+                        Status::Pressed => active_ov.as_ref(),
+                        Status::Disabled => disabled_ov.as_ref(),
+                        Status::Active => None,
+                    };
+                    let bg_color = overlay
+                        .and_then(|r| r.background.as_deref())
                         .and_then(parse_hex_color)
-                        .unwrap_or(Color::WHITE);
-                    // Overlays por pseudo-estado (`.classe:hover/:active/:disabled { }`),
-                    // já resolvidos em `eval.rs`; `None` quando o `.gss` não declara
-                    // aquele estado — nesse caso cai no auto-derive histórico
-                    // (±10% de luminância) ou, para `disabled`, 50% de alfa.
-                    let hover_ov = node.hover_style.as_deref().cloned();
-                    let active_ov = node.active_style.as_deref().cloned();
-                    let disabled_ov = node.disabled_style.as_deref().cloned();
-                    btn = btn.style(move |_theme, status| {
-                        use iced::widget::button::Status;
-                        let overlay = match status {
-                            Status::Hovered => hover_ov.as_ref(),
-                            Status::Pressed => active_ov.as_ref(),
-                            Status::Disabled => disabled_ov.as_ref(),
-                            Status::Active => None,
-                        };
-                        let bg_color = overlay
-                            .and_then(|r| r.background.as_deref())
-                            .and_then(parse_hex_color)
-                            .unwrap_or_else(|| match status {
-                                Status::Hovered => Color {
-                                    r: (col.r * 1.1).min(1.0),
-                                    g: (col.g * 1.1).min(1.0),
-                                    b: (col.b * 1.1).min(1.0),
-                                    a: col.a,
-                                },
-                                Status::Pressed => Color {
-                                    r: (col.r * 0.9).min(1.0),
-                                    g: (col.g * 0.9).min(1.0),
-                                    b: (col.b * 0.9).min(1.0),
-                                    a: col.a,
-                                },
-                                Status::Disabled => Color { a: col.a * 0.5, ..col },
-                                Status::Active => col,
-                            });
-                        let text_color = overlay
-                            .and_then(|r| r.text_color.as_deref())
-                            .and_then(parse_hex_color)
-                            .unwrap_or(label_col);
-                        let radius = overlay.and_then(|r| r.border_radius).unwrap_or(br_radius);
-                        let width = overlay.and_then(|r| r.border_width).unwrap_or(br_width);
-                        let border_color = overlay
-                            .and_then(|r| r.border_color.as_deref())
-                            .and_then(parse_hex_color)
-                            .unwrap_or(br_color);
-                        iced::widget::button::Style {
-                            background: Some(Background::Color(bg_color)),
-                            text_color,
-                            border: Border {
-                                radius: iced::border::Radius::new(radius),
-                                width,
-                                color: border_color,
+                        .unwrap_or_else(|| match status {
+                            Status::Hovered => Color {
+                                r: (col.r * 1.1).min(1.0),
+                                g: (col.g * 1.1).min(1.0),
+                                b: (col.b * 1.1).min(1.0),
+                                a: col.a,
                             },
-                            shadow: iced::Shadow::default(),
-                            snap: false,
-                        }
-                    });
-                }
+                            Status::Pressed => Color {
+                                r: (col.r * 0.9).min(1.0),
+                                g: (col.g * 0.9).min(1.0),
+                                b: (col.b * 0.9).min(1.0),
+                                a: col.a,
+                            },
+                            Status::Disabled => Color {
+                                a: col.a * 0.5,
+                                ..col
+                            },
+                            Status::Active => col,
+                        });
+                    let text_color = overlay
+                        .and_then(|r| r.text_color.as_deref())
+                        .and_then(parse_hex_color)
+                        .unwrap_or(label_col);
+                    let radius = overlay.and_then(|r| r.border_radius).unwrap_or(br_radius);
+                    let width = overlay.and_then(|r| r.border_width).unwrap_or(br_width);
+                    let border_color = overlay
+                        .and_then(|r| r.border_color.as_deref())
+                        .and_then(parse_hex_color)
+                        .unwrap_or(br_color);
+                    iced::widget::button::Style {
+                        background: Some(Background::Color(bg_color)),
+                        text_color,
+                        border: Border {
+                            radius: iced::border::Radius::new(radius),
+                            width,
+                            color: border_color,
+                        },
+                        shadow: iced::Shadow::default(),
+                        snap: false,
+                    }
+                });
+            }
 
             btn.width(parse_length(&node.width))
-               .height(parse_length(&node.height))
-               .padding(parse_padding(&node.padding))
-               .into()
+                .height(parse_length(&node.height))
+                .padding(parse_padding(&node.padding))
+                .into()
         }
-        NodeType::TextInput { placeholder, value_var, on_change, secure } => {
+        NodeType::TextInput {
+            placeholder,
+            value_var,
+            on_change,
+            secure,
+        } => {
             let current_value = context.get(value_var).map(|s| s.as_str()).unwrap_or("");
             // Sem `disabled`, sem `.on_input(...)`: o próprio iced reporta
             // `text_input::Status::Disabled` (não editável, cursor não pisca)
@@ -457,17 +540,22 @@ pub fn render_node<'a>(
             // plain input, same as before this feature existed. Skipped when
             // `disabled` for the same reason as `on_input` above.
             if !is_disabled
-                && let (Some(control), Some(scope), Some(submit_action)) =
-                    (&node.form_control, &node.form_scope, &node.form_submit_action)
-                {
-                    input = input.id(form_input_id(scope, control));
-                    let next_focus = node.form_next_focus.as_ref()
-                        .map(|next| form_input_id(scope, next));
-                    input = input.on_submit(EngineMessage::UiSubmit {
-                        action: submit_action.clone(),
-                        next_focus,
-                    });
-                }
+                && let (Some(control), Some(scope), Some(submit_action)) = (
+                    &node.form_control,
+                    &node.form_scope,
+                    &node.form_submit_action,
+                )
+            {
+                input = input.id(form_input_id(scope, control));
+                let next_focus = node
+                    .form_next_focus
+                    .as_ref()
+                    .map(|next| form_input_id(scope, next));
+                input = input.on_submit(EngineMessage::UiSubmit {
+                    action: submit_action.clone(),
+                    next_focus,
+                });
+            }
 
             // `iced`'s own default for `text_input` is `Length::Fill` (unlike
             // most other widgets, which default to `Shrink`); only override it
@@ -488,7 +576,10 @@ pub fn render_node<'a>(
             // Overlays por pseudo-estado (`:hover`/`:focus`/`:disabled`);
             // parte do estilo padrão do tema (`text_input::default`) e
             // sobrescreve só os campos que o `.gss` realmente declarou.
-            if node.hover_style.is_some() || node.focus_style.is_some() || node.disabled_style.is_some() {
+            if node.hover_style.is_some()
+                || node.focus_style.is_some()
+                || node.disabled_style.is_some()
+            {
                 let hover_ov = node.hover_style.as_deref().cloned();
                 let focus_ov = node.focus_style.as_deref().cloned();
                 let disabled_ov = node.disabled_style.as_deref().cloned();
@@ -532,7 +623,12 @@ pub fn render_node<'a>(
             }
             elem
         }
-        NodeType::TextArea { placeholder, value_var, on_change, readonly } => {
+        NodeType::TextArea {
+            placeholder,
+            value_var,
+            on_change,
+            readonly,
+        } => {
             // The engine keeps the `Content` for this binding (created by
             // `sync_editors` before render). If it is somehow missing on a first
             // frame, fall back to a static placeholder rather than panicking.
@@ -561,16 +657,27 @@ pub fn render_node<'a>(
                     .into(),
             }
         }
-        NodeType::Image { source, clip_circle } => {
+        NodeType::Image {
+            source,
+            clip_circle,
+        } => {
             let handle = image::Handle::from_path(source.clone());
             let img = image(handle);
-            
+
             let w_len = parse_length(&node.width);
             let h_len = parse_length(&node.height);
 
             if *clip_circle {
-                let w_val = node.width.as_ref().and_then(|s| s.parse::<f32>().ok()).unwrap_or(80.0);
-                let h_val = node.height.as_ref().and_then(|s| s.parse::<f32>().ok()).unwrap_or(80.0);
+                let w_val = node
+                    .width
+                    .as_ref()
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(80.0);
+                let h_val = node
+                    .height
+                    .as_ref()
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(80.0);
                 let radius = w_val.min(h_val) / 2.0;
 
                 let clipped_img = img.width(Length::Fixed(w_val)).height(Length::Fixed(h_val));
@@ -578,15 +685,13 @@ pub fn render_node<'a>(
                     .width(Length::Fixed(w_val))
                     .height(Length::Fixed(h_val))
                     .clip(true)
-                    .style(move |_theme| {
-                        container::Style {
-                            border: Border {
-                                radius: iced::border::Radius::new(radius),
-                                width: 0.0,
-                                color: Color::TRANSPARENT,
-                            },
-                            ..Default::default()
-                        }
+                    .style(move |_theme| container::Style {
+                        border: Border {
+                            radius: iced::border::Radius::new(radius),
+                            width: 0.0,
+                            color: Color::TRANSPARENT,
+                        },
+                        ..Default::default()
                     })
                     .into()
             } else {
@@ -610,7 +715,9 @@ pub fn render_node<'a>(
                 column![].into()
             };
             let dir = match direction.to_ascii_lowercase().as_str() {
-                "horizontal" | "h" | "x" => scrollable::Direction::Horizontal(scrollable::Scrollbar::new()),
+                "horizontal" | "h" | "x" => {
+                    scrollable::Direction::Horizontal(scrollable::Scrollbar::new())
+                }
                 "both" | "xy" => scrollable::Direction::Both {
                     vertical: scrollable::Scrollbar::new(),
                     horizontal: scrollable::Scrollbar::new(),
@@ -623,8 +730,15 @@ pub fn render_node<'a>(
                 .height(parse_length(&node.height))
                 .into()
         }
-        NodeType::Checkbox { label, checked_var, on_toggle } => {
-            let checked = context.get(checked_var).map(|s| is_truthy(s)).unwrap_or(false);
+        NodeType::Checkbox {
+            label,
+            checked_var,
+            on_toggle,
+        } => {
+            let checked = context
+                .get(checked_var)
+                .map(|s| is_truthy(s))
+                .unwrap_or(false);
             let mut c = checkbox(checked).label(label.as_str());
             // Sem `disabled`, sem `.on_toggle(...)`: o iced já reporta
             // `checkbox::Status::Disabled` sozinho (mesmo truque do botão).
@@ -640,8 +754,15 @@ pub fn render_node<'a>(
             }
             c.into()
         }
-        NodeType::Toggle { label, checked_var, on_toggle } => {
-            let checked = context.get(checked_var).map(|s| is_truthy(s)).unwrap_or(false);
+        NodeType::Toggle {
+            label,
+            checked_var,
+            on_toggle,
+        } => {
+            let checked = context
+                .get(checked_var)
+                .map(|s| is_truthy(s))
+                .unwrap_or(false);
             let mut t = toggler(checked);
             if !node.disabled.unwrap_or(false) {
                 let action = on_toggle.clone();
@@ -655,7 +776,15 @@ pub fn render_node<'a>(
             }
             t.into()
         }
-        NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, color } => {
+        NodeType::Select {
+            options,
+            value_var,
+            on_change,
+            placeholder,
+            label_field,
+            value_field,
+            color,
+        } => {
             // Options come from a context JSON array (same shape as ForEach).
             let opts: Vec<SelectOption> = context
                 .get(options)
@@ -695,7 +824,10 @@ pub fn render_node<'a>(
                     width: br_width.unwrap_or(1.0),
                     color: br_color.unwrap_or(pal.background.strong.color),
                 };
-                if matches!(status, pick_list::Status::Hovered | pick_list::Status::Opened { .. }) {
+                if matches!(
+                    status,
+                    pick_list::Status::Hovered | pick_list::Status::Opened { .. }
+                ) {
                     border.color = txt_color.unwrap_or(pal.primary.base.color);
                     if let Some(r) = hover_ov.as_ref() {
                         if let Some(bg2) = r.background.as_deref().and_then(parse_hex_color) {
@@ -725,7 +857,10 @@ pub fn render_node<'a>(
             };
 
             let mut pl = pick_list(opts, selected, move |chosen: SelectOption| {
-                EngineMessage::UiInputChanged { action: action.clone(), value: chosen.value }
+                EngineMessage::UiInputChanged {
+                    action: action.clone(),
+                    value: chosen.value,
+                }
             })
             .style(style_fn)
             .width(parse_length(&node.width))
@@ -750,54 +885,62 @@ pub fn render_node<'a>(
         NodeType::Rule { horizontal } => {
             // Thickness comes from the cross dimension; default 1px.
             if *horizontal {
-                let h = node.height.as_ref().and_then(|s| s.parse::<f32>().ok()).unwrap_or(1.0);
+                let h = node
+                    .height
+                    .as_ref()
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(1.0);
                 rule::horizontal(h).into()
             } else {
-                let w = node.width.as_ref().and_then(|s| s.parse::<f32>().ok()).unwrap_or(1.0);
+                let w = node
+                    .width
+                    .as_ref()
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(1.0);
                 rule::vertical(w).into()
             }
         }
         NodeType::Column => {
             let mut col = column![];
-            
+
             if let Some(align_val) = parse_alignment(&node.align_x) {
                 col = col.align_x(align_val);
             }
-            
+
             if let Some(sp) = node.spacing {
                 col = col.spacing(sp);
             }
-            
+
             col = col.padding(parse_padding(&node.padding));
 
             for child in node.children.iter().filter(|c| c.hidden != Some(true)) {
                 col = col.push(render_node(child, context, editors));
             }
-            
+
             col.width(parse_length(&node.width))
-               .height(parse_length(&node.height))
-               .into()
+                .height(parse_length(&node.height))
+                .into()
         }
         NodeType::Row => {
             let mut r = row![];
-            
+
             if let Some(align_val) = parse_alignment(&node.align_y) {
                 r = r.align_y(align_val);
             }
-            
+
             if let Some(sp) = node.spacing {
                 r = r.spacing(sp);
             }
-            
+
             r = r.padding(parse_padding(&node.padding));
 
             for child in node.children.iter().filter(|c| c.hidden != Some(true)) {
                 r = r.push(render_node(child, context, editors));
             }
-            
+
             r.width(parse_length(&node.width))
-             .height(parse_length(&node.height))
-             .into()
+                .height(parse_length(&node.height))
+                .into()
         }
         NodeType::Form { .. } => {
             // A `<Form>` is a layout container like `<Column>` — its
@@ -819,20 +962,22 @@ pub fn render_node<'a>(
             }
 
             col.width(parse_length(&node.width))
-               .height(parse_length(&node.height))
-               .into()
+                .height(parse_length(&node.height))
+                .into()
         }
         NodeType::Container => {
-            let child: Element<'a, EngineMessage> = if let Some(first_child) = node.children.first() {
+            let child: Element<'a, EngineMessage> = if let Some(first_child) = node.children.first()
+            {
                 render_node(first_child, context, editors)
             } else {
                 column![].into()
             };
 
             let mut c = container(child);
-            c = c.width(parse_length(&node.width))
-                 .height(parse_length(&node.height))
-                 .padding(parse_padding(&node.padding));
+            c = c
+                .width(parse_length(&node.width))
+                .height(parse_length(&node.height))
+                .padding(parse_padding(&node.padding));
 
             if let Some(ax) = parse_alignment(&node.align_x) {
                 c = c.align_x(ax);
@@ -844,19 +989,20 @@ pub fn render_node<'a>(
             let bg_opt = background_for(node);
             let br_opt = node.border_radius;
             let bw_opt = node.border_width.unwrap_or(0.0);
-            let bc_opt = node.border_color.as_ref().and_then(|bc| parse_hex_color(bc));
+            let bc_opt = node
+                .border_color
+                .as_ref()
+                .and_then(|bc| parse_hex_color(bc));
 
             if bg_opt.is_some() || br_opt.is_some() || bw_opt > 0.0 {
-                c = c.style(move |_theme| {
-                    container::Style {
-                        background: bg_opt,
-                        border: Border {
-                            radius: iced::border::Radius::new(br_opt.unwrap_or(0.0)),
-                            width: bw_opt,
-                            color: bc_opt.unwrap_or(Color::TRANSPARENT),
-                        },
-                        ..Default::default()
-                    }
+                c = c.style(move |_theme| container::Style {
+                    background: bg_opt,
+                    border: Border {
+                        radius: iced::border::Radius::new(br_opt.unwrap_or(0.0)),
+                        width: bw_opt,
+                        color: bc_opt.unwrap_or(Color::TRANSPARENT),
+                    },
+                    ..Default::default()
                 });
             }
 
@@ -865,9 +1011,10 @@ pub fn render_node<'a>(
         NodeType::Include { .. } => {
             container(text("Unresolved Include").color(Color::from_rgb(1.0, 0.0, 0.0))).into()
         }
-        NodeType::Component { name, .. } => {
-            container(text(format!("Unresolved component <{}>", name)).color(Color::from_rgb(1.0, 0.0, 0.0))).into()
-        }
+        NodeType::Component { name, .. } => container(
+            text(format!("Unresolved component <{}>", name)).color(Color::from_rgb(1.0, 0.0, 0.0)),
+        )
+        .into(),
         NodeType::ForEach { .. } => {
             // TODO(diretivas): forma legada por tag; preferir atributos if/else/for-each. Remover quando templates forem migrados.
             // ForEach is expanded during evaluation; nothing to render directly.
@@ -903,8 +1050,8 @@ pub fn render_node<'a>(
                 col = col.push(render_node(child, context, editors));
             }
             col.width(parse_length(&node.width))
-               .height(parse_length(&node.height))
-               .into()
+                .height(parse_length(&node.height))
+                .into()
         }
     };
 
@@ -914,12 +1061,16 @@ pub fn render_node<'a>(
         let bg_opt = background_for(node);
         let br_opt = node.border_radius;
         let bw_opt = node.border_width.unwrap_or(0.0);
-        let bc_opt = node.border_color.as_ref().and_then(|bc| parse_hex_color(bc));
+        let bc_opt = node
+            .border_color
+            .as_ref()
+            .and_then(|bc| parse_hex_color(bc));
 
         if bg_opt.is_some() || br_opt.is_some() || bw_opt > 0.0 {
             let mut c = container(element);
-            c = c.width(parse_length(&node.width))
-                 .height(parse_length(&node.height));
+            c = c
+                .width(parse_length(&node.width))
+                .height(parse_length(&node.height));
 
             if let Some(ax) = parse_alignment(&node.align_x) {
                 c = c.align_x(ax);
@@ -928,16 +1079,14 @@ pub fn render_node<'a>(
                 c = c.align_y(ay);
             }
 
-            c = c.style(move |_theme| {
-                container::Style {
-                    background: bg_opt,
-                    border: Border {
-                        radius: iced::border::Radius::new(br_opt.unwrap_or(0.0)),
-                        width: bw_opt,
-                        color: bc_opt.unwrap_or(Color::TRANSPARENT),
-                    },
-                    ..Default::default()
-                }
+            c = c.style(move |_theme| container::Style {
+                background: bg_opt,
+                border: Border {
+                    radius: iced::border::Radius::new(br_opt.unwrap_or(0.0)),
+                    width: bw_opt,
+                    color: bc_opt.unwrap_or(Color::TRANSPARENT),
+                },
+                ..Default::default()
             });
             element = c.into();
         }
@@ -964,7 +1113,9 @@ pub fn render_node<'a>(
     // `on_double_click` covers e.g. titlebar double-click to maximize; and
     // `cursor` sets the hover pointer (resize arrows on edge handles). Applied
     // last so the whole styled element is the interactive surface.
-    if node.on_press.is_some() || node.on_double_click.is_some() || node.cursor.is_some()
+    if node.on_press.is_some()
+        || node.on_double_click.is_some()
+        || node.cursor.is_some()
         || node.drag_item_key.is_some()
     {
         let mut ma = mouse_area(element);
@@ -982,7 +1133,10 @@ pub fn render_node<'a>(
         // such a list is a valid drop/hover target; only its `dragHandle`
         // descendant also starts the drag on press.
         if let (Some(list), Some(key)) = (&node.drag_list, &node.drag_item_key) {
-            ma = ma.on_enter(EngineMessage::DragHover { list: list.clone(), key: key.clone() });
+            ma = ma.on_enter(EngineMessage::DragHover {
+                list: list.clone(),
+                key: key.clone(),
+            });
         }
         if node.drag_handle
             && let (Some(list), Some(key), Some(order), Some(on_reorder), Some(reorder_key)) = (
@@ -991,15 +1145,16 @@ pub fn render_node<'a>(
                 &node.drag_order,
                 &node.drag_on_reorder,
                 &node.drag_reorder_key,
-            ) {
-                ma = ma.on_press(EngineMessage::DragStart {
-                    list: list.clone(),
-                    reorder_key: reorder_key.clone(),
-                    on_reorder: on_reorder.clone(),
-                    order: order.clone(),
-                    key: key.clone(),
-                });
-            }
+            )
+        {
+            ma = ma.on_press(EngineMessage::DragStart {
+                list: list.clone(),
+                reorder_key: reorder_key.clone(),
+                on_reorder: on_reorder.clone(),
+                order: order.clone(),
+                key: key.clone(),
+            });
+        }
         element = ma.into();
     }
 
@@ -1035,9 +1190,9 @@ fn cursor_interaction(name: &str) -> Option<iced::mouse::Interaction> {
     // Not glob-importing the variants: `Interaction::None` would shadow
     // `Option::None` below.
     use iced::mouse::Interaction::{
-        Pointer, Text, Grab, Grabbing, Move, Crosshair, Wait, Progress, Help,
-        NotAllowed, Hidden, ResizingHorizontally, ResizingVertically,
-        ResizingDiagonallyUp, ResizingDiagonallyDown,
+        Crosshair, Grab, Grabbing, Help, Hidden, Move, NotAllowed, Pointer, Progress,
+        ResizingDiagonallyDown, ResizingDiagonallyUp, ResizingHorizontally, ResizingVertically,
+        Text, Wait,
     };
     Some(match name.trim().to_ascii_lowercase().as_str() {
         "pointer" | "hand" => Pointer,

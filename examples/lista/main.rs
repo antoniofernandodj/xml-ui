@@ -33,7 +33,12 @@ impl Lista {
             .membros
             .iter()
             .map(|m| {
-                let inicial = m.nome.chars().next().map(|c| c.to_string()).unwrap_or_default();
+                let inicial = m
+                    .nome
+                    .chars()
+                    .next()
+                    .map(|c| c.to_string())
+                    .unwrap_or_default();
                 serde_json::json!({
                     "nome": m.nome,
                     "cargo": m.cargo,
@@ -83,11 +88,22 @@ fn main() -> iced::Result {
         .title("Glacier - Lista de Membros")
         .main(|motor| {
             let membros = vec![
-                Membro { nome: "Clara Silva".into(), cargo: "Engenheira de Software".into(), cor: PALETA[0].into() },
-                Membro { nome: "Sophia Martins".into(), cargo: "Designer UI/UX".into(), cor: PALETA[1].into() },
+                Membro {
+                    nome: "Clara Silva".into(),
+                    cargo: "Engenheira de Software".into(),
+                    cor: PALETA[0].into(),
+                },
+                Membro {
+                    nome: "Sophia Martins".into(),
+                    cargo: "Designer UI/UX".into(),
+                    cor: PALETA[1].into(),
+                },
             ];
 
-            if let Err(e) = motor.register(Box::new(Lista { membros, proximo: 0 })) {
+            if let Err(e) = motor.register(Box::new(Lista {
+                membros,
+                proximo: 0,
+            })) {
                 eprintln!("Erro ao registrar 'lista': {}", e);
             }
             motor.set_initial_screen("lista");

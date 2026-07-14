@@ -7,11 +7,11 @@ use std::sync::OnceLock;
 
 use futures::{SinkExt, Stream, StreamExt};
 use http_body_util::{BodyExt, Full};
-use hyper::body::Bytes;
 use hyper::Method;
+use hyper::body::Bytes;
 use hyper_rustls::HttpsConnector;
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 
 use crate::component::{FetchResult, PendingFetch, StreamKind};
@@ -66,7 +66,11 @@ async fn send(req: &PendingFetch) -> Result<FetchResult, Box<dyn std::error::Err
     // User-Agent padrão quando o chamador não definiu um (via header ou o opt
     // `user_agent` de `fetch`): alguns servidores rejeitam/roteiam diferente sem
     // UA. Um UA explícito nos headers sempre vence (não sobrescrevemos).
-    if !req.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
+    if !req
+        .headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+    {
         builder = builder.header(hyper::header::USER_AGENT, DEFAULT_USER_AGENT);
     }
     let request = builder.body(body)?;
@@ -141,64 +145,66 @@ pub struct StreamKey {
 /// `fetch`, mas em vez de coletar o corpo inteiro lê frame a frame, acumulando
 /// bytes e emitindo um `Message` por evento (`\n\n`), pegando as linhas
 /// `data:`. É somente leitura — não há canal de saída (nenhum `Ready`).
-pub(crate) fn sse(
-    url: String,
-    headers: Vec<(String, String)>,
-) -> impl Stream<Item = StreamEvent> {
-    iced::stream::channel(64, move |mut output: futures::channel::mpsc::Sender<StreamEvent>| async move {
-        install_default_crypto();
+pub(crate) fn sse(url: String, headers: Vec<(String, String)>) -> impl Stream<Item = StreamEvent> {
+    iced::stream::channel(
+        64,
+        move |mut output: futures::channel::mpsc::Sender<StreamEvent>| async move {
+            install_default_crypto();
 
-        let mut builder = hyper::Request::builder()
-            .method(Method::GET)
-            .uri(&url)
-            .header("accept", "text/event-stream");
-        for (k, v) in &headers {
-            builder = builder.header(k.as_str(), v.as_str());
-        }
-        let request = match builder.body(Full::new(Bytes::new())) {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = output.send(StreamEvent::Error(e.to_string())).await;
-                let _ = output.send(StreamEvent::Closed).await;
-                return;
+            let mut builder = hyper::Request::builder()
+                .method(Method::GET)
+                .uri(&url)
+                .header("accept", "text/event-stream");
+            for (k, v) in &headers {
+                builder = builder.header(k.as_str(), v.as_str());
             }
-        };
+            let request = match builder.body(Full::new(Bytes::new())) {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = output.send(StreamEvent::Error(e.to_string())).await;
+                    let _ = output.send(StreamEvent::Closed).await;
+                    return;
+                }
+            };
 
-        let response = match client().request(request).await {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = output.send(StreamEvent::Error(e.to_string())).await;
-                let _ = output.send(StreamEvent::Closed).await;
-                return;
-            }
-        };
-        let _ = output.send(StreamEvent::Open).await;
+            let response = match client().request(request).await {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = output.send(StreamEvent::Error(e.to_string())).await;
+                    let _ = output.send(StreamEvent::Closed).await;
+                    return;
+                }
+            };
+            let _ = output.send(StreamEvent::Open).await;
 
-        let mut body = response.into_body();
-        let mut buf = String::new();
-        loop {
-            match body.frame().await {
-                Some(Ok(frame)) => {
-                    let Some(chunk) = frame.data_ref() else { continue };
-                    // Normaliza CRLF: o parser abaixo trabalha só com '\n'.
-                    buf.push_str(&String::from_utf8_lossy(chunk).replace('\r', ""));
-                    // Um evento SSE termina numa linha em branco (`\n\n`).
-                    while let Some(pos) = buf.find("\n\n") {
-                        let raw: String = buf.drain(..pos + 2).collect();
-                        if let Some(data) = parse_sse_event(&raw) {
-                            let _ = output.send(StreamEvent::Message(data)).await;
+            let mut body = response.into_body();
+            let mut buf = String::new();
+            loop {
+                match body.frame().await {
+                    Some(Ok(frame)) => {
+                        let Some(chunk) = frame.data_ref() else {
+                            continue;
+                        };
+                        // Normaliza CRLF: o parser abaixo trabalha só com '\n'.
+                        buf.push_str(&String::from_utf8_lossy(chunk).replace('\r', ""));
+                        // Um evento SSE termina numa linha em branco (`\n\n`).
+                        while let Some(pos) = buf.find("\n\n") {
+                            let raw: String = buf.drain(..pos + 2).collect();
+                            if let Some(data) = parse_sse_event(&raw) {
+                                let _ = output.send(StreamEvent::Message(data)).await;
+                            }
                         }
                     }
+                    Some(Err(e)) => {
+                        let _ = output.send(StreamEvent::Error(e.to_string())).await;
+                        break;
+                    }
+                    None => break,
                 }
-                Some(Err(e)) => {
-                    let _ = output.send(StreamEvent::Error(e.to_string())).await;
-                    break;
-                }
-                None => break,
             }
-        }
-        let _ = output.send(StreamEvent::Closed).await;
-    })
+            let _ = output.send(StreamEvent::Closed).await;
+        },
+    )
 }
 
 /// Extrai o payload de um bloco de evento SSE: junta com `\n` os valores das
@@ -228,79 +234,82 @@ pub(crate) fn websocket(
     headers: Vec<(String, String)>,
 ) -> impl Stream<Item = StreamEvent> {
     use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
-    use tokio_tungstenite::tungstenite::Message;
 
-    iced::stream::channel(64, move |mut output: futures::channel::mpsc::Sender<StreamEvent>| async move {
-        install_default_crypto();
+    iced::stream::channel(
+        64,
+        move |mut output: futures::channel::mpsc::Sender<StreamEvent>| async move {
+            install_default_crypto();
 
-        let mut request = match url.as_str().into_client_request() {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = output.send(StreamEvent::Error(e.to_string())).await;
-                let _ = output.send(StreamEvent::Closed).await;
-                return;
+            let mut request = match url.as_str().into_client_request() {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = output.send(StreamEvent::Error(e.to_string())).await;
+                    let _ = output.send(StreamEvent::Closed).await;
+                    return;
+                }
+            };
+            for (k, v) in &headers {
+                if let (Ok(name), Ok(val)) = (
+                    HeaderName::from_bytes(k.as_bytes()),
+                    HeaderValue::from_str(v),
+                ) {
+                    request.headers_mut().insert(name, val);
+                }
             }
-        };
-        for (k, v) in &headers {
-            if let (Ok(name), Ok(val)) = (
-                HeaderName::from_bytes(k.as_bytes()),
-                HeaderValue::from_str(v),
-            ) {
-                request.headers_mut().insert(name, val);
-            }
-        }
 
-        let ws = match connect_async(request).await {
-            Ok((ws, _resp)) => ws,
-            Err(e) => {
-                let _ = output.send(StreamEvent::Error(e.to_string())).await;
-                let _ = output.send(StreamEvent::Closed).await;
-                return;
-            }
-        };
+            let ws = match connect_async(request).await {
+                Ok((ws, _resp)) => ws,
+                Err(e) => {
+                    let _ = output.send(StreamEvent::Error(e.to_string())).await;
+                    let _ = output.send(StreamEvent::Closed).await;
+                    return;
+                }
+            };
 
-        let (mut write, read) = ws.split();
-        // Canal de comandos de saída; o motor guarda a ponta `Sender`.
-        let (cmd_tx, mut cmd_rx) = futures::channel::mpsc::channel::<WsCommand>(64);
-        let _ = output.send(StreamEvent::Ready(cmd_tx)).await;
-        let _ = output.send(StreamEvent::Open).await;
+            let (mut write, read) = ws.split();
+            // Canal de comandos de saída; o motor guarda a ponta `Sender`.
+            let (cmd_tx, mut cmd_rx) = futures::channel::mpsc::channel::<WsCommand>(64);
+            let _ = output.send(StreamEvent::Ready(cmd_tx)).await;
+            let _ = output.send(StreamEvent::Open).await;
 
-        let mut read = read.fuse();
-        loop {
-            futures::select! {
-                incoming = read.next() => match incoming {
-                    Some(Ok(Message::Text(t))) => {
-                        let _ = output.send(StreamEvent::Message(t.to_string())).await;
-                    }
-                    Some(Ok(Message::Binary(b))) => {
-                        let text = String::from_utf8_lossy(&b).into_owned();
-                        let _ = output.send(StreamEvent::Message(text)).await;
-                    }
-                    Some(Ok(Message::Close(_))) | None => break,
-                    // Ping/Pong/Frame: o tungstenite responde ao ping sozinho.
-                    Some(Ok(_)) => {}
-                    Some(Err(e)) => {
-                        let _ = output.send(StreamEvent::Error(e.to_string())).await;
-                        break;
-                    }
-                },
-                cmd = cmd_rx.next() => match cmd {
-                    Some(WsCommand::Send(t)) => {
-                        if write.send(Message::Text(t.into())).await.is_err() {
+            let mut read = read.fuse();
+            loop {
+                futures::select! {
+                    incoming = read.next() => match incoming {
+                        Some(Ok(Message::Text(t))) => {
+                            let _ = output.send(StreamEvent::Message(t.to_string())).await;
+                        }
+                        Some(Ok(Message::Binary(b))) => {
+                            let text = String::from_utf8_lossy(&b).into_owned();
+                            let _ = output.send(StreamEvent::Message(text)).await;
+                        }
+                        Some(Ok(Message::Close(_))) | None => break,
+                        // Ping/Pong/Frame: o tungstenite responde ao ping sozinho.
+                        Some(Ok(_)) => {}
+                        Some(Err(e)) => {
+                            let _ = output.send(StreamEvent::Error(e.to_string())).await;
                             break;
                         }
-                    }
-                    Some(WsCommand::Close) | None => {
-                        let _ = write.close().await;
-                        break;
-                    }
-                },
+                    },
+                    cmd = cmd_rx.next() => match cmd {
+                        Some(WsCommand::Send(t)) => {
+                            if write.send(Message::Text(t.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Some(WsCommand::Close) | None => {
+                            let _ = write.close().await;
+                            break;
+                        }
+                    },
+                }
             }
-        }
-        let _ = output.send(StreamEvent::Closed).await;
-    })
+            let _ = output.send(StreamEvent::Closed).await;
+        },
+    )
 }
 
 #[cfg(test)]
@@ -328,7 +337,13 @@ mod tests {
             .enable_time()
             .build()
             .unwrap();
-        let req = PendingFetch::new(1, "https://example.com".into(), "GET".into(), None, Vec::new());
+        let req = PendingFetch::new(
+            1,
+            "https://example.com".into(),
+            "GET".into(),
+            None,
+            Vec::new(),
+        );
         let res = rt.block_on(perform(req));
         assert!(res.ok, "falhou: status={} erro={}", res.status, res.error);
         assert!(res.body.contains("Example Domain"), "corpo inesperado");
@@ -354,7 +369,11 @@ mod tests {
                 match ev {
                     StreamEvent::Ready(s) => sender = Some(s),
                     StreamEvent::Open => {
-                        sender.as_mut().unwrap().try_send(WsCommand::Send("glacier-ping".into())).unwrap();
+                        sender
+                            .as_mut()
+                            .unwrap()
+                            .try_send(WsCommand::Send("glacier-ping".into()))
+                            .unwrap();
                     }
                     StreamEvent::Message(m) => {
                         // O echo.websocket.org manda uma saudação antes; só o

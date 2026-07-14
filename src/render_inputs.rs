@@ -114,16 +114,23 @@ impl RenderInputs {
     /// calculado aqui para o motor não pagar por nó no caso comum.
     pub fn has_tag_rules(&self) -> bool {
         self.stylesheets.iter().any(|s| s.has_tag_rules())
-            || self.component_stylesheets.values().flatten().any(|s| s.has_tag_rules())
+            || self
+                .component_stylesheets
+                .values()
+                .flatten()
+                .any(|s| s.has_tag_rules())
     }
 
     /// `true` se mover o viewport de `old` para `new` ativa ou desativa alguma
     /// `@media` — o que decide se vale reavaliar num resize.
     pub fn media_set_changes(&self, old: (f32, f32), new: (f32, f32)) -> bool {
-        let sheets = self.stylesheets.iter().chain(self.component_stylesheets.values().flatten());
-        sheets.flat_map(|s| &s.media).any(|mq| {
-            mq.condition.matches(old.0, old.1) != mq.condition.matches(new.0, new.1)
-        })
+        let sheets = self
+            .stylesheets
+            .iter()
+            .chain(self.component_stylesheets.values().flatten());
+        sheets
+            .flat_map(|s| &s.media)
+            .any(|mq| mq.condition.matches(old.0, old.1) != mq.condition.matches(new.0, new.1))
     }
 
     // ── Mutação (cada uma avança a época) ───────────────────────────────────
@@ -147,7 +154,8 @@ impl RenderInputs {
         if sheets.is_empty() {
             self.component_stylesheets.remove(component);
         } else {
-            self.component_stylesheets.insert(component.to_string(), sheets);
+            self.component_stylesheets
+                .insert(component.to_string(), sheets);
         }
         self.touch();
     }

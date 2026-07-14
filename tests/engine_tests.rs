@@ -1,4 +1,4 @@
-use glacier_ui::{GlacierUI, UiNode, NodeType};
+use glacier_ui::{GlacierUI, NodeType, UiNode};
 
 #[test]
 fn test_parser_basic() {
@@ -12,21 +12,27 @@ fn test_parser_basic() {
     "##;
 
     let ast = UiNode::parse_xml(xml).unwrap();
-    
+
     assert_eq!(ast.kind, NodeType::Container);
     assert_eq!(ast.padding.as_deref(), Some("15"));
     assert_eq!(ast.width.as_deref(), Some("200"));
     assert_eq!(ast.background.as_deref(), Some("#FFFFFF"));
-    
+
     assert_eq!(ast.children.len(), 1);
     let column = &ast.children[0];
     assert_eq!(column.kind, NodeType::Column);
     assert_eq!(column.spacing, Some(10.0));
-    
+
     assert_eq!(column.children.len(), 2);
-    
+
     let text = &column.children[0];
-    if let NodeType::Text { content, size, bold, .. } = &text.kind {
+    if let NodeType::Text {
+        content,
+        size,
+        bold,
+        ..
+    } = &text.kind
+    {
         assert_eq!(content, "Hello World");
         assert_eq!(*size, Some(20.0));
         assert!(bold);
@@ -46,16 +52,19 @@ fn test_parser_basic() {
 #[test]
 fn test_interpolation() {
     let mut motor = GlacierUI::new();
-    
+
     let temp_xml_path = "templates/test_temp.gv";
     std::fs::create_dir_all("templates").ok();
     std::fs::write(
         temp_xml_path,
-        r##"<Text content="Welcome, {user_name}! Role: {user_role}" />"##
-    ).unwrap();
+        r##"<Text content="Welcome, {user_name}! Role: {user_role}" />"##,
+    )
+    .unwrap();
 
-    motor.register_component("test_comp", temp_xml_path).unwrap();
-    
+    motor
+        .register_component("test_comp", temp_xml_path)
+        .unwrap();
+
     motor.define_data("user_name", "Bob");
     motor.define_data("user_role", "Admin");
 
@@ -72,16 +81,17 @@ fn test_interpolation() {
 #[test]
 fn test_includes() {
     let mut motor = GlacierUI::new();
-    
+
     std::fs::create_dir_all("templates").ok();
-    
+
     let main_path = "templates/test_main.gv";
     let card_path = "templates/test_card.gv";
 
     std::fs::write(
         card_path,
-        r##"<Container background="#222"><Text content="User: {name}" /></Container>"##
-    ).unwrap();
+        r##"<Container background="#222"><Text content="User: {name}" /></Container>"##,
+    )
+    .unwrap();
 
     std::fs::write(
         main_path,
@@ -90,8 +100,9 @@ fn test_includes() {
             <Include src="test_card" name="Alice" />
             <Include src="test_card" name="Charlie" />
         </Column>
-        "##
-    ).unwrap();
+        "##,
+    )
+    .unwrap();
 
     motor.register_component("test_card", card_path).unwrap();
     motor.register_component("test_main", main_path).unwrap();
@@ -139,8 +150,9 @@ fn test_if_else() {
                 <Text content="painel admin" />
             </if>
         </Column>
-        "##
-    ).unwrap();
+        "##,
+    )
+    .unwrap();
 
     motor.register_component("cond", path).unwrap();
 
@@ -188,10 +200,7 @@ fn test_import_recursivo() {
     let badge_path = "templates/test_imp_badge.gv";
 
     // badge: folha, sem imports.
-    std::fs::write(
-        badge_path,
-        r##"<Text content="[{label}]" />"##
-    ).unwrap();
+    std::fs::write(badge_path, r##"<Text content="[{label}]" />"##).unwrap();
 
     // card: importa badge e o usa pelo nome.
     std::fs::write(
@@ -202,8 +211,9 @@ fn test_import_recursivo() {
                 <Text content="User: {name}" />
                 <Badge label="ok" />
             </Column>
-        </Container>"##
-    ).unwrap();
+        </Container>"##,
+    )
+    .unwrap();
 
     // main: importa card (que por sua vez importa badge — recursivo).
     std::fs::write(
@@ -211,15 +221,22 @@ fn test_import_recursivo() {
         r##"<import name="Card" from="templates/test_imp_card.gv" />
         <Column>
             <Card name="Alice" />
-        </Column>"##
-    ).unwrap();
+        </Column>"##,
+    )
+    .unwrap();
 
     // Apenas o componente de entrada é registrado.
     motor.register_component("main", main_path).unwrap();
 
     // Os imports recursivos devem ter sido carregados automaticamente.
-    assert!(motor.is_registered("Card"), "Card deveria ter sido importado");
-    assert!(motor.is_registered("Badge"), "Badge deveria ter sido importado recursivamente");
+    assert!(
+        motor.is_registered("Card"),
+        "Card deveria ter sido importado"
+    );
+    assert!(
+        motor.is_registered("Badge"),
+        "Badge deveria ter sido importado recursivamente"
+    );
 
     let evaluated = motor.evaluated("main").unwrap();
     assert_eq!(evaluated.kind, NodeType::Column);
@@ -259,8 +276,9 @@ fn test_componente_por_nome() {
 
     std::fs::write(
         card_path,
-        r##"<Container background="#222"><Text content="User: {name}" /></Container>"##
-    ).unwrap();
+        r##"<Container background="#222"><Text content="User: {name}" /></Container>"##,
+    )
+    .unwrap();
 
     // Reuse via the component's own tag name instead of <Include>
     std::fs::write(
@@ -270,12 +288,15 @@ fn test_componente_por_nome() {
             <UserCard name="Alice" />
             <UserCard name="Charlie" />
         </Column>
-        "##
-    ).unwrap();
+        "##,
+    )
+    .unwrap();
 
     // The registered name must match the tag used in the XML.
     motor.register_component("UserCard", card_path).unwrap();
-    motor.register_component("test_main_comp", main_path).unwrap();
+    motor
+        .register_component("test_main_comp", main_path)
+        .unwrap();
 
     let evaluated = motor.evaluated("test_main_comp").unwrap();
     assert_eq!(evaluated.kind, NodeType::Column);
@@ -330,7 +351,12 @@ fn test_builtin_badge_disponivel_sem_registro() {
     assert_eq!(padrao.kind, NodeType::Container);
     assert_eq!(padrao.background.as_deref(), Some("#89B4FA"));
     match &padrao.children[0].kind {
-        NodeType::Text { content, color, size, .. } => {
+        NodeType::Text {
+            content,
+            color,
+            size,
+            ..
+        } => {
             assert_eq!(content, "Badge");
             assert_eq!(color.as_deref(), Some("#11111B"));
             assert_eq!(*size, Some(13.0)); // default numérico templado
@@ -367,7 +393,10 @@ fn test_template_default_inline() {
     // Chave presente: usa o valor (o default é ignorado).
     assert_eq!(process_template("Oi {nome|visitante}", &ctx), "Oi Ana");
     // Chave ausente: cai no default.
-    assert_eq!(process_template("Oi {cargo|visitante}", &ctx), "Oi visitante");
+    assert_eq!(
+        process_template("Oi {cargo|visitante}", &ctx),
+        "Oi visitante"
+    );
     // Sem default e ausente: vazio (comportamento antigo, inalterado).
     assert_eq!(process_template("Oi {cargo}", &ctx), "Oi ");
     // Espaços em torno da chave e do default são aparados.
@@ -384,11 +413,7 @@ fn test_atributo_numerico_templado() {
     let card_path = "templates/test_num_card.gv";
     let main_path = "templates/test_num_main.gv";
 
-    std::fs::write(
-        card_path,
-        r##"<Text content="oi" size="{s}" />"##,
-    )
-    .unwrap();
+    std::fs::write(card_path, r##"<Text content="oi" size="{s}" />"##).unwrap();
     std::fs::write(
         main_path,
         r##"<Column>
@@ -399,7 +424,9 @@ fn test_atributo_numerico_templado() {
     .unwrap();
 
     motor.register_component("NumCard", card_path).unwrap();
-    motor.register_component("test_num_main", main_path).unwrap();
+    motor
+        .register_component("test_num_main", main_path)
+        .unwrap();
 
     let evaluated = motor.evaluated("test_num_main").unwrap();
     // Com prop: size templado resolve para 28.
@@ -429,8 +456,9 @@ fn test_foreach_com_componente() {
     // Componente reutilizável que recebe props.
     std::fs::write(
         card_path,
-        r##"<Container background="#222"><Text content="{nome} - {cargo}" /></Container>"##
-    ).unwrap();
+        r##"<Container background="#222"><Text content="{nome} - {cargo}" /></Container>"##,
+    )
+    .unwrap();
 
     // Usa o componente pelo nome dentro de um ForEach, passando campos como props.
     std::fs::write(
@@ -441,8 +469,9 @@ fn test_foreach_com_componente() {
                 <Cartao nome="{m.nome}" cargo="{m.cargo}" />
             </ForEach>
         </Column>
-        "##
-    ).unwrap();
+        "##,
+    )
+    .unwrap();
 
     motor.register_component("Cartao", card_path).unwrap();
     motor.register_component("test_lista", main_path).unwrap();
@@ -507,7 +536,7 @@ fn test_navegacao_historico() {
 #[test]
 fn test_foreach() {
     let mut motor = GlacierUI::new();
-    
+
     let path = "templates/test_foreach.gv";
     std::fs::create_dir_all("templates").ok();
     std::fs::write(
@@ -518,11 +547,12 @@ fn test_foreach() {
                 <Text content="Item: {it.name} ({it.val})" />
             </ForEach>
         </Column>
-        "##
-    ).unwrap();
+        "##,
+    )
+    .unwrap();
 
     motor.register_component("test_for", path).unwrap();
-    
+
     let data = r#"[
         {"name": "X", "val": "1"},
         {"name": "Y", "val": "2"}
@@ -548,34 +578,42 @@ fn test_foreach() {
     std::fs::remove_file(path).ok();
 }
 
-
 // --- Nested components: behavior composition -------------------------------
 
-use glacier_ui::{Component, Context, Template, EngineMessage};
+use glacier_ui::{Component, Context, EngineMessage, Template};
 
 /// Child component with its own behavior. Its button action is `ping`.
 struct ChildComp;
 impl Component for ChildComp {
-    fn name(&self) -> &str { "ChildComp" }
+    fn name(&self) -> &str {
+        "ChildComp"
+    }
     fn template(&self) -> Template {
         Template::Inline(r#"<Container><Button text="C" on_click="ping" /></Container>"#.into())
     }
     fn update(&mut self, action: &str, _v: Option<&str>, ctx: &mut Context) {
-        if action == "ping" { ctx.set("child_pinged", "true"); }
+        if action == "ping" {
+            ctx.set("child_pinged", "true");
+        }
     }
 }
 
 /// Parent owns ChildComp and references it in its own template.
 struct ParentComp;
 impl Component for ParentComp {
-    fn name(&self) -> &str { "parent" }
+    fn name(&self) -> &str {
+        "parent"
+    }
     fn template(&self) -> Template {
         Template::Inline(
-            r#"<Container><Button text="P" on_click="parent_act" /><ChildComp /></Container>"#.into(),
+            r#"<Container><Button text="P" on_click="parent_act" /><ChildComp /></Container>"#
+                .into(),
         )
     }
     fn update(&mut self, action: &str, _v: Option<&str>, ctx: &mut Context) {
-        if action == "parent_act" { ctx.set("parent_acted", "true"); }
+        if action == "parent_act" {
+            ctx.set("parent_acted", "true");
+        }
     }
     fn children(&self) -> Vec<Box<dyn Component>> {
         vec![Box::new(ChildComp)]
@@ -584,7 +622,10 @@ impl Component for ParentComp {
 
 /// Collects every `Button.on_click` in an evaluated tree.
 fn collect_clicks(node: &UiNode, out: &mut Vec<String>) {
-    if let NodeType::Button { on_click: Some(a), .. } = &node.kind {
+    if let NodeType::Button {
+        on_click: Some(a), ..
+    } = &node.kind
+    {
         out.push(a.clone());
     }
     for c in &node.children {
@@ -606,8 +647,16 @@ fn test_nested_component_action_namespacing() {
     let evaluated = motor.evaluated("parent").unwrap();
     let mut clicks = Vec::new();
     collect_clicks(evaluated, &mut clicks);
-    assert!(clicks.contains(&"parent_act".to_string()), "got {:?}", clicks);
-    assert!(clicks.contains(&"ChildComp::ping".to_string()), "got {:?}", clicks);
+    assert!(
+        clicks.contains(&"parent_act".to_string()),
+        "got {:?}",
+        clicks
+    );
+    assert!(
+        clicks.contains(&"ChildComp::ping".to_string()),
+        "got {:?}",
+        clicks
+    );
 }
 
 #[test]
@@ -618,12 +667,18 @@ fn test_nested_component_action_routing() {
 
     // A namespaced action reaches the child's update, not the parent's.
     let _ = motor.dispatch(&EngineMessage::UiClick("ChildComp::ping".into()));
-    assert_eq!(motor.get_data("child_pinged").map(String::as_str), Some("true"));
+    assert_eq!(
+        motor.get_data("child_pinged").map(String::as_str),
+        Some("true")
+    );
     assert_eq!(motor.get_data("parent_acted"), None);
 
     // A plain action falls back to the active screen (the parent).
     let _ = motor.dispatch(&EngineMessage::UiClick("parent_act".into()));
-    assert_eq!(motor.get_data("parent_acted").map(String::as_str), Some("true"));
+    assert_eq!(
+        motor.get_data("parent_acted").map(String::as_str),
+        Some("true")
+    );
 }
 
 // --- Drag-and-drop list reordering ------------------------------------------
@@ -633,9 +688,12 @@ fn test_nested_component_action_routing() {
 /// asked to persist.
 struct EnvComp;
 impl Component for EnvComp {
-    fn name(&self) -> &str { "envcomp" }
+    fn name(&self) -> &str {
+        "envcomp"
+    }
     fn template(&self) -> Template {
-        Template::Inline(r#"
+        Template::Inline(
+            r#"
             <Column>
                 <ForEach items="rows" var="e" onReorder="reordered" reorderKey="key">
                     <Row>
@@ -643,7 +701,9 @@ impl Component for EnvComp {
                     </Row>
                 </ForEach>
             </Column>
-        "#.into())
+        "#
+            .into(),
+        )
     }
     fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {
         if action == "reordered" {
@@ -667,17 +727,27 @@ fn test_drag_reorder_end_to_end() {
         order: vec!["a".into(), "b".into(), "c".into()],
         key: "a".into(),
     });
-    let _ = motor.dispatch(&EngineMessage::DragHover { list: "rows".into(), key: "c".into() });
+    let _ = motor.dispatch(&EngineMessage::DragHover {
+        list: "rows".into(),
+        key: "c".into(),
+    });
     assert_eq!(
         motor.get_data("rows").map(String::as_str),
         Some(r#"[{"key":"b"},{"key":"c"},{"key":"a"}]"#),
         "context should reflect the live reflow while still dragging",
     );
-    assert_eq!(motor.get_data("last_order"), None, "onReorder only fires on drop");
+    assert_eq!(
+        motor.get_data("last_order"),
+        None,
+        "onReorder only fires on drop"
+    );
 
     // Drop: the component's `update` receives the final order.
     let _ = motor.dispatch(&EngineMessage::DragEnd);
-    assert_eq!(motor.get_data("last_order").map(String::as_str), Some(r#"["b","c","a"]"#));
+    assert_eq!(
+        motor.get_data("last_order").map(String::as_str),
+        Some(r#"["b","c","a"]"#)
+    );
 
     // A stray release with nothing in progress is a harmless no-op.
     let _ = motor.dispatch(&EngineMessage::DragEnd);
@@ -698,12 +768,24 @@ fn test_drag_hover_ignores_other_lists_and_self() {
         key: "a".into(),
     });
     // Hovering a different list, or the dragged item itself, changes nothing.
-    let _ = motor.dispatch(&EngineMessage::DragHover { list: "other".into(), key: "b".into() });
-    let _ = motor.dispatch(&EngineMessage::DragHover { list: "rows".into(), key: "a".into() });
-    assert_eq!(motor.get_data("rows").map(String::as_str), Some(r#"[{"key":"a"},{"key":"b"}]"#));
+    let _ = motor.dispatch(&EngineMessage::DragHover {
+        list: "other".into(),
+        key: "b".into(),
+    });
+    let _ = motor.dispatch(&EngineMessage::DragHover {
+        list: "rows".into(),
+        key: "a".into(),
+    });
+    assert_eq!(
+        motor.get_data("rows").map(String::as_str),
+        Some(r#"[{"key":"a"},{"key":"b"}]"#)
+    );
 
     let _ = motor.dispatch(&EngineMessage::DragEnd);
-    assert_eq!(motor.get_data("last_order").map(String::as_str), Some(r#"["a","b"]"#));
+    assert_eq!(
+        motor.get_data("last_order").map(String::as_str),
+        Some(r#"["a","b"]"#)
+    );
 }
 
 #[test]
@@ -723,7 +805,11 @@ fn test_gss_fill_and_max_width_resolve_from_class() {
     motor.register_component("maxw", path).unwrap();
 
     let n = motor.evaluated("maxw").unwrap();
-    assert_eq!(n.width.as_deref(), Some("fill"), "width: fill applies from the class");
+    assert_eq!(
+        n.width.as_deref(),
+        Some("fill"),
+        "width: fill applies from the class"
+    );
     assert_eq!(n.max_width, Some(640.0), "max-width applies from the class");
 
     std::fs::remove_file(gss).ok();
@@ -751,7 +837,11 @@ fn test_link_stylesheet_is_global() {
     // `<link rel="stylesheet">` is always global, regardless of which
     // template declares it. It overrides `.box`'s padding and adds `.linked`.
     let linked_gss = "templates/test_linked.gss";
-    std::fs::write(linked_gss, ".box { padding: 9; } .linked { color: #abcabc; }").unwrap();
+    std::fs::write(
+        linked_gss,
+        ".box { padding: 9; } .linked { color: #abcabc; }",
+    )
+    .unwrap();
 
     // A links the sheet (as a top-level sibling, before its root, to
     // exercise the <link> hoisting in parse_xml).
@@ -762,7 +852,8 @@ fn test_link_stylesheet_is_global() {
         <link rel="stylesheet" href="templates/test_linked.gss" />
         <Text class="box linked" content="A" />
         "##,
-    ).unwrap();
+    )
+    .unwrap();
 
     // B doesn't declare the <link> itself, but should see its effect anyway.
     let b_path = "templates/test_scoped_b.gv";
@@ -775,12 +866,28 @@ fn test_link_stylesheet_is_global() {
     let a = motor.evaluated("a").unwrap().clone();
     let b = motor.evaluated("b").unwrap().clone();
 
-    assert_eq!(a.padding.as_deref(), Some("9"), "linked class overrides global padding in A");
-    assert_eq!(text_color(&a.kind).as_deref(), Some("#abcabc"), "linked class color applies in A");
+    assert_eq!(
+        a.padding.as_deref(),
+        Some("9"),
+        "linked class overrides global padding in A"
+    );
+    assert_eq!(
+        text_color(&a.kind).as_deref(),
+        Some("#abcabc"),
+        "linked class color applies in A"
+    );
 
     // B: the sheet A linked applies here too, since <link rel="stylesheet"> is global.
-    assert_eq!(b.padding.as_deref(), Some("9"), "linked sheet reaches B even though only A declared the <link>");
-    assert_eq!(text_color(&b.kind).as_deref(), Some("#abcabc"), "linked class color reaches B too");
+    assert_eq!(
+        b.padding.as_deref(),
+        Some("9"),
+        "linked sheet reaches B even though only A declared the <link>"
+    );
+    assert_eq!(
+        text_color(&b.kind).as_deref(),
+        Some("#abcabc"),
+        "linked class color reaches B too"
+    );
 
     std::fs::remove_file(global_gss).ok();
     std::fs::remove_file(linked_gss).ok();
@@ -808,7 +915,8 @@ fn test_inline_style_block_default_is_global() {
         </style>
         <Text class="box inlined" content="A" />
         "##,
-    ).unwrap();
+    )
+    .unwrap();
 
     // B declares nothing, but should see A's plain <style> anyway.
     let b_path = "templates/test_istyle_b.gv";
@@ -821,12 +929,28 @@ fn test_inline_style_block_default_is_global() {
     let a = motor.evaluated("a").unwrap().clone();
     let b = motor.evaluated("b").unwrap().clone();
 
-    assert_eq!(a.padding.as_deref(), Some("9"), "inline <style> overrides global padding");
-    assert_eq!(text_color(&a.kind).as_deref(), Some("#abcabc"), "inline class color applies in A");
+    assert_eq!(
+        a.padding.as_deref(),
+        Some("9"),
+        "inline <style> overrides global padding"
+    );
+    assert_eq!(
+        text_color(&a.kind).as_deref(),
+        Some("#abcabc"),
+        "inline class color applies in A"
+    );
 
     // B: A's plain inline <style> reaches it too, since it's global by default.
-    assert_eq!(b.padding.as_deref(), Some("9"), "B sees A's unscoped inline <style> too");
-    assert_eq!(text_color(&b.kind).as_deref(), Some("#abcabc"), "B sees A's unscoped inline class color too");
+    assert_eq!(
+        b.padding.as_deref(),
+        Some("9"),
+        "B sees A's unscoped inline <style> too"
+    );
+    assert_eq!(
+        text_color(&b.kind).as_deref(),
+        Some("#abcabc"),
+        "B sees A's unscoped inline class color too"
+    );
 
     std::fs::remove_file(global_gss).ok();
     std::fs::remove_file(a_path).ok();
@@ -854,7 +978,8 @@ fn test_inline_style_block_scoped_true_is_scoped() {
         </style>
         <Text class="box scoped" content="A" />
         "##,
-    ).unwrap();
+    )
+    .unwrap();
 
     // B declares nothing: it only sees the global sheet.
     let b_path = "templates/test_istyle_scoped_b.gv";
@@ -868,12 +993,24 @@ fn test_inline_style_block_scoped_true_is_scoped() {
     let b = motor.evaluated("b").unwrap().clone();
 
     // A: scoped `.box` overrides padding (9 vs global 5); `.scoped` provides color.
-    assert_eq!(a.padding.as_deref(), Some("9"), "scoped class should override global padding");
-    assert_eq!(text_color(&a.kind).as_deref(), Some("#abcabc"), "scoped class color applies in A");
+    assert_eq!(
+        a.padding.as_deref(),
+        Some("9"),
+        "scoped class should override global padding"
+    );
+    assert_eq!(
+        text_color(&a.kind).as_deref(),
+        Some("#abcabc"),
+        "scoped class color applies in A"
+    );
 
     // B: only the global `.box` applies; `.scoped` is invisible outside A's scope.
     assert_eq!(b.padding.as_deref(), Some("5"), "B uses global padding");
-    assert_eq!(text_color(&b.kind).as_deref(), Some("#111111"), "B uses global color; scoped class has no effect");
+    assert_eq!(
+        text_color(&b.kind).as_deref(),
+        Some("#111111"),
+        "B uses global color; scoped class has no effect"
+    );
 
     std::fs::remove_file(global_gss).ok();
     std::fs::remove_file(a_path).ok();
@@ -899,13 +1036,22 @@ fn test_inline_style_overrides_linked_by_document_order() {
         <style>.tag { color: #bbbbbb; }</style>
         <Text class="tag" content="x" />
         "##,
-    ).unwrap();
+    )
+    .unwrap();
 
     motor.register_component("ord", path).unwrap();
 
     let n = motor.evaluated("ord").unwrap();
-    assert_eq!(text_color(&n.kind).as_deref(), Some("#bbbbbb"), "later inline <style> wins over the linked sheet");
-    assert_eq!(n.padding.as_deref(), Some("3"), "padding still comes from the linked sheet");
+    assert_eq!(
+        text_color(&n.kind).as_deref(),
+        Some("#bbbbbb"),
+        "later inline <style> wins over the linked sheet"
+    );
+    assert_eq!(
+        n.padding.as_deref(),
+        Some("3"),
+        "padding still comes from the linked sheet"
+    );
 
     std::fs::remove_file(linked).ok();
     std::fs::remove_file(path).ok();
@@ -920,7 +1066,8 @@ fn test_inline_style_reloads_with_template() {
     std::fs::write(
         path,
         r##"<style>.t { color: #010101; }</style><Text class="t" content="x" />"##,
-    ).unwrap();
+    )
+    .unwrap();
     motor.register_component("rel", path).unwrap();
     let n = motor.evaluated("rel").unwrap();
     assert_eq!(text_color(&n.kind).as_deref(), Some("#010101"));
@@ -930,12 +1077,17 @@ fn test_inline_style_reloads_with_template() {
     std::fs::write(
         path,
         r##"<style>.t { color: #020202; }</style><Text class="t" content="x" />"##,
-    ).unwrap();
+    )
+    .unwrap();
     let _ = filetime_touch(path);
     motor.check_reload();
 
     let n = motor.evaluated("rel").unwrap();
-    assert_eq!(text_color(&n.kind).as_deref(), Some("#020202"), "inline style rebuilds when the template reloads");
+    assert_eq!(
+        text_color(&n.kind).as_deref(),
+        Some("#020202"),
+        "inline style rebuilds when the template reloads"
+    );
 
     std::fs::remove_file(path).ok();
 }
@@ -958,14 +1110,26 @@ fn test_inline_attribute_wins_over_class() {
 
     let path = "templates/test_inline.gv";
     // Inline color overrides the class; padding falls back to the class.
-    std::fs::write(path, r##"<Text class="tag" content="x" color="#ff0000" />"##).unwrap();
+    std::fs::write(
+        path,
+        r##"<Text class="tag" content="x" color="#ff0000" />"##,
+    )
+    .unwrap();
 
     motor.load_stylesheet(gss).unwrap();
     motor.register_component("inline", path).unwrap();
 
     let n = motor.evaluated("inline").unwrap();
-    assert_eq!(text_color(&n.kind).as_deref(), Some("#ff0000"), "inline color wins");
-    assert_eq!(n.padding.as_deref(), Some("3"), "padding comes from the class");
+    assert_eq!(
+        text_color(&n.kind).as_deref(),
+        Some("#ff0000"),
+        "inline color wins"
+    );
+    assert_eq!(
+        n.padding.as_deref(),
+        Some("3"),
+        "padding comes from the class"
+    );
 
     std::fs::remove_file(gss).ok();
     std::fs::remove_file(path).ok();
@@ -989,12 +1153,16 @@ fn test_link_rel_import() {
             <ChildLink x="42" />
         </Column>
         "##,
-    ).unwrap();
+    )
+    .unwrap();
 
     motor.register_component("parent", parent).unwrap();
 
     // The imported component must be registered and inlined with its prop.
-    assert!(motor.is_registered("ChildLink"), "import should register the component");
+    assert!(
+        motor.is_registered("ChildLink"),
+        "import should register the component"
+    );
     let ev = motor.evaluated("parent").unwrap();
     assert_eq!(ev.children.len(), 1);
     if let NodeType::Text { content, .. } = &ev.children[0].kind {
@@ -1014,7 +1182,12 @@ fn test_textarea_parses_and_syncs() {
     let xml = r##"<TextArea value="dotenv" placeholder="KEY=VALUE" onChange="env_changed" />"##;
     let ast = UiNode::parse_xml(xml).unwrap();
     match &ast.kind {
-        NodeType::TextArea { value_var, placeholder, on_change, readonly } => {
+        NodeType::TextArea {
+            value_var,
+            placeholder,
+            on_change,
+            readonly,
+        } => {
             assert_eq!(value_var, "dotenv");
             assert_eq!(placeholder, "KEY=VALUE");
             assert_eq!(on_change, "env_changed");
@@ -1052,7 +1225,15 @@ fn test_select_parses_and_renders() {
     let xml = r##"<Select options="repos" value="chosen" onChange="pick" placeholder="escolha" labelField="full_name" valueField="clone_url" />"##;
     let ast = UiNode::parse_xml(xml).unwrap();
     match &ast.kind {
-        NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, .. } => {
+        NodeType::Select {
+            options,
+            value_var,
+            on_change,
+            placeholder,
+            label_field,
+            value_field,
+            ..
+        } => {
             assert_eq!(options, "repos");
             assert_eq!(value_var, "chosen");
             assert_eq!(on_change, "pick");
@@ -1141,7 +1322,11 @@ fn test_link_rel_data() {
     std::fs::create_dir_all("templates").ok();
 
     let data = "templates/test_data.json";
-    std::fs::write(data, r##"{ "title": "Olá", "users": [ {"name": "Ana"}, {"name": "Bob"} ] }"##).unwrap();
+    std::fs::write(
+        data,
+        r##"{ "title": "Olá", "users": [ {"name": "Ana"}, {"name": "Bob"} ] }"##,
+    )
+    .unwrap();
 
     let tpl = "templates/test_data.gv";
     std::fs::write(
@@ -1155,7 +1340,8 @@ fn test_link_rel_data() {
             </ForEach>
         </Column>
         "##,
-    ).unwrap();
+    )
+    .unwrap();
 
     motor.register_component("datacomp", tpl).unwrap();
 
@@ -1165,9 +1351,17 @@ fn test_link_rel_data() {
     let ev = motor.evaluated("datacomp").unwrap();
     // 1 title + 2 ForEach-expanded users.
     assert_eq!(ev.children.len(), 3, "title + two users");
-    let names: Vec<String> = ev.children.iter().filter_map(|c| {
-        if let NodeType::Text { content, .. } = &c.kind { Some(content.clone()) } else { None }
-    }).collect();
+    let names: Vec<String> = ev
+        .children
+        .iter()
+        .filter_map(|c| {
+            if let NodeType::Text { content, .. } = &c.kind {
+                Some(content.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
     assert_eq!(names, vec!["Olá", "Ana", "Bob"]);
 
     std::fs::remove_file(data).ok();
@@ -1192,18 +1386,28 @@ fn test_link_rel_theme() {
         <link rel="theme" href="templates/test_theme.json" />
         <Text content="x" />
         "##,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Default theme before loading anything is Dark.
     assert!(motor.custom_theme().is_none());
 
     motor.register_component("themecomp", tpl).unwrap();
 
-    assert!(motor.custom_theme().is_some(), "theme link should set a custom theme");
+    assert!(
+        motor.custom_theme().is_some(),
+        "theme link should set a custom theme"
+    );
     let bg = motor.theme().palette().background;
     assert!((bg.r - 16.0 / 255.0).abs() < 1e-6, "background red channel");
-    assert!((bg.g - 32.0 / 255.0).abs() < 1e-6, "background green channel");
-    assert!((bg.b - 48.0 / 255.0).abs() < 1e-6, "background blue channel");
+    assert!(
+        (bg.g - 32.0 / 255.0).abs() < 1e-6,
+        "background green channel"
+    );
+    assert!(
+        (bg.b - 48.0 / 255.0).abs() < 1e-6,
+        "background blue channel"
+    );
 
     std::fs::remove_file(theme).ok();
     std::fs::remove_file(tpl).ok();
@@ -1230,7 +1434,12 @@ fn parses_new_widget_tags() {
     assert!(matches!(kinds[3], NodeType::Rule { horizontal: true }));
     assert!(matches!(kinds[4], NodeType::Svg { .. }));
 
-    if let NodeType::Checkbox { label, checked_var, on_toggle } = &ast.children[1].kind {
+    if let NodeType::Checkbox {
+        label,
+        checked_var,
+        on_toggle,
+    } = &ast.children[1].kind
+    {
         assert_eq!(label, "Remember");
         assert_eq!(checked_var, "remember");
         assert_eq!(on_toggle, "toggle_remember");
@@ -1241,7 +1450,8 @@ fn parses_new_widget_tags() {
 
 #[test]
 fn parses_font_gradient_text_align() {
-    let xml = r##"<Text content="Hi" font="mono" gradient="180 #000000 #FFFFFF" textAlign="center" />"##;
+    let xml =
+        r##"<Text content="Hi" font="mono" gradient="180 #000000 #FFFFFF" textAlign="center" />"##;
     let ast = UiNode::parse_xml(xml).unwrap();
     assert_eq!(ast.font.as_deref(), Some("mono"));
     assert_eq!(ast.gradient.as_deref(), Some("180 #000000 #FFFFFF"));
@@ -1284,8 +1494,9 @@ fn test_directives_as_attributes() {
             <Text content="painel admin" if="{papel}" equals="admin" />
             <Text content="painel comum" if="{papel}" notEquals="admin" />
         </Column>
-        "##
-    ).unwrap();
+        "##,
+    )
+    .unwrap();
 
     motor.register_component("cond_attr", path).unwrap();
 
@@ -1343,8 +1554,9 @@ fn test_precedence_foreach_if_attributes() {
         <Column>
             <Text content="Item: {u.nome}" for-each="usuarios" var="u" if="{u.ativo}" />
         </Column>
-        "##
-    ).unwrap();
+        "##,
+    )
+    .unwrap();
 
     motor.register_component("precedence", path).unwrap();
 
@@ -1352,7 +1564,8 @@ fn test_precedence_foreach_if_attributes() {
         { "nome": "Clara", "ativo": "true" },
         { "nome": "Sophia", "ativo": "false" },
         { "nome": "Mateus", "ativo": "true" }
-    ]).to_string();
+    ])
+    .to_string();
     motor.define_data("usuarios", &json);
 
     let ev = motor.evaluated("precedence").unwrap();
@@ -1372,7 +1585,6 @@ fn test_precedence_foreach_if_attributes() {
     std::fs::remove_file(path).ok();
 }
 
-
 #[test]
 fn test_unknown_extension_falls_back_to_xml() {
     // Extensão desconhecida (.tmpl) deve usar o parser XML.
@@ -1380,10 +1592,7 @@ fn test_unknown_extension_falls_back_to_xml() {
 
     std::fs::create_dir_all("templates").ok();
     let path = "templates/test_fallback.tmpl";
-    std::fs::write(
-        path,
-        r##"<Text content="via XML fallback" size="18" />"##,
-    ).unwrap();
+    std::fs::write(path, r##"<Text content="via XML fallback" size="18" />"##).unwrap();
 
     motor.register_component("fallback", path).unwrap();
 
@@ -1415,19 +1624,28 @@ fn collect_form_inputs(node: &UiNode, out: &mut Vec<(String, UiNode)>) {
 /// hidratação e de dispatch abaixo.
 struct FormTestComp;
 impl Component for FormTestComp {
-    fn name(&self) -> &str { "formtest" }
+    fn name(&self) -> &str {
+        "formtest"
+    }
     fn template(&self) -> Template {
-        Template::Inline(r#"
+        Template::Inline(
+            r#"
             <Form onSubmit="enviar">
                 <TextInput formControl="usuario" />
                 <TextInput formControl="senha" secure="true" />
             </Form>
-        "#.into())
+        "#
+            .into(),
+        )
     }
     fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {
         match action {
-            "usuario" => { ctx.set("usuario", value.unwrap_or_default()); }
-            "senha" => { ctx.set("senha", value.unwrap_or_default()); }
+            "usuario" => {
+                ctx.set("usuario", value.unwrap_or_default());
+            }
+            "senha" => {
+                ctx.set("senha", value.unwrap_or_default());
+            }
             _ => {}
         }
     }
@@ -1447,8 +1665,12 @@ fn test_form_hydrates_scope_submit_and_next_focus() {
     let evaluated = motor.evaluated("formtest").unwrap();
     let mut inputs = Vec::new();
     collect_form_inputs(evaluated, &mut inputs);
-    assert_eq!(inputs.len(), 2, "esperava 2 inputs ligados a formControl, veio {:?}",
-        inputs.iter().map(|(n, _)| n).collect::<Vec<_>>());
+    assert_eq!(
+        inputs.len(),
+        2,
+        "esperava 2 inputs ligados a formControl, veio {:?}",
+        inputs.iter().map(|(n, _)| n).collect::<Vec<_>>()
+    );
 
     let (usuario_name, usuario) = &inputs[0];
     let (senha_name, senha) = &inputs[1];
@@ -1479,7 +1701,10 @@ fn test_form_control_input_dispatches_like_on_change() {
 
     // `TextInput formControl="usuario"` sem `onChange` explícito usa o nome
     // do controle como ação — o mesmo canal que um `onChange` manual usaria.
-    let _ = motor.dispatch(&EngineMessage::UiInputChanged { action: "usuario".into(), value: "ana".into() });
+    let _ = motor.dispatch(&EngineMessage::UiInputChanged {
+        action: "usuario".into(),
+        value: "ana".into(),
+    });
     assert_eq!(motor.get_data("usuario").map(String::as_str), Some("ana"));
 }
 
@@ -1501,7 +1726,10 @@ fn test_ui_submit_always_dispatches_regardless_of_next_focus() {
     let mut motor2 = GlacierUI::new();
     motor2.register(Box::new(FormTestComp)).unwrap();
     motor2.set_initial_screen("formtest");
-    let _ = motor2.dispatch(&EngineMessage::UiSubmit { action: "enviar".into(), next_focus: None });
+    let _ = motor2.dispatch(&EngineMessage::UiSubmit {
+        action: "enviar".into(),
+        next_focus: None,
+    });
     assert_eq!(motor2.get_data("enviado").map(String::as_str), Some("true"));
 }
 
@@ -1521,7 +1749,11 @@ fn test_form_control_defaults_value_and_on_change() {
     let input = &ast.children[0];
     assert_eq!(input.form_control.as_deref(), Some("usuario"));
     match &input.kind {
-        NodeType::TextInput { value_var, on_change, .. } => {
+        NodeType::TextInput {
+            value_var,
+            on_change,
+            ..
+        } => {
             assert_eq!(value_var, "usuario");
             assert_eq!(on_change, "usuario");
         }
@@ -1539,7 +1771,11 @@ fn test_form_control_respects_explicit_value_and_on_change() {
     let ast = UiNode::parse_xml(xml).unwrap();
     let input = &ast.children[0];
     match &input.kind {
-        NodeType::TextInput { value_var, on_change, .. } => {
+        NodeType::TextInput {
+            value_var,
+            on_change,
+            ..
+        } => {
             assert_eq!(value_var, "outro_valor");
             assert_eq!(on_change, "outraAcao");
         }
@@ -1555,7 +1791,10 @@ fn test_form_control_respects_explicit_value_and_on_change() {
 fn test_formulario_login_example_template_parses_and_evaluates() {
     let mut motor = GlacierUI::new();
     motor
-        .register_component("formulario_login_smoke", "examples/formulario_login/formulario_login.gv")
+        .register_component(
+            "formulario_login_smoke",
+            "examples/formulario_login/formulario_login.gv",
+        )
         .expect("o template do exemplo formulario_login deve parsear e avaliar sem erro");
 
     let evaluated = motor.evaluated("formulario_login_smoke").unwrap();
@@ -1607,8 +1846,17 @@ fn test_fragment_component_splices_if_else_branch() {
 
     assert_eq!(evaluated.kind, NodeType::Column);
     // Two spliced siblings — neither is a Fragment wrapper.
-    assert_eq!(evaluated.children.len(), 2, "fragment children should be spliced, not wrapped");
-    assert!(evaluated.children.iter().all(|c| c.kind != NodeType::Fragment));
+    assert_eq!(
+        evaluated.children.len(),
+        2,
+        "fragment children should be spliced, not wrapped"
+    );
+    assert!(
+        evaluated
+            .children
+            .iter()
+            .all(|c| c.kind != NodeType::Fragment)
+    );
 
     // `class` is resolved into style fields (and cleared) during evaluation,
     // so branches are identified by their structure instead: the `else` card
@@ -1616,14 +1864,21 @@ fn test_fragment_component_splices_if_else_branch() {
     //
     // First instance (filler="0") → the `else` card branch, carrying the name.
     let first = &evaluated.children[0];
-    assert_eq!(first.children.len(), 1, "card branch has one child (the name Text)");
+    assert_eq!(
+        first.children.len(),
+        1,
+        "card branch has one child (the name Text)"
+    );
     if let NodeType::Text { content, .. } = &first.children[0].kind {
         assert_eq!(content, "Alice");
     } else {
         panic!("card branch should contain the name Text");
     }
     // Second instance (filler="1") → the empty `if` filler branch.
-    assert!(evaluated.children[1].children.is_empty(), "filler branch is empty");
+    assert!(
+        evaluated.children[1].children.is_empty(),
+        "filler branch is empty"
+    );
 
     std::fs::remove_file(card).ok();
     std::fs::remove_file(main).ok();
@@ -1736,9 +1991,8 @@ fn tooltip_parses_interpolates_and_renders() {
     let ast_alias = UiNode::parse_xml(r#"<Button text="x" title="Ajuda 2" />"#).unwrap();
     assert_eq!(ast_alias.tooltip.as_deref(), Some("Ajuda 2"));
 
-    let ast_pos = UiNode::parse_xml(
-        r#"<Button text="x" tooltip="Ajuda" tooltipPosition="left" />"#,
-    ).unwrap();
+    let ast_pos =
+        UiNode::parse_xml(r#"<Button text="x" tooltip="Ajuda" tooltipPosition="left" />"#).unwrap();
     assert_eq!(ast_pos.tooltip_position.as_deref(), Some("left"));
 
     // Sem tooltip, o campo fica None (não vira string vazia nem afeta o render).
@@ -1772,7 +2026,10 @@ fn tooltip_parses_interpolates_and_renders() {
     assert_eq!(row_node.tooltip.as_deref(), Some("linha sem clique"));
     assert_eq!(row_node.tooltip_position.as_deref(), Some("bottom"));
 
-    assert!(motor.render("tipcomp").is_ok(), "render com tooltip não deve panicar");
+    assert!(
+        motor.render("tipcomp").is_ok(),
+        "render com tooltip não deve panicar"
+    );
 
     std::fs::remove_file(tpl).ok();
 }

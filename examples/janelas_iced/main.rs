@@ -13,8 +13,7 @@ use iced::window;
 use iced::{Element, Point, Size, Task};
 
 fn main() -> iced::Result {
-    App::bootstrap()
-        .run()
+    App::bootstrap().run()
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +96,6 @@ impl App {
     }
 
     fn view(&self, janela: window::Id) -> Element<'_, Message> {
-
         let abertas = self.filhas.len();
         let a = center(
             column![
@@ -124,7 +122,6 @@ impl App {
         } else {
             b.into()
         }
-
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
@@ -133,13 +130,8 @@ impl App {
         subscription.map(Message::JanelaFechada)
     }
 
-    fn bootstrap() -> iced::Daemon<
-        impl iced::Program<
-            State = App,
-            Message = Message,
-            Theme = iced::Theme
-        >
-    > {
+    fn bootstrap()
+    -> iced::Daemon<impl iced::Program<State = App, Message = Message, Theme = iced::Theme>> {
         iced::daemon(App::new, App::update, App::view)
             .title(App::title)
             .subscription(App::subscription)

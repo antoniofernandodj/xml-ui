@@ -51,14 +51,16 @@ impl Component for ListaReordenavel {
     fn update(&mut self, action: &str, value: Option<&str>, ctx: &mut Context) {
         if action == "reordenar" {
             let Some(value) = value else { return };
-            let Ok(ids) = serde_json::from_str::<Vec<String>>(value) else { return };
-    
+            let Ok(ids) = serde_json::from_str::<Vec<String>>(value) else {
+                return;
+            };
+
             // Reordena `self.tarefas` seguindo a nova ordem de ids que o motor
             // já vinha refletindo ao vivo no contexto enquanto o usuário arrastava.
             let mut by_id: HashMap<String, Tarefa> =
                 self.tarefas.drain(..).map(|t| (t.id.clone(), t)).collect();
             self.tarefas = ids.into_iter().filter_map(|id| by_id.remove(&id)).collect();
-    
+
             ctx.set("ultima_ordem", value.to_string());
             self.sincronizar(ctx);
         }
@@ -72,9 +74,18 @@ fn main() -> iced::Result {
         .title("Glacier - Lista Reordenável (drag-and-drop)")
         .main(|motor| {
             let tarefas = vec![
-                Tarefa { id: "1".into(), nome: "Revisar PR".into() },
-                Tarefa { id: "2".into(), nome: "Escrever changelog".into() },
-                Tarefa { id: "3".into(), nome: "Publicar release".into() },
+                Tarefa {
+                    id: "1".into(),
+                    nome: "Revisar PR".into(),
+                },
+                Tarefa {
+                    id: "2".into(),
+                    nome: "Escrever changelog".into(),
+                },
+                Tarefa {
+                    id: "3".into(),
+                    nome: "Publicar release".into(),
+                },
             ];
 
             if let Err(e) = motor.register(Box::new(ListaReordenavel { tarefas })) {

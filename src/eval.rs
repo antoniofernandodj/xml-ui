@@ -1,7 +1,9 @@
-use std::collections::HashMap;
 use crate::error::Result;
-use crate::parser::{UiNode, NodeType, NumAttr};
-use crate::stylesheet::{StyleSheet, StyleRule, StateStyles, resolve_classes, resolve_state_classes};
+use crate::parser::{NodeType, NumAttr, UiNode};
+use crate::stylesheet::{
+    StateStyles, StyleRule, StyleSheet, resolve_classes, resolve_state_classes,
+};
+use std::collections::HashMap;
 
 /// Splits a `<script>...</script>` block out of an XML document, returning the
 /// markup with the block removed and the script body (if any).
@@ -74,7 +76,8 @@ pub fn normalize_bare_directives(xml: &str) -> String {
     while i < chars.len() {
         if in_comment {
             // Check for end of comment "-->"
-            if i + 2 < chars.len() && chars[i] == '-' && chars[i+1] == '-' && chars[i+2] == '>' {
+            if i + 2 < chars.len() && chars[i] == '-' && chars[i + 1] == '-' && chars[i + 2] == '>'
+            {
                 result.push('-');
                 result.push('-');
                 result.push('>');
@@ -88,7 +91,12 @@ pub fn normalize_bare_directives(xml: &str) -> String {
         }
 
         // Check for start of comment "<!--"
-        if i + 3 < chars.len() && chars[i] == '<' && chars[i+1] == '!' && chars[i+2] == '-' && chars[i+3] == '-' {
+        if i + 3 < chars.len()
+            && chars[i] == '<'
+            && chars[i + 1] == '!'
+            && chars[i + 2] == '-'
+            && chars[i + 3] == '-'
+        {
             result.push_str("<!--");
             in_comment = true;
             i += 4;
@@ -129,14 +137,14 @@ pub fn normalize_bare_directives(xml: &str) -> String {
                     // Match "else" or "senao" (case-insensitive)
                     let remaining_len = chars.len() - i;
                     if remaining_len >= 4 {
-                        let word: String = chars[i..i+4].iter().collect();
+                        let word: String = chars[i..i + 4].iter().collect();
                         if word.eq_ignore_ascii_case("else") {
                             matched_len = Some(4);
                             replaced_with = Some("else=\"\"");
                         }
                     }
                     if matched_len.is_none() && remaining_len >= 5 {
-                        let word: String = chars[i..i+5].iter().collect();
+                        let word: String = chars[i..i + 5].iter().collect();
                         if word.eq_ignore_ascii_case("senao") {
                             matched_len = Some(5);
                             replaced_with = Some("senao=\"\"");
@@ -153,7 +161,8 @@ pub fn normalize_bare_directives(xml: &str) -> String {
                             while next_idx < chars.len() && chars[next_idx].is_ascii_whitespace() {
                                 next_idx += 1;
                             }
-                            let is_followed_by_equals = next_idx < chars.len() && chars[next_idx] == '=';
+                            let is_followed_by_equals =
+                                next_idx < chars.len() && chars[next_idx] == '=';
 
                             if !is_followed_by_equals {
                                 // It is a bare attribute! Replace it.
@@ -258,7 +267,10 @@ impl Reads {
     }
 
     fn push(&self, depth: u32) {
-        self.frames.borrow_mut().push(Frame { depth, reads: HashMap::new() });
+        self.frames.borrow_mut().push(Frame {
+            depth,
+            reads: HashMap::new(),
+        });
     }
 
     /// Fecha o quadro corrente, devolvendo **todas** as suas dependências (é o
@@ -266,11 +278,16 @@ impl Reads {
     /// propagando para o quadro de fora só as que vêm de fora dele.
     fn pop(&self) -> Deps {
         let mut frames = self.frames.borrow_mut();
-        let Some(frame) = frames.pop() else { return Vec::new() };
+        let Some(frame) = frames.pop() else {
+            return Vec::new();
+        };
         if let Some(parent) = frames.last_mut() {
             for (k, (v, src)) in &frame.reads {
                 if *src < frame.depth {
-                    parent.reads.entry(k.clone()).or_insert_with(|| (v.clone(), *src));
+                    parent
+                        .reads
+                        .entry(k.clone())
+                        .or_insert_with(|| (v.clone(), *src));
                 }
             }
         }
@@ -285,13 +302,18 @@ impl Reads {
     /// sobe o que foi resolvido fora dela.
     fn merge(&self, deps: &[(String, Option<String>)], depth: u32, ctx: &EvalCtx) {
         let mut frames = self.frames.borrow_mut();
-        let Some(frame) = frames.last_mut() else { return };
+        let Some(frame) = frames.last_mut() else {
+            return;
+        };
         for (k, v) in deps {
             // A entrada de cache guarda o valor, não a origem — recalculamos a
             // profundidade contra as camadas de agora (as mesmas contra as quais
             // as dependências acabaram de ser validadas).
             if ctx.src_depth(k) < depth {
-                frame.reads.entry(k.clone()).or_insert_with(|| (v.clone(), ctx.src_depth(k)));
+                frame
+                    .reads
+                    .entry(k.clone())
+                    .or_insert_with(|| (v.clone(), ctx.src_depth(k)));
             }
         }
     }
@@ -362,7 +384,10 @@ pub struct Layer<'a> {
 
 impl<'a> Layer<'a> {
     fn new(outer: Option<&'a Layer<'a>>) -> Self {
-        Self { vars: Vec::new(), outer }
+        Self {
+            vars: Vec::new(),
+            outer,
+        }
     }
 
     fn set(&mut self, key: String, value: String) {
@@ -393,12 +418,24 @@ impl<'a> Layer<'a> {
 impl<'a> EvalCtx<'a> {
     /// Contexto de avaliação sobre `base`, sem camadas nem rastreamento.
     pub fn new(base: &'a HashMap<String, String>) -> Self {
-        Self { base, layer: None, reads: None, path: 0, depth: 0 }
+        Self {
+            base,
+            layer: None,
+            reads: None,
+            path: 0,
+            depth: 0,
+        }
     }
 
     /// O mesmo, rastreando as leituras em `reads` (o que habilita o cache).
     fn tracked(base: &'a HashMap<String, String>, reads: &'a Reads) -> Self {
-        Self { base, layer: None, reads: Some(reads), path: 0, depth: 0 }
+        Self {
+            base,
+            layer: None,
+            reads: Some(reads),
+            path: 0,
+            depth: 0,
+        }
     }
 
     /// Resolve `key` sem registrar a leitura: o valor e a profundidade da camada
@@ -481,7 +518,9 @@ fn reuse(ctx: &EvalCtx, cache: &mut EvalCache, out: &mut Vec<UiNode>) -> bool {
         .filter(|e| ctx.deps_hold(&e.deps))
         .map(|e| (e.deps.clone(), e.nodes.clone()));
 
-    let Some((deps, nodes)) = hit else { return false };
+    let Some((deps, nodes)) = hit else {
+        return false;
+    };
     if let Some(r) = ctx.reads {
         r.merge(&deps, ctx.depth, ctx);
     }
@@ -495,7 +534,13 @@ fn reuse(ctx: &EvalCtx, cache: &mut EvalCache, out: &mut Vec<UiNode>) -> bool {
 fn store(ctx: &EvalCtx, cache: &mut EvalCache, nodes: &[UiNode]) {
     let Some(reads) = ctx.reads else { return };
     let deps = reads.pop();
-    cache.entries.insert(ctx.path, CacheEntry { deps, nodes: nodes.to_vec() });
+    cache.entries.insert(
+        ctx.path,
+        CacheEntry {
+            deps,
+            nodes: nodes.to_vec(),
+        },
+    );
     cache.live.insert(ctx.path);
 }
 
@@ -654,9 +699,10 @@ impl<'a> StyleContext<'a> {
     fn active(&self, scope: Option<&str>) -> Vec<&StyleSheet> {
         let mut sheets: Vec<&StyleSheet> = self.global.iter().collect();
         if let Some(name) = scope
-            && let Some(scoped) = self.by_component.get(name) {
-                sheets.extend(scoped.iter());
-            }
+            && let Some(scoped) = self.by_component.get(name)
+        {
+            sheets.extend(scoped.iter());
+        }
         sheets
     }
 }
@@ -682,7 +728,10 @@ fn expand_children(
     // can bind to it. Reset by any other (non-else) node.
     let mut last_if: Option<bool> = None;
     for child in children {
-        if matches!(child.kind, NodeType::Import { .. } | NodeType::Link { .. } | NodeType::Style { .. }) {
+        if matches!(
+            child.kind,
+            NodeType::Import { .. } | NodeType::Link { .. } | NodeType::Style { .. }
+        ) {
             continue;
         }
 
@@ -692,78 +741,82 @@ fn expand_children(
             let items_evaluated = process_tpl(items, context);
             // Drag-and-drop: resolved once per for-each, reused by every item.
             let reorder_key = child.reorder_key.as_ref().map(|s| process_tpl(s, context));
-            let on_reorder = child.on_reorder.as_ref()
+            let on_reorder = child
+                .on_reorder
+                .as_ref()
                 .map(|s| namespace_action(process_tpl(s, context), owner));
             if let Some(json_str) = context.get(&items_evaluated)
                 && let Ok(serde_json::Value::Array(arr)) =
                     serde_json::from_str::<serde_json::Value>(json_str)
-                {
-                    // Full identity snapshot, needed by the handle's `DragStart`.
-                    let full_order: Vec<String> = match &reorder_key {
-                        Some(rk) => arr.iter()
-                            .filter_map(|item| item.get(rk).and_then(|v| v.as_str()).map(String::from))
-                            .collect(),
-                        None => Vec::new(),
-                    };
-                    // Uma lista reordenável NÃO entra no cache: o corpo de cada
-                    // item carrega `drag_order` — a ordem inteira da lista —
-                    // INJETADO por `hydrate_drag_item`, não lido do contexto.
-                    // Como o rastreamento só enxerga leituras, uma entrada de
-                    // cache não teria como perceber que a ordem mudou, e serviria
-                    // um item com a ordem velha. São listas pequenas (env vars);
-                    // reavaliá-las sempre não custa nada.
-                    let cacheable = on_reorder.is_none();
+            {
+                // Full identity snapshot, needed by the handle's `DragStart`.
+                let full_order: Vec<String> = match &reorder_key {
+                    Some(rk) => arr
+                        .iter()
+                        .filter_map(|item| item.get(rk).and_then(|v| v.as_str()).map(String::from))
+                        .collect(),
+                    None => Vec::new(),
+                };
+                // Uma lista reordenável NÃO entra no cache: o corpo de cada
+                // item carrega `drag_order` — a ordem inteira da lista —
+                // INJETADO por `hydrate_drag_item`, não lido do contexto.
+                // Como o rastreamento só enxerga leituras, uma entrada de
+                // cache não teria como perceber que a ordem mudou, e serviria
+                // um item com a ordem velha. São listas pequenas (env vars);
+                // reavaliá-las sempre não custa nada.
+                let cacheable = on_reorder.is_none();
 
-                    for (index, item) in arr.into_iter().enumerate() {
-                        // Variáveis do item numa CAMADA sobre o contexto, sem
-                        // clonar a base (ver `EvalCtx`).
-                        let (layer, this_key) =
-                            item_layer(&item, var, reorder_key.as_deref(), context);
-                        let item_ctx = context.with(&layer, mix(child.node_id, index as u64));
+                for (index, item) in arr.into_iter().enumerate() {
+                    // Variáveis do item numa CAMADA sobre o contexto, sem
+                    // clonar a base (ver `EvalCtx`).
+                    let (layer, this_key) = item_layer(&item, var, reorder_key.as_deref(), context);
+                    let item_ctx = context.with(&layer, mix(child.node_id, index as u64));
 
-                        if cacheable && reuse(&item_ctx, cache, out) {
-                            continue;
-                        }
-
-                        // Clone the child without the for_each directive
-                        let mut clone = child.clone();
-                        clone.for_each = None;
-                        clone.for_each_var = None;
-                        clone.on_reorder = None;
-                        clone.reorder_key = None;
-
-                        if let (Some(on_reorder), Some(key), Some(rk)) = (&on_reorder, &this_key, &reorder_key) {
-                            hydrate_drag_item(
-                                std::slice::from_mut(&mut clone),
-                                &items_evaluated,
-                                key,
-                                &full_order,
-                                on_reorder,
-                                rk,
-                            );
-                        }
-
-                        // Expand the single child in the new context (which will evaluate its if condition if present)
-                        let mut item_out = Vec::new();
-                        if cacheable {
-                            item_ctx.push_frame();
-                        }
-                        expand_children(
-                            std::slice::from_ref(&clone),
-                            &item_ctx,
-                            templates,
-                            styles,
-                            scope,
-                            owner,
-                            &mut item_out,
-                            cache,
-                        )?;
-                        if cacheable {
-                            store(&item_ctx, cache, &item_out);
-                        }
-                        out.extend(item_out);
+                    if cacheable && reuse(&item_ctx, cache, out) {
+                        continue;
                     }
+
+                    // Clone the child without the for_each directive
+                    let mut clone = child.clone();
+                    clone.for_each = None;
+                    clone.for_each_var = None;
+                    clone.on_reorder = None;
+                    clone.reorder_key = None;
+
+                    if let (Some(on_reorder), Some(key), Some(rk)) =
+                        (&on_reorder, &this_key, &reorder_key)
+                    {
+                        hydrate_drag_item(
+                            std::slice::from_mut(&mut clone),
+                            &items_evaluated,
+                            key,
+                            &full_order,
+                            on_reorder,
+                            rk,
+                        );
+                    }
+
+                    // Expand the single child in the new context (which will evaluate its if condition if present)
+                    let mut item_out = Vec::new();
+                    if cacheable {
+                        item_ctx.push_frame();
+                    }
+                    expand_children(
+                        std::slice::from_ref(&clone),
+                        &item_ctx,
+                        templates,
+                        styles,
+                        scope,
+                        owner,
+                        &mut item_out,
+                        cache,
+                    )?;
+                    if cacheable {
+                        store(&item_ctx, cache, &item_out);
+                    }
+                    out.extend(item_out);
                 }
+            }
             last_if = None;
             continue;
         }
@@ -774,7 +827,9 @@ fn expand_children(
                 // Clone child and clear else directive
                 let mut clone = child.clone();
                 clone.is_else = false;
-                out.push(eval_owned(&clone, context, templates, styles, scope, owner, None, None, cache)?);
+                out.push(eval_owned(
+                    &clone, context, templates, styles, scope, owner, None, None, cache,
+                )?);
             }
             last_if = None;
             continue;
@@ -789,7 +844,9 @@ fn expand_children(
                 clone.if_cond = None;
                 clone.if_equals = None;
                 clone.if_not_equals = None;
-                out.push(eval_owned(&clone, context, templates, styles, scope, owner, None, None, cache)?);
+                out.push(eval_owned(
+                    &clone, context, templates, styles, scope, owner, None, None, cache,
+                )?);
             }
             last_if = Some(truthy);
             continue;
@@ -804,78 +861,116 @@ fn expand_children(
                 // Drag-and-drop: `onReorder`/`reorderKey` on the `<ForEach>` tag
                 // itself (a plain node attribute, same as `onPress`/`cursor`).
                 let reorder_key = child.reorder_key.as_ref().map(|s| process_tpl(s, context));
-                let on_reorder = child.on_reorder.as_ref()
+                let on_reorder = child
+                    .on_reorder
+                    .as_ref()
                     .map(|s| namespace_action(process_tpl(s, context), owner));
                 if let Some(json_str) = context.get(&items_evaluated)
                     && let Ok(serde_json::Value::Array(arr)) =
                         serde_json::from_str::<serde_json::Value>(json_str)
-                    {
-                        let full_order: Vec<String> = match &reorder_key {
-                            Some(rk) => arr.iter()
-                                .filter_map(|item| item.get(rk).and_then(|v| v.as_str()).map(String::from))
-                                .collect(),
-                            None => Vec::new(),
-                        };
-                        // Ver o porquê no `for-each` de atributo, acima.
-                        let cacheable = on_reorder.is_none();
+                {
+                    let full_order: Vec<String> = match &reorder_key {
+                        Some(rk) => arr
+                            .iter()
+                            .filter_map(|item| {
+                                item.get(rk).and_then(|v| v.as_str()).map(String::from)
+                            })
+                            .collect(),
+                        None => Vec::new(),
+                    };
+                    // Ver o porquê no `for-each` de atributo, acima.
+                    let cacheable = on_reorder.is_none();
 
-                        for (index, item) in arr.into_iter().enumerate() {
-                            // Variáveis do item numa CAMADA sobre o contexto, sem
-                            // clonar a base (ver `EvalCtx`).
-                            let (layer, this_key) =
-                                item_layer(&item, var, reorder_key.as_deref(), context);
-                            let item_ctx = context.with(&layer, mix(child.node_id, index as u64));
+                    for (index, item) in arr.into_iter().enumerate() {
+                        // Variáveis do item numa CAMADA sobre o contexto, sem
+                        // clonar a base (ver `EvalCtx`).
+                        let (layer, this_key) =
+                            item_layer(&item, var, reorder_key.as_deref(), context);
+                        let item_ctx = context.with(&layer, mix(child.node_id, index as u64));
 
-                            if cacheable && reuse(&item_ctx, cache, out) {
-                                continue;
-                            }
-
-                            // The `<ForEach>` tag's body isn't a single node like
-                            // the attribute form's — clone its children so the
-                            // hydration below has somewhere of its own to live.
-                            let mut body: Vec<UiNode> = child.children.clone();
-                            if let (Some(on_reorder), Some(key), Some(rk)) = (&on_reorder, &this_key, &reorder_key) {
-                                hydrate_drag_item(&mut body, &items_evaluated, key, &full_order, on_reorder, rk);
-                            }
-                            // Re-run the structural expansion on the body so that
-                            // nested `if`/`else`/`ForEach` are honoured per item.
-                            let mut item_out = Vec::new();
-                            if cacheable {
-                                item_ctx.push_frame();
-                            }
-                            expand_children(
-                                &body,
-                                &item_ctx,
-                                templates,
-                                styles,
-                                scope,
-                                owner,
-                                &mut item_out,
-                                cache,
-                            )?;
-                            if cacheable {
-                                store(&item_ctx, cache, &item_out);
-                            }
-                            out.extend(item_out);
+                        if cacheable && reuse(&item_ctx, cache, out) {
+                            continue;
                         }
+
+                        // The `<ForEach>` tag's body isn't a single node like
+                        // the attribute form's — clone its children so the
+                        // hydration below has somewhere of its own to live.
+                        let mut body: Vec<UiNode> = child.children.clone();
+                        if let (Some(on_reorder), Some(key), Some(rk)) =
+                            (&on_reorder, &this_key, &reorder_key)
+                        {
+                            hydrate_drag_item(
+                                &mut body,
+                                &items_evaluated,
+                                key,
+                                &full_order,
+                                on_reorder,
+                                rk,
+                            );
+                        }
+                        // Re-run the structural expansion on the body so that
+                        // nested `if`/`else`/`ForEach` are honoured per item.
+                        let mut item_out = Vec::new();
+                        if cacheable {
+                            item_ctx.push_frame();
+                        }
+                        expand_children(
+                            &body,
+                            &item_ctx,
+                            templates,
+                            styles,
+                            scope,
+                            owner,
+                            &mut item_out,
+                            cache,
+                        )?;
+                        if cacheable {
+                            store(&item_ctx, cache, &item_out);
+                        }
+                        out.extend(item_out);
                     }
+                }
                 last_if = None;
             }
-            NodeType::If { cond, equals, not_equals } => {
+            NodeType::If {
+                cond,
+                equals,
+                not_equals,
+            } => {
                 let truthy = eval_condition(cond, equals, not_equals, context);
                 if truthy {
-                    expand_children(&child.children, context, templates, styles, scope, owner, out, cache)?;
+                    expand_children(
+                        &child.children,
+                        context,
+                        templates,
+                        styles,
+                        scope,
+                        owner,
+                        out,
+                        cache,
+                    )?;
                 }
                 last_if = Some(truthy);
             }
             NodeType::Else => {
                 if last_if == Some(false) {
-                    expand_children(&child.children, context, templates, styles, scope, owner, out, cache)?;
+                    expand_children(
+                        &child.children,
+                        context,
+                        templates,
+                        styles,
+                        scope,
+                        owner,
+                        out,
+                        cache,
+                    )?;
                 }
                 last_if = None;
             }
             _ => {
-                let n = eval_owned(child, context, templates, styles, scope, owner, None, None, cache)?;
+                let n = eval_owned(
+                    child, context, templates, styles, scope, owner, None, None, cache,
+                )?;
                 // A `Fragment` (a multi-root component template, or an explicit
                 // `Fragment { … }`) is transparent: splice its already-evaluated
                 // children into this list instead of pushing a wrapper node, so
@@ -912,7 +1007,9 @@ pub fn evaluate_node(
     // árvore uma vez. O motor usa [`evaluate_template`].
     let ctx = EvalCtx::new(context);
     let mut cache = EvalCache::default();
-    eval_owned(node, &ctx, templates, styles, scope, None, None, None, &mut cache)
+    eval_owned(
+        node, &ctx, templates, styles, scope, None, None, None, &mut cache,
+    )
 }
 
 /// Avalia um template **rastreando** as chaves de contexto que ele lê e
@@ -933,7 +1030,9 @@ pub fn evaluate_template(
     let reads = Reads::default();
     reads.push(0);
     let ctx = EvalCtx::tracked(context, &reads);
-    let tree = eval_owned(node, &ctx, templates, styles, scope, None, None, None, cache)?;
+    let tree = eval_owned(
+        node, &ctx, templates, styles, scope, None, None, None, cache,
+    )?;
     let deps = reads.pop();
     // Entradas de subárvores que sumiram (uma linha removida da lista) viram
     // lixo; varrer aqui mantém o cache do tamanho da tela, não do histórico.
@@ -955,7 +1054,9 @@ fn namespace_action(action: String, owner: Option<&str>) -> String {
     match owner {
         Some(name)
             if !action.is_empty()
-                && !BUILTIN_ACTION_PREFIXES.iter().any(|p| action.starts_with(p)) =>
+                && !BUILTIN_ACTION_PREFIXES
+                    .iter()
+                    .any(|p| action.starts_with(p)) =>
         {
             format!("{}::{}", name, action)
         }
@@ -1030,15 +1131,34 @@ fn eval_owned(
         if styles.has_tag_rules {
             let active = styles.active(scope);
             let tag = name.to_lowercase();
-            underlay_rule.merge_from(&resolve_classes(Some(&tag), "", None, &active, styles.viewport));
-            underlay_st.merge_from(&resolve_state_classes(Some(&tag), "", None, &active, styles.viewport));
+            underlay_rule.merge_from(&resolve_classes(
+                Some(&tag),
+                "",
+                None,
+                &active,
+                styles.viewport,
+            ));
+            underlay_st.merge_from(&resolve_state_classes(
+                Some(&tag),
+                "",
+                None,
+                &active,
+                styles.viewport,
+            ));
         }
 
         // The referenced subtree's actions and scoped styles belong to `name`
         // (innermost wins).
         let root = eval_owned(
-            template_ast, &local_context, templates, styles, Some(name), Some(name),
-            Some(&underlay_rule), Some(&underlay_st), cache,
+            template_ast,
+            &local_context,
+            templates,
+            styles,
+            Some(name),
+            Some(name),
+            Some(&underlay_rule),
+            Some(&underlay_st),
+            cache,
         )?;
         store(&local_context, cache, std::slice::from_ref(&root));
         return Ok(root);
@@ -1060,17 +1180,30 @@ fn eval_owned(
         let mut base = underlay.cloned().unwrap_or_default();
         let mut states = underlay_states.cloned().unwrap_or_default();
         let tag = node.kind.tag_name();
-        let needs_lookup = node.class.is_some()
-            || node.id.is_some()
-            || (tag.is_some() && styles.has_tag_rules);
+        let needs_lookup =
+            node.class.is_some() || node.id.is_some() || (tag.is_some() && styles.has_tag_rules);
         if needs_lookup {
             let active = styles.active(scope);
-            let processed = node.class.as_deref()
+            let processed = node
+                .class
+                .as_deref()
                 .map(|c| process_tpl(c, context))
                 .unwrap_or_default();
             let id = node.id.as_deref().map(|i| process_tpl(i, context));
-            base.merge_from(&resolve_classes(tag, &processed, id.as_deref(), &active, styles.viewport));
-            states.merge_from(&resolve_state_classes(tag, &processed, id.as_deref(), &active, styles.viewport));
+            base.merge_from(&resolve_classes(
+                tag,
+                &processed,
+                id.as_deref(),
+                &active,
+                styles.viewport,
+            ));
+            states.merge_from(&resolve_state_classes(
+                tag,
+                &processed,
+                id.as_deref(),
+                &active,
+                styles.viewport,
+            ));
         }
         (base, states)
     };
@@ -1090,102 +1223,136 @@ fn eval_owned(
         NodeType::Container => NodeType::Container,
         NodeType::Column => NodeType::Column,
         NodeType::Row => NodeType::Row,
-        NodeType::Text { content, size, bold, color } => {
-            NodeType::Text {
-                content: process_tpl(content, context),
-                size: num_template(NumAttr::Size).or(*size).or(style.size),
-                bold: *bold || style.bold.unwrap_or(false),
-                color: color.as_ref()
-                    .map(|c| process_tpl(c, context))
-                    .or_else(|| style.color.clone()),
-            }
-        }
-        NodeType::Button { text, on_click, navigate_to, navigate_back, color } => {
-            NodeType::Button {
-                text: process_tpl(text, context),
-                on_click: on_click.as_ref()
-                    .map(|o| namespace_action(process_tpl(o, context), owner)),
-                navigate_to: navigate_to.as_ref().map(|n| process_tpl(n, context)),
-                navigate_back: *navigate_back,
-                color: color.as_ref()
-                    .map(|c| process_tpl(c, context))
-                    .or_else(|| style.color.clone()),
-            }
-        }
-        NodeType::TextInput { placeholder, value_var, on_change, secure } => {
-            NodeType::TextInput {
-                placeholder: process_tpl(placeholder, context),
-                value_var: process_tpl(value_var, context),
-                on_change: namespace_action(process_tpl(on_change, context), owner),
-                secure: *secure,
-            }
-        }
-        NodeType::TextArea { placeholder, value_var, on_change, readonly } => {
-            NodeType::TextArea {
-                placeholder: process_tpl(placeholder, context),
-                value_var: process_tpl(value_var, context),
-                on_change: namespace_action(process_tpl(on_change, context), owner),
-                readonly: *readonly,
-            }
-        }
-        NodeType::Image { source, clip_circle } => {
-            NodeType::Image {
-                source: process_tpl(source, context),
-                clip_circle: *clip_circle,
-            }
-        }
-        NodeType::Svg { source, color } => {
-            NodeType::Svg {
-                source: process_tpl(source, context),
-                color: color.as_ref()
-                    .map(|c| process_tpl(c, context))
-                    .or_else(|| style.color.clone()),
-            }
-        }
-        NodeType::Scrollable { direction } => NodeType::Scrollable { direction: direction.clone() },
-        NodeType::Checkbox { label, checked_var, on_toggle } => {
-            NodeType::Checkbox {
-                label: process_tpl(label, context),
-                checked_var: process_tpl(checked_var, context),
-                on_toggle: namespace_action(process_tpl(on_toggle, context), owner),
-            }
-        }
-        NodeType::Toggle { label, checked_var, on_toggle } => {
-            NodeType::Toggle {
-                label: process_tpl(label, context),
-                checked_var: process_tpl(checked_var, context),
-                on_toggle: namespace_action(process_tpl(on_toggle, context), owner),
-            }
-        }
-        NodeType::Rule { horizontal } => NodeType::Rule { horizontal: *horizontal },
-        NodeType::Select { options, value_var, on_change, placeholder, label_field, value_field, color } => {
-            NodeType::Select {
-                options: process_tpl(options, context),
-                value_var: process_tpl(value_var, context),
-                on_change: namespace_action(process_tpl(on_change, context), owner),
-                placeholder: process_tpl(placeholder, context),
-                label_field: label_field.clone(),
-                value_field: value_field.clone(),
-                color: color.as_ref()
-                    .map(|c| process_tpl(c, context))
-                    .or_else(|| style.color.clone()),
-            }
-        }
-        NodeType::Form { on_submit, name } => {
-            NodeType::Form {
-                on_submit: on_submit.as_ref().map(|s| namespace_action(process_tpl(s, context), owner)),
-                name: name.as_ref().map(|n| process_tpl(n, context)),
-            }
-        }
+        NodeType::Text {
+            content,
+            size,
+            bold,
+            color,
+        } => NodeType::Text {
+            content: process_tpl(content, context),
+            size: num_template(NumAttr::Size).or(*size).or(style.size),
+            bold: *bold || style.bold.unwrap_or(false),
+            color: color
+                .as_ref()
+                .map(|c| process_tpl(c, context))
+                .or_else(|| style.color.clone()),
+        },
+        NodeType::Button {
+            text,
+            on_click,
+            navigate_to,
+            navigate_back,
+            color,
+        } => NodeType::Button {
+            text: process_tpl(text, context),
+            on_click: on_click
+                .as_ref()
+                .map(|o| namespace_action(process_tpl(o, context), owner)),
+            navigate_to: navigate_to.as_ref().map(|n| process_tpl(n, context)),
+            navigate_back: *navigate_back,
+            color: color
+                .as_ref()
+                .map(|c| process_tpl(c, context))
+                .or_else(|| style.color.clone()),
+        },
+        NodeType::TextInput {
+            placeholder,
+            value_var,
+            on_change,
+            secure,
+        } => NodeType::TextInput {
+            placeholder: process_tpl(placeholder, context),
+            value_var: process_tpl(value_var, context),
+            on_change: namespace_action(process_tpl(on_change, context), owner),
+            secure: *secure,
+        },
+        NodeType::TextArea {
+            placeholder,
+            value_var,
+            on_change,
+            readonly,
+        } => NodeType::TextArea {
+            placeholder: process_tpl(placeholder, context),
+            value_var: process_tpl(value_var, context),
+            on_change: namespace_action(process_tpl(on_change, context), owner),
+            readonly: *readonly,
+        },
+        NodeType::Image {
+            source,
+            clip_circle,
+        } => NodeType::Image {
+            source: process_tpl(source, context),
+            clip_circle: *clip_circle,
+        },
+        NodeType::Svg { source, color } => NodeType::Svg {
+            source: process_tpl(source, context),
+            color: color
+                .as_ref()
+                .map(|c| process_tpl(c, context))
+                .or_else(|| style.color.clone()),
+        },
+        NodeType::Scrollable { direction } => NodeType::Scrollable {
+            direction: direction.clone(),
+        },
+        NodeType::Checkbox {
+            label,
+            checked_var,
+            on_toggle,
+        } => NodeType::Checkbox {
+            label: process_tpl(label, context),
+            checked_var: process_tpl(checked_var, context),
+            on_toggle: namespace_action(process_tpl(on_toggle, context), owner),
+        },
+        NodeType::Toggle {
+            label,
+            checked_var,
+            on_toggle,
+        } => NodeType::Toggle {
+            label: process_tpl(label, context),
+            checked_var: process_tpl(checked_var, context),
+            on_toggle: namespace_action(process_tpl(on_toggle, context), owner),
+        },
+        NodeType::Rule { horizontal } => NodeType::Rule {
+            horizontal: *horizontal,
+        },
+        NodeType::Select {
+            options,
+            value_var,
+            on_change,
+            placeholder,
+            label_field,
+            value_field,
+            color,
+        } => NodeType::Select {
+            options: process_tpl(options, context),
+            value_var: process_tpl(value_var, context),
+            on_change: namespace_action(process_tpl(on_change, context), owner),
+            placeholder: process_tpl(placeholder, context),
+            label_field: label_field.clone(),
+            value_field: value_field.clone(),
+            color: color
+                .as_ref()
+                .map(|c| process_tpl(c, context))
+                .or_else(|| style.color.clone()),
+        },
+        NodeType::Form { on_submit, name } => NodeType::Form {
+            on_submit: on_submit
+                .as_ref()
+                .map(|s| namespace_action(process_tpl(s, context), owner)),
+            name: name.as_ref().map(|n| process_tpl(n, context)),
+        },
         // A `Fragment` carries through evaluation as-is; its children are
         // spliced into the parent by `expand_children` (below), so it stays
         // transparent instead of collapsing into a `Container` box.
         NodeType::Fragment => NodeType::Fragment,
-        NodeType::Include { .. } | NodeType::Component { .. } | NodeType::Import { .. }
-        | NodeType::ForEach { .. } | NodeType::If { .. } | NodeType::Else
-        | NodeType::Link { .. } | NodeType::Style { .. } => {
-            NodeType::Container
-        }
+        NodeType::Include { .. }
+        | NodeType::Component { .. }
+        | NodeType::Import { .. }
+        | NodeType::ForEach { .. }
+        | NodeType::If { .. }
+        | NodeType::Else
+        | NodeType::Link { .. }
+        | NodeType::Style { .. } => NodeType::Container,
     };
 
     // For each style field, the node's inline attribute wins; a `class` value
@@ -1204,24 +1371,37 @@ fn eval_owned(
     let align_y_eval = resolve(&node.align_y, &style.align_y);
     let background_eval = resolve(&node.background, &style.background);
     let border_color_eval = resolve(&node.border_color, &style.border_color);
-    let spacing_eval = num_template(NumAttr::Spacing).or(node.spacing).or(style.spacing);
-    let border_radius_eval = num_template(NumAttr::BorderRadius).or(node.border_radius).or(style.border_radius);
-    let border_width_eval = num_template(NumAttr::BorderWidth).or(node.border_width).or(style.border_width);
+    let spacing_eval = num_template(NumAttr::Spacing)
+        .or(node.spacing)
+        .or(style.spacing);
+    let border_radius_eval = num_template(NumAttr::BorderRadius)
+        .or(node.border_radius)
+        .or(style.border_radius);
+    let border_width_eval = num_template(NumAttr::BorderWidth)
+        .or(node.border_width)
+        .or(style.border_width);
     let font_eval = resolve(&node.font, &style.font);
     let gradient_eval = resolve(&node.gradient, &style.gradient);
     let text_align_eval = resolve(&node.text_align, &style.text_align);
     // `on_press` is behavior, not a style field; interpolate it directly so
     // actions like `onPress="window:{cmd}"` can bind context values.
     let on_press_eval = node.on_press.as_ref().map(|s| process_tpl(s, context));
-    let on_double_click_eval = node.on_double_click.as_ref().map(|s| process_tpl(s, context));
+    let on_double_click_eval = node
+        .on_double_click
+        .as_ref()
+        .map(|s| process_tpl(s, context));
     let cursor_eval = resolve(&node.cursor, &style.cursor);
     let text_color_eval = resolve(&node.text_color, &style.text_color);
     // `tooltip` é conteúdo, não estilo (sem equivalente `.classe { }`, como
     // `on_press`) — interpolado direto pra suportar `tooltip="{var}"`.
     let tooltip_eval = node.tooltip.as_ref().map(|s| process_tpl(s, context));
     let tooltip_position_eval = node.tooltip_position.clone();
-    let max_width_eval = num_template(NumAttr::MaxWidth).or(node.max_width).or(style.max_width);
-    let max_height_eval = num_template(NumAttr::MaxHeight).or(node.max_height).or(style.max_height);
+    let max_width_eval = num_template(NumAttr::MaxWidth)
+        .or(node.max_width)
+        .or(style.max_width);
+    let max_height_eval = num_template(NumAttr::MaxHeight)
+        .or(node.max_height)
+        .or(style.max_height);
     // `hidden` resolvido: inline vence a classe/`@media` (mesma precedência dos
     // demais campos). Consumido em `widget::render_node` (pulado no layout).
     let hidden_eval = node.hidden.or(style.hidden);
@@ -1232,7 +1412,11 @@ fn eval_owned(
     // realmente declarou algo para aquele estado, para não pagar uma
     // alocação por nó no caso comum (nenhum `:hover`/`:focus`/etc. no sheet).
     let box_state = |r: StyleRule| -> Option<Box<StyleRule>> {
-        if r == StyleRule::default() { None } else { Some(Box::new(r)) }
+        if r == StyleRule::default() {
+            None
+        } else {
+            Some(Box::new(r))
+        }
     };
     let hover_style_eval = box_state(state_styles.hover);
     let focus_style_eval = box_state(state_styles.focus);
@@ -1242,7 +1426,16 @@ fn eval_owned(
     // Evaluate children recursively. ForEach/if/else/Import are structural:
     // they are expanded or dropped rather than rendered directly.
     let mut children_eval = Vec::new();
-    expand_children(&node.children, context, templates, styles, scope, owner, &mut children_eval, cache)?;
+    expand_children(
+        &node.children,
+        context,
+        templates,
+        styles,
+        scope,
+        owner,
+        &mut children_eval,
+        cache,
+    )?;
 
     // A `<Form>` hydrates every `formControl`-bound descendant (at any depth,
     // through nested Rows/Columns) with the shared scope, its evaluated
@@ -1345,7 +1538,8 @@ fn collect_form_control_names(nodes: &[UiNode], out: &mut Vec<String>) {
 fn hydrate_form_controls(nodes: &mut [UiNode], order: &[String], scope: &str, on_submit: &str) {
     for node in nodes.iter_mut() {
         if let Some(name) = &node.form_control {
-            let next = order.iter()
+            let next = order
+                .iter()
                 .position(|n| n == name)
                 .and_then(|i| order.get(i + 1))
                 .cloned();
@@ -1376,7 +1570,14 @@ fn hydrate_drag_item(
     // first match (the old `find_handle` + `break`) left the *rendered* branch's
     // handle without drag metadata, so `DragStart` fired with no order and the
     // reorder silently did nothing.
-    fn hydrate_handles(node: &mut UiNode, list: &str, key: &str, order: &[String], on_reorder: &str, reorder_key: &str) {
+    fn hydrate_handles(
+        node: &mut UiNode,
+        list: &str,
+        key: &str,
+        order: &[String],
+        on_reorder: &str,
+        reorder_key: &str,
+    ) {
         if node.drag_handle {
             node.drag_list = Some(list.to_string());
             node.drag_item_key = Some(key.to_string());
@@ -1432,11 +1633,7 @@ mod tests {
     }
 
     /// Avalia `xml` com `sheet` como sheet global e um mapa de componentes.
-    fn eval_with(
-        xml: &str,
-        gss: &str,
-        templates: &HashMap<String, UiNode>,
-    ) -> UiNode {
+    fn eval_with(xml: &str, gss: &str, templates: &HashMap<String, UiNode>) -> UiNode {
         let global = vec![StyleSheet::parse(gss).unwrap()];
         let by_component: HashMap<String, Vec<StyleSheet>> = HashMap::new();
         let styles = StyleContext {
@@ -1451,7 +1648,11 @@ mod tests {
     #[test]
     fn builtin_tag_selector_applies_to_node() {
         // `Button { padding: 7 }` casa o kind builtin, sem class/id no nó.
-        let out = eval_with(r#"<Button text="x" />"#, "Button { padding: 7; }", &HashMap::new());
+        let out = eval_with(
+            r#"<Button text="x" />"#,
+            "Button { padding: 7; }",
+            &HashMap::new(),
+        );
         assert_eq!(out.padding.as_deref(), Some("7"));
     }
 
@@ -1489,7 +1690,11 @@ mod tests {
     #[test]
     fn tag_selector_ignored_without_any_tag_rule() {
         // Sem regra de tag no sheet, um nó pelado não paga resolução e nada muda.
-        let out = eval_with(r#"<Button text="x" />"#, ".unused { padding: 9; }", &HashMap::new());
+        let out = eval_with(
+            r#"<Button text="x" />"#,
+            ".unused { padding: 9; }",
+            &HashMap::new(),
+        );
         assert_eq!(out.padding, None);
     }
 }

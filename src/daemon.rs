@@ -341,7 +341,10 @@ impl Runtime {
             DaemonMessage::TickAll(msg) => {
                 // Aplica o tick a cada janela (clonando a mensagem por janela).
                 let ids: Vec<window::Id> = self.windows.keys().copied().collect();
-                let tasks: Vec<_> = ids.into_iter().map(|id| self.route(id, msg.clone())).collect();
+                let tasks: Vec<_> = ids
+                    .into_iter()
+                    .map(|id| self.route(id, msg.clone()))
+                    .collect();
                 Task::batch(tasks)
             }
         }
@@ -370,16 +373,19 @@ impl Runtime {
         // serial no Wayland (ver `Runtime::main_id`). O `close` ainda passa por
         // `Runtime::close`, para o gancho `on_close` poder salvar a geometria.
         if let EngineMessage::UiClick(action) = &msg
-            && let Some(cmd) = action.strip_prefix("window:") {
-                return match cmd {
-                    "close" => self.close(id),
-                    _ => window_control(id, cmd),
-                };
-            }
+            && let Some(cmd) = action.strip_prefix("window:")
+        {
+            return match cmd {
+                "close" => self.close(id),
+                _ => window_control(id, cmd),
+            };
+        }
 
         // 1. despacha ao motor da janela (borrow escopado)
         let ui_task = match self.windows.get_mut(&id) {
-            Some(engine) => engine.dispatch(&msg).map(move |m| DaemonMessage::Ui { id, msg: m }),
+            Some(engine) => engine
+                .dispatch(&msg)
+                .map(move |m| DaemonMessage::Ui { id, msg: m }),
             None => return Task::none(),
         };
 
@@ -387,9 +393,10 @@ impl Runtime {
         // resultante), e só na principal — é lá que vive o formulário cujo
         // estado o app quer guardar.
         if id == self.main_id
-            && let (Some(hook), Some(engine)) = (&self.on_message, self.windows.get(&id)) {
-                hook(&msg, engine);
-            }
+            && let (Some(hook), Some(engine)) = (&self.on_message, self.windows.get(&id))
+        {
+            hook(&msg, engine);
+        }
 
         let mut tasks = vec![ui_task];
 
@@ -428,7 +435,12 @@ impl Runtime {
         // 4. se o motor pediu para fechar a própria janela (`close_window()` na
         // Lua), fecha — pela mesma porta do botão da titlebar, para o gancho
         // `on_close` da principal também valer aqui.
-        if self.windows.get_mut(&id).map(|e| e.take_close_requested()).unwrap_or(false) {
+        if self
+            .windows
+            .get_mut(&id)
+            .map(|e| e.take_close_requested())
+            .unwrap_or(false)
+        {
             tasks.push(self.close(id));
         }
 
@@ -450,7 +462,12 @@ impl Runtime {
             f(&spec, &mut settings);
         }
 
-        let WindowSpec { source, title, data, .. } = spec;
+        let WindowSpec {
+            source,
+            title,
+            data,
+            ..
+        } = spec;
         let (engine, fallback_title) = build_engine(source, &data);
         let (id, open) = window::open(settings);
         self.titles.insert(id, title.unwrap_or(fallback_title));
@@ -471,11 +488,17 @@ impl Runtime {
     }
 
     fn title(&self, id: window::Id) -> String {
-        self.titles.get(&id).cloned().unwrap_or_else(|| "Glacier".to_string())
+        self.titles
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| "Glacier".to_string())
     }
 
     fn theme(&self, id: window::Id) -> iced::Theme {
-        self.windows.get(&id).map(|e| e.theme()).unwrap_or(iced::Theme::Dark)
+        self.windows
+            .get(&id)
+            .map(|e| e.theme())
+            .unwrap_or(iced::Theme::Dark)
     }
 
     fn subscription(&self) -> Subscription<DaemonMessage> {
@@ -604,8 +627,8 @@ fn resize_direction(s: &str) -> Option<window::Direction> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::{Component, Context, Template};
     use crate::EngineMessage;
+    use crate::component::{Component, Context, Template};
 
     /// Componente de teste: cada ação pede uma janela nova de tipo diferente.
     struct Abridor;
@@ -673,8 +696,10 @@ mod tests {
 
     #[test]
     fn build_engine_de_arquivo_usa_stem_como_titulo() {
-        let (engine, title) =
-            build_engine(WindowSource::File("examples/janelas_glacier/detalhe.gv".into()), &[]);
+        let (engine, title) = build_engine(
+            WindowSource::File("examples/janelas_glacier/detalhe.gv".into()),
+            &[],
+        );
         assert_eq!(title, "detalhe");
         // O motor da nova janela renderiza a tela carregada sem erro.
         assert!(engine.render_current().is_ok());
@@ -684,7 +709,10 @@ mod tests {
     fn build_engine_semeia_data_no_contexto() {
         let (engine, _) = build_engine(
             WindowSource::File("examples/janelas_glacier/detalhe.gv".into()),
-            &[("url".into(), "http://x".into()), ("token".into(), "abc".into())],
+            &[
+                ("url".into(), "http://x".into()),
+                ("token".into(), "abc".into()),
+            ],
         );
         assert_eq!(engine.get_data("url").map(String::as_str), Some("http://x"));
         assert_eq!(engine.get_data("token").map(String::as_str), Some("abc"));
@@ -738,7 +766,10 @@ mod tests {
         b.register(Box::new(Receptor)).unwrap();
         b.set_initial_screen("receptor");
         let _ = b.deliver_broadcast(&msgs[0].event, &msgs[0].payload);
-        assert_eq!(b.get_data("rx").map(String::as_str), Some("ping:{\"v\":\"1\"}"));
+        assert_eq!(
+            b.get_data("rx").map(String::as_str),
+            Some("ping:{\"v\":\"1\"}")
+        );
     }
 
     #[test]

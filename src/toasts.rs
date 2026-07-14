@@ -18,7 +18,7 @@
 //! sem ele os toasts continuam sendo mostrados/fechados manualmente (clique no
 //! "×"), só não somem sozinhos.
 
-use iced::widget::{button, column, container, row, text, Space};
+use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Vector};
 use std::time::Duration;
 
@@ -82,7 +82,12 @@ impl ToastSpec {
 
     /// Um toast do zero, com o tipo, mensagem e duração padrão explícitos.
     pub fn new(kind: ToastKind, message: impl Into<String>) -> Self {
-        Self { kind, title: None, message: message.into(), duration: Self::DEFAULT_DURATION }
+        Self {
+            kind,
+            title: None,
+            message: message.into(),
+            duration: Self::DEFAULT_DURATION,
+        }
     }
 
     pub fn info(message: impl Into<String>) -> Self {
@@ -162,7 +167,11 @@ fn toast_card<'a>(
     header = header.push(Space::new().width(Length::Fill));
     header = header.push(dismiss_button(id, text_color));
 
-    let card = column![header, text(spec.message.as_str()).size(13).color(text_color)].spacing(6);
+    let card = column![
+        header,
+        text(spec.message.as_str()).size(13).color(text_color)
+    ]
+    .spacing(6);
 
     let card_bg = palette.background.base.color;
     container(card)
@@ -191,8 +200,14 @@ fn dismiss_button<'a>(id: u64, text_color: Color) -> Element<'a, EngineMessage> 
         .padding([0, 6])
         .style(move |_theme: &iced::Theme, status: button::Status| {
             let bg = match status {
-                button::Status::Hovered => Color { a: 0.12, ..text_color },
-                button::Status::Pressed => Color { a: 0.2, ..text_color },
+                button::Status::Hovered => Color {
+                    a: 0.12,
+                    ..text_color
+                },
+                button::Status::Pressed => Color {
+                    a: 0.2,
+                    ..text_color
+                },
                 _ => Color::TRANSPARENT,
             };
             button::Style {

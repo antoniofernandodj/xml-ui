@@ -3,8 +3,8 @@
 //! silenciosamente só a primeira raiz (o que fazia todo NavItem renderizar o
 //! ramo "on" e sumir com o ramo else).
 
-use glacier_ui::parser::NodeType;
 use glacier_ui::GlacierUI;
+use glacier_ui::parser::NodeType;
 
 fn write_tmp(name: &str, content: &str) -> String {
     let dir = std::env::temp_dir().join("glacier_repro_navitem");
@@ -45,7 +45,12 @@ fn navitem_if_else_por_atributo_em_componente_multi_raiz() {
     let ev = motor.evaluated("shell").unwrap();
     // A raiz avaliada deve ser a Column com 3 botões (um por NavItem).
     let col = ev;
-    assert_eq!(col.kind, NodeType::Column, "raiz deve ser Column, veio {:?}", col.kind);
+    assert_eq!(
+        col.kind,
+        NodeType::Column,
+        "raiz deve ser Column, veio {:?}",
+        col.kind
+    );
     let texts: Vec<String> = col
         .children
         .iter()

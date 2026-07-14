@@ -63,27 +63,69 @@ impl StyleRule {
     /// Overlays every `Some` field of `other` onto `self`, leaving `self`'s
     /// fields untouched where `other` is `None`. Used to merge classes in order.
     pub fn merge_from(&mut self, other: &StyleRule) {
-        if other.width.is_some() { self.width = other.width.clone(); }
-        if other.height.is_some() { self.height = other.height.clone(); }
-        if other.padding.is_some() { self.padding = other.padding.clone(); }
-        if other.spacing.is_some() { self.spacing = other.spacing; }
-        if other.align_x.is_some() { self.align_x = other.align_x.clone(); }
-        if other.align_y.is_some() { self.align_y = other.align_y.clone(); }
-        if other.background.is_some() { self.background = other.background.clone(); }
-        if other.border_radius.is_some() { self.border_radius = other.border_radius; }
-        if other.border_width.is_some() { self.border_width = other.border_width; }
-        if other.border_color.is_some() { self.border_color = other.border_color.clone(); }
-        if other.color.is_some() { self.color = other.color.clone(); }
-        if other.size.is_some() { self.size = other.size; }
-        if other.bold.is_some() { self.bold = other.bold; }
-        if other.font.is_some() { self.font = other.font.clone(); }
-        if other.gradient.is_some() { self.gradient = other.gradient.clone(); }
-        if other.text_align.is_some() { self.text_align = other.text_align.clone(); }
-        if other.cursor.is_some() { self.cursor = other.cursor.clone(); }
-        if other.text_color.is_some() { self.text_color = other.text_color.clone(); }
-        if other.max_width.is_some() { self.max_width = other.max_width; }
-        if other.max_height.is_some() { self.max_height = other.max_height; }
-        if other.hidden.is_some() { self.hidden = other.hidden; }
+        if other.width.is_some() {
+            self.width = other.width.clone();
+        }
+        if other.height.is_some() {
+            self.height = other.height.clone();
+        }
+        if other.padding.is_some() {
+            self.padding = other.padding.clone();
+        }
+        if other.spacing.is_some() {
+            self.spacing = other.spacing;
+        }
+        if other.align_x.is_some() {
+            self.align_x = other.align_x.clone();
+        }
+        if other.align_y.is_some() {
+            self.align_y = other.align_y.clone();
+        }
+        if other.background.is_some() {
+            self.background = other.background.clone();
+        }
+        if other.border_radius.is_some() {
+            self.border_radius = other.border_radius;
+        }
+        if other.border_width.is_some() {
+            self.border_width = other.border_width;
+        }
+        if other.border_color.is_some() {
+            self.border_color = other.border_color.clone();
+        }
+        if other.color.is_some() {
+            self.color = other.color.clone();
+        }
+        if other.size.is_some() {
+            self.size = other.size;
+        }
+        if other.bold.is_some() {
+            self.bold = other.bold;
+        }
+        if other.font.is_some() {
+            self.font = other.font.clone();
+        }
+        if other.gradient.is_some() {
+            self.gradient = other.gradient.clone();
+        }
+        if other.text_align.is_some() {
+            self.text_align = other.text_align.clone();
+        }
+        if other.cursor.is_some() {
+            self.cursor = other.cursor.clone();
+        }
+        if other.text_color.is_some() {
+            self.text_color = other.text_color.clone();
+        }
+        if other.max_width.is_some() {
+            self.max_width = other.max_width;
+        }
+        if other.max_height.is_some() {
+            self.max_height = other.max_height;
+        }
+        if other.hidden.is_some() {
+            self.hidden = other.hidden;
+        }
     }
 
     /// Resolve `var(--x)` em todos os campos String da regra contra `vars`
@@ -91,9 +133,10 @@ impl StyleRule {
     fn resolve_var_refs(&mut self, vars: &HashMap<String, String>) {
         let sub = |o: &mut Option<String>| {
             if let Some(v) = o
-                && v.contains("var(") {
-                    *v = substitute_vars(v, vars);
-                }
+                && v.contains("var(")
+            {
+                *v = substitute_vars(v, vars);
+            }
         };
         sub(&mut self.width);
         sub(&mut self.height);
@@ -289,7 +332,10 @@ impl StyleSheet {
     pub fn has_tag_rules(&self) -> bool {
         !self.tags.is_empty()
             || !self.tag_states.is_empty()
-            || self.media.iter().any(|m| !m.tags.is_empty() || !m.tag_states.is_empty())
+            || self
+                .media
+                .iter()
+                .any(|m| !m.tags.is_empty() || !m.tag_states.is_empty())
     }
 }
 
@@ -347,9 +393,10 @@ pub fn resolve_classes(
             for sheet in sheets {
                 for mq in &sheet.media {
                     if mq.condition.matches(w, h)
-                        && let Some(rule) = mq.tags.get(tag) {
-                            merged.merge_from(rule);
-                        }
+                        && let Some(rule) = mq.tags.get(tag)
+                    {
+                        merged.merge_from(rule);
+                    }
                 }
             }
         }
@@ -368,9 +415,10 @@ pub fn resolve_classes(
             for sheet in sheets {
                 for mq in &sheet.media {
                     if mq.condition.matches(w, h)
-                        && let Some(rule) = mq.rules.get(name) {
-                            merged.merge_from(rule);
-                        }
+                        && let Some(rule) = mq.rules.get(name)
+                    {
+                        merged.merge_from(rule);
+                    }
                 }
             }
         }
@@ -387,9 +435,10 @@ pub fn resolve_classes(
             for sheet in sheets {
                 for mq in &sheet.media {
                     if mq.condition.matches(w, h)
-                        && let Some(rule) = mq.ids.get(id) {
-                            merged.merge_from(rule);
-                        }
+                        && let Some(rule) = mq.ids.get(id)
+                    {
+                        merged.merge_from(rule);
+                    }
                 }
             }
         }
@@ -436,11 +485,12 @@ pub fn resolve_state_classes(
             for sheet in sheets {
                 for mq in &sheet.media {
                     if mq.condition.matches(w, h)
-                        && let Some(by_state) = mq.tag_states.get(tag) {
-                            for (state, rule) in by_state {
-                                out.get_mut(*state).merge_from(rule);
-                            }
+                        && let Some(by_state) = mq.tag_states.get(tag)
+                    {
+                        for (state, rule) in by_state {
+                            out.get_mut(*state).merge_from(rule);
                         }
+                    }
                 }
             }
         }
@@ -460,11 +510,12 @@ pub fn resolve_state_classes(
             for sheet in sheets {
                 for mq in &sheet.media {
                     if mq.condition.matches(w, h)
-                        && let Some(by_state) = mq.states.get(name) {
-                            for (state, rule) in by_state {
-                                out.get_mut(*state).merge_from(rule);
-                            }
+                        && let Some(by_state) = mq.states.get(name)
+                    {
+                        for (state, rule) in by_state {
+                            out.get_mut(*state).merge_from(rule);
                         }
+                    }
                 }
             }
         }
@@ -482,11 +533,12 @@ pub fn resolve_state_classes(
             for sheet in sheets {
                 for mq in &sheet.media {
                     if mq.condition.matches(w, h)
-                        && let Some(by_state) = mq.id_states.get(id) {
-                            for (state, rule) in by_state {
-                                out.get_mut(*state).merge_from(rule);
-                            }
+                        && let Some(by_state) = mq.id_states.get(id)
+                    {
+                        for (state, rule) in by_state {
+                            out.get_mut(*state).merge_from(rule);
                         }
+                    }
                 }
             }
         }
@@ -541,7 +593,9 @@ fn strip_comments(input: &str) -> std::result::Result<String, Box<Diagnostic>> {
                     let (line, col) = line_col_of(input, start);
                     return Err(Box::new(
                         Diagnostic::new(line, col, "comentário de bloco `/* ... */` nunca fechado")
-                            .with_hint("falta um `*/` — o parser leu o resto do arquivo como comentário"),
+                            .with_hint(
+                                "falta um `*/` — o parser leu o resto do arquivo como comentário",
+                            ),
                     ));
                 }
                 if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
@@ -648,7 +702,10 @@ fn gss_error(
     file: Option<&str>,
     line_offset: u32,
 ) -> GlacierError {
-    let snippet = source.lines().nth(local.line.saturating_sub(1) as usize).unwrap_or("");
+    let snippet = source
+        .lines()
+        .nth(local.line.saturating_sub(1) as usize)
+        .unwrap_or("");
     let mut d = Diagnostic::new(
         line_offset + local.line.saturating_sub(1),
         local.col,
@@ -690,7 +747,13 @@ pub fn parse_gss_in(input: &str, file: Option<&str>, line_offset: u32) -> Result
     // que reportamos serem as do arquivo original (ver `strip_comments`).
     let cleaned = strip_comments(input).map_err(|d| gss_error(*d, input, file, line_offset))?;
     let lines = LineMap::new(&cleaned);
-    let ctx = SheetCtx { input, cleaned: &cleaned, file, line_offset, lines: &lines };
+    let ctx = SheetCtx {
+        input,
+        cleaned: &cleaned,
+        file,
+        line_offset,
+        lines: &lines,
+    };
     // Toda posição daqui para baixo nasce local (relativa a `input`) e só vira
     // absoluta em `gss_error`, então o mapeamento mora num lugar só.
     let err = |local: Diagnostic| ctx.err(local);
@@ -737,8 +800,12 @@ pub fn parse_gss_in(input: &str, file: Option<&str>, line_offset: u32) -> Result
         }
 
         let close = after_open.find('}').ok_or_else(|| {
-            err(Diagnostic::new(sel_line, sel_col, format!("a regra '{selector}' nunca é fechada"))
-                .with_hint("falta a `}` que fecha este bloco"))
+            err(Diagnostic::new(
+                sel_line,
+                sel_col,
+                format!("a regra '{selector}' nunca é fechada"),
+            )
+            .with_hint("falta a `}` que fecha este bloco"))
         })?;
         let body = &after_open[..close];
         let body_at = brace_at + 1;
@@ -765,7 +832,9 @@ pub fn parse_gss_in(input: &str, file: Option<&str>, line_offset: u32) -> Result
                     sel_col,
                     format!("seletor vazio em '{selector}'"),
                 )
-                .with_hint("uma vírgula sobrando na lista de seletores (ex.: `.a, { }` ou `.a,, .b { }`)")));
+                .with_hint(
+                    "uma vírgula sobrando na lista de seletores (ex.: `.a, { }` ou `.a,, .b { }`)",
+                )));
             }
             let rule = parse_rule_body(body, sel, body_at, &ctx)?;
             apply_selector(&mut sheet, sel, rule, sel_line, sel_col, &err)?;
@@ -782,7 +851,9 @@ pub fn parse_gss_in(input: &str, file: Option<&str>, line_offset: u32) -> Result
             col,
             format!("esperava '{{' depois do seletor '{}'", rest.trim()),
         )
-        .with_hint("um seletor solto no fim do arquivo — falta o bloco `{ ... }`")));
+        .with_hint(
+            "um seletor solto no fim do arquivo — falta o bloco `{ ... }`",
+        )));
     }
 
     Ok(sheet)
@@ -816,7 +887,11 @@ fn apply_selector(
                     err(Diagnostic::new(
                         line,
                         col,
-                        format!("pseudo-estado ':{}' não suportado em '{}'", state_str.trim(), raw),
+                        format!(
+                            "pseudo-estado ':{}' não suportado em '{}'",
+                            state_str.trim(),
+                            raw
+                        ),
                     )
                     .with_hint("os suportados são :hover, :focus, :active e :disabled"))
                 })?;
@@ -835,7 +910,13 @@ fn apply_selector(
         }
         let (name, state) = split_state(raw)?;
         match state {
-            Some(s) => sheet.id_states.entry(name).or_default().entry(s).or_default().merge_from(&rule),
+            Some(s) => sheet
+                .id_states
+                .entry(name)
+                .or_default()
+                .entry(s)
+                .or_default()
+                .merge_from(&rule),
             None => sheet.ids.entry(name).or_default().merge_from(&rule),
         }
         return Ok(());
@@ -847,11 +928,21 @@ fn apply_selector(
     if let Some(raw) = selector.strip_prefix('.') {
         let raw = raw.trim();
         if raw.is_empty() {
-            return Err(err(Diagnostic::new(line, col, "seletor de classe vazio ('.')")));
+            return Err(err(Diagnostic::new(
+                line,
+                col,
+                "seletor de classe vazio ('.')",
+            )));
         }
         let (name, state) = split_state(raw)?;
         match state {
-            Some(s) => sheet.states.entry(name).or_default().entry(s).or_default().merge_from(&rule),
+            Some(s) => sheet
+                .states
+                .entry(name)
+                .or_default()
+                .entry(s)
+                .or_default()
+                .merge_from(&rule),
             None => sheet.rules.entry(name).or_default().merge_from(&rule),
         }
         return Ok(());
@@ -861,12 +952,22 @@ fn apply_selector(
     // `Text`, …) OU o nome de um componente (`Card`) no seu uso. Normalizado
     // para minúsculo, então `Button {}` == `button {}`.
     if selector.is_empty() {
-        return Err(err(Diagnostic::new(line, col, "seletor vazio antes de '{'")));
+        return Err(err(Diagnostic::new(
+            line,
+            col,
+            "seletor vazio antes de '{'",
+        )));
     }
     let (name, state) = split_state(selector)?;
     let name = name.to_lowercase();
     match state {
-        Some(s) => sheet.tag_states.entry(name).or_default().entry(s).or_default().merge_from(&rule),
+        Some(s) => sheet
+            .tag_states
+            .entry(name)
+            .or_default()
+            .entry(s)
+            .or_default()
+            .merge_from(&rule),
         None => sheet.tags.entry(name).or_default().merge_from(&rule),
     }
     Ok(())
@@ -929,7 +1030,10 @@ fn parse_media_condition(selector: &str) -> std::result::Result<MediaCondition, 
 
 /// Parses the `--nome: valor;` declarations of a `:root { ... }` block into the
 /// sheet's design-token map. As chaves guardam o `--nome` completo.
-fn parse_root_vars(body: &str, vars: &mut HashMap<String, String>) -> std::result::Result<(), String> {
+fn parse_root_vars(
+    body: &str,
+    vars: &mut HashMap<String, String>,
+) -> std::result::Result<(), String> {
     for decl in body.split(';') {
         let decl = decl.trim();
         if decl.is_empty() {
@@ -960,7 +1064,12 @@ fn parse_root_vars(body: &str, vars: &mut HashMap<String, String>) -> std::resul
 /// — é o que permite dizer em **que linha** está a declaração ofensora, em vez
 /// de só nomear o seletor. Um `.gss` de 400 linhas com três `.card { }` faz
 /// dessa diferença a diferença entre achar e não achar o erro.
-fn parse_rule_body(body: &str, selector: &str, body_at: usize, ctx: &SheetCtx) -> Result<StyleRule> {
+fn parse_rule_body(
+    body: &str,
+    selector: &str,
+    body_at: usize,
+    ctx: &SheetCtx,
+) -> Result<StyleRule> {
     let mut rule = StyleRule::default();
 
     // Percorre as declarações mantendo o offset de cada uma (o `split` sozinho
@@ -980,8 +1089,14 @@ fn parse_rule_body(body: &str, selector: &str, body_at: usize, ctx: &SheetCtx) -
 
         let (key, value) = decl.split_once(':').ok_or_else(|| {
             ctx.err(
-                Diagnostic::new(line, col, format!("declaração inválida '{decl}' em '{selector}'"))
-                    .with_hint("uma declaração é `propriedade: valor;` — faltou o `:` (ou um `;` antes)"),
+                Diagnostic::new(
+                    line,
+                    col,
+                    format!("declaração inválida '{decl}' em '{selector}'"),
+                )
+                .with_hint(
+                    "uma declaração é `propriedade: valor;` — faltou o `:` (ou um `;` antes)",
+                ),
             )
         })?;
         let key = key.trim();
@@ -1062,10 +1177,28 @@ fn parse_rule_body(body: &str, selector: &str, body_at: usize, ctx: &SheetCtx) -
 /// Toda propriedade que o GSS entende, na grafia canônica — a lista contra a
 /// qual um nome desconhecido é comparado para sugerir o certo.
 const KNOWN_PROPERTIES: &[&str] = &[
-    "width", "height", "padding", "spacing", "align-x", "align-y", "background",
-    "border-radius", "border-width", "border-color", "color", "size", "bold",
-    "font", "gradient", "text-align", "cursor", "text-color", "max-width",
-    "max-height", "hidden", "display",
+    "width",
+    "height",
+    "padding",
+    "spacing",
+    "align-x",
+    "align-y",
+    "background",
+    "border-radius",
+    "border-width",
+    "border-color",
+    "color",
+    "size",
+    "bold",
+    "font",
+    "gradient",
+    "text-align",
+    "cursor",
+    "text-color",
+    "max-width",
+    "max-height",
+    "hidden",
+    "display",
 ];
 
 /// A propriedade conhecida mais próxima de `name`, se houver uma perto o
@@ -1110,22 +1243,42 @@ mod diagnostic_tests {
     #[test]
     fn seletor_por_virgula_aplica_a_regra_a_cada_parte() {
         let sheet = parse_gss(".a, .b { padding: 4; }").unwrap();
-        assert_eq!(sheet.rules.get("a").and_then(|r| r.padding.as_deref()), Some("4"));
-        assert_eq!(sheet.rules.get("b").and_then(|r| r.padding.as_deref()), Some("4"));
-        assert!(!sheet.rules.contains_key("a, .b"), "a chave literal não pode mais existir");
+        assert_eq!(
+            sheet.rules.get("a").and_then(|r| r.padding.as_deref()),
+            Some("4")
+        );
+        assert_eq!(
+            sheet.rules.get("b").and_then(|r| r.padding.as_deref()),
+            Some("4")
+        );
+        assert!(
+            !sheet.rules.contains_key("a, .b"),
+            "a chave literal não pode mais existir"
+        );
     }
 
     // Vírgula funciona com as outras formas de seletor e com pseudo-estados,
     // e mistura tiers (classe + id + tag) na mesma lista.
     #[test]
     fn virgula_vale_para_id_tag_e_estado() {
-        let sheet = parse_gss("#salvar, Button, .cta { color: #fff; } .a:hover, .b:hover { bold: true; }")
-            .unwrap();
+        let sheet =
+            parse_gss("#salvar, Button, .cta { color: #fff; } .a:hover, .b:hover { bold: true; }")
+                .unwrap();
         assert!(sheet.ids.contains_key("salvar"));
         assert!(sheet.tags.contains_key("button"));
         assert!(sheet.rules.contains_key("cta"));
-        assert!(sheet.states.get("a").is_some_and(|m| m.contains_key(&PseudoState::Hover)));
-        assert!(sheet.states.get("b").is_some_and(|m| m.contains_key(&PseudoState::Hover)));
+        assert!(
+            sheet
+                .states
+                .get("a")
+                .is_some_and(|m| m.contains_key(&PseudoState::Hover))
+        );
+        assert!(
+            sheet
+                .states
+                .get("b")
+                .is_some_and(|m| m.contains_key(&PseudoState::Hover))
+        );
     }
 
     // Uma vírgula sobrando não pode passar batida (era o comportamento antigo).
@@ -1144,7 +1297,11 @@ mod diagnostic_tests {
         let d = err.diagnostic().expect("erro de GSS tem diagnóstico");
         assert_eq!(d.file.as_deref(), Some("app.gss"));
         assert_eq!(d.line, 5, "a linha do `spacing: muito`");
-        assert!(d.snippet.as_deref().is_some_and(|s| s.contains("muito")), "{:?}", d.snippet);
+        assert!(
+            d.snippet.as_deref().is_some_and(|s| s.contains("muito")),
+            "{:?}",
+            d.snippet
+        );
     }
 
     // `line_offset`: um `.gss` inline num `<style>` lá pela linha 200 reporta a
@@ -1262,7 +1419,7 @@ mod tests {
         // ausentes no 2º preservam os do 1º; presentes sobrescrevem.
         let sheet = parse_gss(".card { padding: 4; color: #111; } .card { color: #222; }").unwrap();
         let card = &sheet.rules["card"];
-        assert_eq!(card.padding.as_deref(), Some("4"));  // preservado do 1º bloco
+        assert_eq!(card.padding.as_deref(), Some("4")); // preservado do 1º bloco
         assert_eq!(card.color.as_deref(), Some("#222")); // sobrescrito pelo 2º
     }
 
@@ -1272,15 +1429,17 @@ mod tests {
         // em `tags` (minúsculo), não em `rules`.
         let sheet = parse_gss("Card { padding: 1; }").unwrap();
         assert!(sheet.rules.is_empty());
-        assert_eq!(sheet.tags.get("card").unwrap().padding.as_deref(), Some("1"));
+        assert_eq!(
+            sheet.tags.get("card").unwrap().padding.as_deref(),
+            Some("1")
+        );
     }
 
     #[test]
     fn parses_text_color_and_max_size() {
-        let sheet = parse_gss(
-            ".btn { text-color: #0D1117; } .panel { max-width: 640; max-height: 480; }",
-        )
-        .unwrap();
+        let sheet =
+            parse_gss(".btn { text-color: #0D1117; } .panel { max-width: 640; max-height: 480; }")
+                .unwrap();
         assert_eq!(sheet.rules["btn"].text_color.as_deref(), Some("#0D1117"));
         assert_eq!(sheet.rules["panel"].max_width, Some(640.0));
         assert_eq!(sheet.rules["panel"].max_height, Some(480.0));
@@ -1302,7 +1461,8 @@ mod tests {
 
     #[test]
     fn var_fallback_and_undefined() {
-        let sheet = parse_gss(".x { color: var(--missing, #FF0000); background: var(--nope); }").unwrap();
+        let sheet =
+            parse_gss(".x { color: var(--missing, #FF0000); background: var(--nope); }").unwrap();
         let r = resolve_classes(None, "x", None, &[&sheet], None);
         assert_eq!(r.color.as_deref(), Some("#FF0000")); // usa o fallback
         assert_eq!(r.background.as_deref(), Some("")); // sem var nem fallback → vazio
@@ -1319,20 +1479,18 @@ mod tests {
 
     #[test]
     fn var_embedded_in_gradient() {
-        let sheet = parse_gss(
-            ":root { --a: #000000; --b: #FFFFFF; } .g { gradient: var(--a) var(--b); }",
-        )
-        .unwrap();
+        let sheet =
+            parse_gss(":root { --a: #000000; --b: #FFFFFF; } .g { gradient: var(--a) var(--b); }")
+                .unwrap();
         let r = resolve_classes(None, "g", None, &[&sheet], None);
         assert_eq!(r.gradient.as_deref(), Some("#000000 #FFFFFF"));
     }
 
     #[test]
     fn media_max_width_overrides_when_narrow() {
-        let sheet = parse_gss(
-            ".panel { width: 640; } @media (max-width: 800) { .panel { width: fill; } }",
-        )
-        .unwrap();
+        let sheet =
+            parse_gss(".panel { width: 640; } @media (max-width: 800) { .panel { width: fill; } }")
+                .unwrap();
         assert_eq!(sheet.media.len(), 1);
         // Largo (1000 > 800): media inativa → base.
         let wide = resolve_classes(None, "panel", None, &[&sheet], Some((1000.0, 700.0)));
@@ -1360,10 +1518,7 @@ mod tests {
     #[test]
     fn media_can_hide_at_narrow_width() {
         // O caso de uso central: `@media` esconde um elemento em telas estreitas.
-        let sheet = parse_gss(
-            "@media (max-width: 600) { .search { hidden: true; } }",
-        )
-        .unwrap();
+        let sheet = parse_gss("@media (max-width: 600) { .search { hidden: true; } }").unwrap();
         let wide = resolve_classes(None, "search", None, &[&sheet], Some((1000.0, 700.0)));
         assert_eq!(wide.hidden, None); // visível (nada aplicado)
         let narrow = resolve_classes(None, "search", None, &[&sheet], Some((500.0, 700.0)));
@@ -1408,10 +1563,9 @@ mod tests {
 
     #[test]
     fn duplicate_pseudo_state_merges_not_clobbers() {
-        let sheet = parse_gss(
-            ".btn:hover { background: #222222; } .btn:hover { text-color: #ffffff; }",
-        )
-        .unwrap();
+        let sheet =
+            parse_gss(".btn:hover { background: #222222; } .btn:hover { text-color: #ffffff; }")
+                .unwrap();
         let states = resolve_state_classes(None, "btn", None, &[&sheet], None);
         assert_eq!(states.hover.background.as_deref(), Some("#222222"));
         assert_eq!(states.hover.text_color.as_deref(), Some("#ffffff"));
@@ -1419,20 +1573,17 @@ mod tests {
 
     #[test]
     fn pseudo_state_vars_resolve() {
-        let sheet = parse_gss(
-            ":root { --hoverbg: #abcdef; } .btn:hover { background: var(--hoverbg); }",
-        )
-        .unwrap();
+        let sheet =
+            parse_gss(":root { --hoverbg: #abcdef; } .btn:hover { background: var(--hoverbg); }")
+                .unwrap();
         let states = resolve_state_classes(None, "btn", None, &[&sheet], None);
         assert_eq!(states.hover.background.as_deref(), Some("#abcdef"));
     }
 
     #[test]
     fn pseudo_state_inside_media_applies_when_matched() {
-        let sheet = parse_gss(
-            "@media (max-width: 500) { .btn:hover { background: #000000; } }",
-        )
-        .unwrap();
+        let sheet =
+            parse_gss("@media (max-width: 500) { .btn:hover { background: #000000; } }").unwrap();
         let narrow = resolve_state_classes(None, "btn", None, &[&sheet], Some((400.0, 400.0)));
         assert_eq!(narrow.hover.background.as_deref(), Some("#000000"));
         let wide = resolve_state_classes(None, "btn", None, &[&sheet], Some((900.0, 400.0)));
@@ -1479,7 +1630,10 @@ mod tests {
         let hit = resolve_classes(None, "", Some("save"), &[&sheet], None);
         assert_eq!(hit.color.as_deref(), Some("#111111"));
         // id diferente não casa; sem id também não.
-        assert_eq!(resolve_classes(None, "", Some("other"), &[&sheet], None).color, None);
+        assert_eq!(
+            resolve_classes(None, "", Some("other"), &[&sheet], None).color,
+            None
+        );
         assert_eq!(resolve_classes(None, "", None, &[&sheet], None).color, None);
     }
 
@@ -1526,20 +1680,18 @@ mod tests {
     #[test]
     fn id_state_overrides_class_state() {
         // `#id:hover` (tier alto) vence `.classe:hover` (tier baixo).
-        let sheet = parse_gss(
-            ".btn:hover { background: #aaaaaa; } #go:hover { background: #ffffff; }",
-        )
-        .unwrap();
+        let sheet =
+            parse_gss(".btn:hover { background: #aaaaaa; } #go:hover { background: #ffffff; }")
+                .unwrap();
         let states = resolve_state_classes(None, "btn", Some("go"), &[&sheet], None);
         assert_eq!(states.hover.background.as_deref(), Some("#ffffff"));
     }
 
     #[test]
     fn id_inside_media_overrides_when_matched() {
-        let sheet = parse_gss(
-            "#panel { width: 640; } @media (max-width: 800) { #panel { width: fill; } }",
-        )
-        .unwrap();
+        let sheet =
+            parse_gss("#panel { width: 640; } @media (max-width: 800) { #panel { width: fill; } }")
+                .unwrap();
         assert_eq!(sheet.media[0].ids.len(), 1);
         let wide = resolve_classes(None, "", Some("panel"), &[&sheet], Some((1000.0, 700.0)));
         assert_eq!(wide.width.as_deref(), Some("640"));
@@ -1551,7 +1703,10 @@ mod tests {
     fn parses_tag_selector_normalized_lowercase() {
         let sheet = parse_gss("Button { padding: 8; } column { spacing: 12; }").unwrap();
         assert!(sheet.rules.is_empty() && sheet.ids.is_empty());
-        assert_eq!(sheet.tags.get("button").unwrap().padding.as_deref(), Some("8"));
+        assert_eq!(
+            sheet.tags.get("button").unwrap().padding.as_deref(),
+            Some("8")
+        );
         assert_eq!(sheet.tags.get("column").unwrap().spacing, Some(12.0));
         assert!(sheet.has_tag_rules());
     }
@@ -1601,8 +1756,16 @@ mod tests {
         // ambos casados por nome minúsculo — o underlay de componente é só
         // `resolve_classes(Some("card"), "", None, ...)`.
         let sheet = parse_gss("Card { padding: 24; } Column { spacing: 8; }").unwrap();
-        assert_eq!(resolve_classes(Some("card"), "", None, &[&sheet], None).padding.as_deref(), Some("24"));
-        assert_eq!(resolve_classes(Some("column"), "", None, &[&sheet], None).spacing, Some(8.0));
+        assert_eq!(
+            resolve_classes(Some("card"), "", None, &[&sheet], None)
+                .padding
+                .as_deref(),
+            Some("24")
+        );
+        assert_eq!(
+            resolve_classes(Some("column"), "", None, &[&sheet], None).spacing,
+            Some(8.0)
+        );
     }
 
     #[test]

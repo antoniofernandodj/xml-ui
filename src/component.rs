@@ -58,7 +58,10 @@ impl EffectOutcome {
     /// Só um toast, sem dados — para um efeito cujo resultado é apenas a
     /// notificação.
     pub fn toast(spec: crate::toasts::ToastSpec) -> Self {
-        Self { patch: Vec::new(), toast: Some(spec) }
+        Self {
+            patch: Vec::new(),
+            toast: Some(spec),
+        }
     }
 
     /// Anexa (ou substitui) o toast deste outcome — encadeável sobre
@@ -91,7 +94,13 @@ impl PendingFetch {
         body: Option<String>,
         headers: Vec<(String, String)>,
     ) -> Self {
-        Self { id, url, method, body, headers }
+        Self {
+            id,
+            url,
+            method,
+            body,
+            headers,
+        }
     }
 }
 
@@ -112,7 +121,12 @@ pub struct FetchResult {
 impl FetchResult {
     /// Um resultado de falha (sem resposta): `ok = false`, `status = 0`.
     pub fn error(msg: impl Into<String>) -> Self {
-        Self { ok: false, status: 0, body: String::new(), error: msg.into() }
+        Self {
+            ok: false,
+            status: 0,
+            body: String::new(),
+            error: msg.into(),
+        }
     }
 }
 
@@ -150,7 +164,12 @@ impl StreamRequest {
         url: String,
         headers: Vec<(String, String)>,
     ) -> Self {
-        Self { id, kind, url, headers }
+        Self {
+            id,
+            kind,
+            url,
+            headers,
+        }
     }
 }
 
@@ -294,7 +313,13 @@ impl WindowSpec {
     }
 
     fn from_source(source: WindowSource) -> Self {
-        Self { source, title: None, size: None, resizable: true, data: Vec::new() }
+        Self {
+            source,
+            title: None,
+            size: None,
+            resizable: true,
+            data: Vec::new(),
+        }
     }
 
     /// Semeia um par `(chave, valor)` no contexto da nova janela (encadeável).
@@ -333,7 +358,10 @@ pub struct ContextVar {
 impl ContextVar {
     /// Cria uma variável com sua chave e valor.
     pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
-        Self { key: key.into(), value: value.into() }
+        Self {
+            key: key.into(),
+            value: value.into(),
+        }
     }
 
     /// A chave (nome) da variável.
@@ -498,7 +526,10 @@ impl<'a> Context<'a> {
     /// ctx.broadcast("project_created", r#"{"id":"42","name":"api"}"#);
     /// ```
     pub fn broadcast(&mut self, event: impl Into<String>, payload: impl Into<String>) {
-        self.broadcasts.push(BroadcastMessage { event: event.into(), payload: payload.into() });
+        self.broadcasts.push(BroadcastMessage {
+            event: event.into(),
+            payload: payload.into(),
+        });
     }
 
     /// Pede para fechar a **própria** janela após o `update` (equivalente ao

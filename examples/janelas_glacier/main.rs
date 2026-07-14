@@ -25,7 +25,10 @@ struct Painel {
 
 impl Painel {
     fn new() -> Self {
-        Self { valor: 0, recebidos: 0 }
+        Self {
+            valor: 0,
+            recebidos: 0,
+        }
     }
 }
 

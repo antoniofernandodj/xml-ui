@@ -33,9 +33,9 @@ impl Component for Toasts {
             "mostrar_aviso" => {
                 ctx.show_toast(ToastSpec::warning("O volume de build está com 92% de uso."))
             }
-            "mostrar_erro" => ctx.show_toast(
-                ToastSpec::error("Não foi possível iniciar o container: porta 8080 já em uso."),
-            ),
+            "mostrar_erro" => ctx.show_toast(ToastSpec::error(
+                "Não foi possível iniciar o container: porta 8080 já em uso.",
+            )),
             "mostrar_com_titulo" => ctx.show_toast(
                 ToastSpec::warning("Esse toast fica em exibição por 10 segundos.")
                     .with_title("Duração customizada")

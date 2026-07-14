@@ -12,8 +12,8 @@ fn main() -> iced::Result {
     GlacierDaemon::new()
         .title("Glacier - Contador (script)")
         .main(|motor| {
-            if let Err(e) = motor
-                .register_component("contador", "examples/contador_macro/contador_macro.gv")
+            if let Err(e) =
+                motor.register_component("contador", "examples/contador_macro/contador_macro.gv")
             {
                 eprintln!("Erro ao registrar: {}", e);
             }

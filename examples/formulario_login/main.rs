@@ -8,7 +8,9 @@
 
 use glacier_ui::{Component, Context, Form, FormBuilder, FormControl, GlacierDaemon, Template};
 
-struct Login { form: Form }
+struct Login {
+    form: Form,
+}
 
 /// Publica os valores e o primeiro erro de cada controle no contexto — é
 /// isso que `formControl`/`{erro_username}` no template consomem. Função
@@ -21,7 +23,6 @@ fn sincronizar(form: &Form, ctx: &mut Context) {
 
 impl Login {
     fn new() -> Self {
-
         let form = FormBuilder::new("login")
             .control(FormControl::new("username", "").required().min_length(3))
             .control(FormControl::new("password", "").required().min_length(6))

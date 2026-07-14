@@ -242,7 +242,11 @@ impl FormBuilder {
     /// name="...">`'s `name` attribute when more than one form shares a
     /// component; otherwise it can be any label).
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), controls: Vec::new(), on_submit: None }
+        Self {
+            name: name.into(),
+            controls: Vec::new(),
+            on_submit: None,
+        }
     }
 
     /// Registers a control, in the order controls should be visited by Enter.
@@ -282,7 +286,11 @@ impl FormBuilder {
 
     /// Finishes building the [`Form`].
     pub fn build(self) -> Form {
-        Form { name: self.name, controls: self.controls, on_submit: self.on_submit }
+        Form {
+            name: self.name,
+            controls: self.controls,
+            on_submit: self.on_submit,
+        }
     }
 }
 
@@ -352,7 +360,10 @@ impl Form {
     /// they've typed anything.
     pub fn errors_to_context(&self, ctx: &mut Context, prefix: &str) {
         for c in &self.controls {
-            ctx.set(&format!("{prefix}{}", c.name), c.errors.first().cloned().unwrap_or_default());
+            ctx.set(
+                &format!("{prefix}{}", c.name),
+                c.errors.first().cloned().unwrap_or_default(),
+            );
         }
     }
 
@@ -393,7 +404,10 @@ impl Form {
 
     /// A snapshot of every control's current value, keyed by name.
     pub fn values(&self) -> HashMap<String, String> {
-        self.controls.iter().map(|c| (c.name.clone(), c.value.clone())).collect()
+        self.controls
+            .iter()
+            .map(|c| (c.name.clone(), c.value.clone()))
+            .collect()
     }
 
     /// Publishes every control's current value into the reactive context under
@@ -495,15 +509,13 @@ mod tests {
     #[test]
     fn custom_validator_closure() {
         let mut form = FormBuilder::new("f")
-            .control(
-                FormControl::new("age", "0").validator(|v| {
-                    v.parse::<u32>()
-                        .ok()
-                        .filter(|n| *n >= 18)
-                        .map(|_| ())
-                        .ok_or_else(|| "must be an adult".to_string())
-                }),
-            )
+            .control(FormControl::new("age", "0").validator(|v| {
+                v.parse::<u32>()
+                    .ok()
+                    .filter(|n| *n >= 18)
+                    .map(|_| ())
+                    .ok_or_else(|| "must be an adult".to_string())
+            }))
             .build();
 
         assert!(!form.is_valid());
@@ -549,7 +561,10 @@ mod tests {
             .control(FormControl::new("second", "2"))
             .build();
 
-        assert_eq!(form.control_names().collect::<Vec<_>>(), vec!["first", "second"]);
+        assert_eq!(
+            form.control_names().collect::<Vec<_>>(),
+            vec!["first", "second"]
+        );
         let values = form.values();
         assert_eq!(values.get("first").map(String::as_str), Some("1"));
         assert_eq!(values.get("second").map(String::as_str), Some("2"));
@@ -601,7 +616,9 @@ mod tests {
 
     #[test]
     fn submit_without_a_registered_closure_is_a_no_op() {
-        let mut form = FormBuilder::new("f").control(FormControl::new("x", "")).build();
+        let mut form = FormBuilder::new("f")
+            .control(FormControl::new("x", ""))
+            .build();
         let mut data = HashMap::new();
         form.submit(&mut test_context(&mut data)); // must not panic
         assert!(data.is_empty());
@@ -623,6 +640,9 @@ mod tests {
         form.set_value("username", "");
         let mut data = HashMap::new();
         form.errors_to_context(&mut test_context(&mut data), "erro_");
-        assert_eq!(data.get("erro_username").map(String::as_str), Some("\"username\" is required"));
+        assert_eq!(
+            data.get("erro_username").map(String::as_str),
+            Some("\"username\" is required")
+        );
     }
 }

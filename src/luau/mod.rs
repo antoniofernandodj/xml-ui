@@ -57,12 +57,14 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::error::{GlacierError, Result};
 use crate::component::{
     Component, Context, FetchResult, PendingFetch, PendingTimer, StreamCommand, StreamCommandKind,
     StreamEventKind, StreamKind, StreamRequest, Template,
 };
-use mlua::{Function, Lua, LuaSerdeExt, MultiValue, RegistryKey, Table, Thread, ThreadStatus, Value};
+use crate::error::{GlacierError, Result};
+use mlua::{
+    Function, Lua, LuaSerdeExt, MultiValue, RegistryKey, Table, Thread, ThreadStatus, Value,
+};
 
 /// Prelúdio Lua injetado antes do `<script>` do usuário. Define `fetch` e,
 /// para streams de vida longa, `sse` / `websocket` (ver [`LuauComponent::drive`]).
@@ -199,9 +201,10 @@ impl LuauComponent {
         module_base: &Path,
     ) -> std::result::Result<Self, String> {
         let luau = Lua::new();
-        luau.load(PRELUDE).set_name("<glacier prelude>").exec().map_err(|e| {
-            format!("Erro ao carregar prelúdio Luau: {}", e)
-        })?;
+        luau.load(PRELUDE)
+            .set_name("<glacier prelude>")
+            .exec()
+            .map_err(|e| format!("Erro ao carregar prelúdio Luau: {}", e))?;
         // Habilita `require(...)` resolvendo módulos relativo ao script/template.
         install_module_system(&luau, module_roots(module_base))
             .map_err(|e| format!("Erro ao instalar sistema de módulos Luau: {}", e))?;
@@ -285,15 +288,21 @@ impl LuauComponent {
                     "[glacier-ui] aviso: <script> Lua '{}' descartou ctx.{} ao sincronizar \
                      (valor do tipo '{}' não é serializável — funções/threads/userdata não \
                      podem ir para o contexto; tabelas com esses tipos dentro também falham)",
-                    self.name, k, val.type_name()
+                    self.name,
+                    k,
+                    val.type_name()
                 ),
                 None => {}
             }
         }
         // Chaves que existiam no contexto mas não estão mais na tabela (o Luau as
         // setou para nil) são removidas.
-        let removed: Vec<String> =
-            ctx.data.keys().filter(|k| !present.contains(*k)).cloned().collect();
+        let removed: Vec<String> = ctx
+            .data
+            .keys()
+            .filter(|k| !present.contains(*k))
+            .cloned()
+            .collect();
         for k in removed {
             ctx.data.remove(&k);
         }
@@ -317,7 +326,10 @@ impl LuauComponent {
     ///
     /// Nunca propaga: se o próprio `on_error` falhar, só loga (evita loop).
     fn report_error(&self, where_: &str, err: impl std::fmt::Display, ctx: &mut Context) {
-        let msg = format!("[glacier-ui] erro em <script> Lua '{}::{}': {}", self.name, where_, err);
+        let msg = format!(
+            "[glacier-ui] erro em <script> Lua '{}::{}': {}",
+            self.name, where_, err
+        );
         eprintln!("{msg}");
         match self.luau.globals().get::<Function>("on_error") {
             Ok(f) => {
@@ -335,9 +347,7 @@ impl LuauComponent {
                 }
             }
             Err(_) => {
-                ctx.show_toast(
-                    crate::toasts::ToastSpec::error(msg).with_title("Erro de script"),
-                );
+                ctx.show_toast(crate::toasts::ToastSpec::error(msg).with_title("Erro de script"));
             }
         }
     }
@@ -574,7 +584,12 @@ impl LuauComponent {
             }
             None => (
                 Vec::new(),
-                StreamRegistration { on_open: None, on_message: None, on_error: None, on_close: None },
+                StreamRegistration {
+                    on_open: None,
+                    on_message: None,
+                    on_error: None,
+                    on_close: None,
+                },
             ),
         };
         self.streams.borrow_mut().insert(id, reg);
@@ -621,7 +636,8 @@ impl LuauComponent {
             _ => StreamCommandKind::Send,
         };
         let text: Option<String> = req.get("text")?;
-        ctx.stream_cmds.push(StreamCommand::new(id, kind, text.unwrap_or_default()));
+        ctx.stream_cmds
+            .push(StreamCommand::new(id, kind, text.unwrap_or_default()));
         Ok(())
     }
 
@@ -658,7 +674,12 @@ impl LuauComponent {
     /// `on_broadcast(event, payload)`. `payload` (JSON) é decodificado para um
     /// valor Lua (tabela) antes da chamada; vazio vira `nil`, JSON inválido vira
     /// a string crua. Janelas sem `on_broadcast` global ignoram (no-op).
-    fn on_broadcast_inner(&self, event: &str, payload: &str, ctx: &mut Context) -> mlua::Result<()> {
+    fn on_broadcast_inner(
+        &self,
+        event: &str,
+        payload: &str,
+        ctx: &mut Context,
+    ) -> mlua::Result<()> {
         let Ok(func) = self.luau.globals().get::<Function>("on_broadcast") else {
             return Ok(());
         };
@@ -672,10 +693,8 @@ impl LuauComponent {
             }
         };
         let thread = self.luau.create_thread(func)?;
-        let args = MultiValue::from_iter([
-            Value::String(self.luau.create_string(event)?),
-            payload_val,
-        ]);
+        let args =
+            MultiValue::from_iter([Value::String(self.luau.create_string(event)?), payload_val]);
         self.drive(thread, args, ctx)
     }
 
@@ -685,16 +704,21 @@ impl LuauComponent {
         let opts: Option<Table> = req.get("opts")?;
         let (method, body, headers) = match opts {
             Some(o) => {
-                let method = o.get::<Option<String>>("method")?.unwrap_or_else(|| "GET".into());
+                let method = o
+                    .get::<Option<String>>("method")?
+                    .unwrap_or_else(|| "GET".into());
                 let body = o.get::<Option<String>>("body")?;
                 let mut headers = parse_headers_table(&o)?;
                 // Atalho `user_agent = "..."`: vira um header User-Agent, a menos
                 // que o chamador já tenha posto um em `headers` (esse vence). Sem
                 // isto, o net aplica o UA padrão (ver DEFAULT_USER_AGENT).
                 if let Some(ua) = o.get::<Option<String>>("user_agent")?
-                    && !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
-                        headers.push(("User-Agent".to_string(), ua));
-                    }
+                    && !headers
+                        .iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+                {
+                    headers.push(("User-Agent".to_string(), ua));
+                }
                 (method, body, headers)
             }
             None => ("GET".into(), None, Vec::new()),
@@ -781,11 +805,21 @@ fn build_dialog(req: &Table) -> mlua::Result<crate::dialogs::DialogSpec> {
     use crate::dialogs::{ButtonRole, DialogButton, DialogIcon, DialogSpec};
     let title: String = req.get::<Option<String>>("title")?.unwrap_or_default();
     let message: String = req.get::<Option<String>>("message")?.unwrap_or_default();
-    let confirm_label = req.get::<Option<String>>("confirm_label")?.unwrap_or_else(|| "OK".into());
-    let confirm_action = req.get::<Option<String>>("confirm_action")?.unwrap_or_default();
-    let cancel_label = req.get::<Option<String>>("cancel_label")?.unwrap_or_else(|| "Cancelar".into());
+    let confirm_label = req
+        .get::<Option<String>>("confirm_label")?
+        .unwrap_or_else(|| "OK".into());
+    let confirm_action = req
+        .get::<Option<String>>("confirm_action")?
+        .unwrap_or_default();
+    let cancel_label = req
+        .get::<Option<String>>("cancel_label")?
+        .unwrap_or_else(|| "Cancelar".into());
     let destructive = req.get::<Option<bool>>("destructive")?.unwrap_or(false);
-    let role = if destructive { ButtonRole::Destructive } else { ButtonRole::Accept };
+    let role = if destructive {
+        ButtonRole::Destructive
+    } else {
+        ButtonRole::Accept
+    };
     Ok(DialogSpec::new(DialogIcon::Question, title, message)
         .with_button(DialogButton::new(cancel_label, "", ButtonRole::Neutral))
         .with_button(DialogButton::new(confirm_label, confirm_action, role))
@@ -798,7 +832,10 @@ fn build_dialog(req: &Table) -> mlua::Result<crate::dialogs::DialogSpec> {
 /// `width`/`height` e `resizable` são opcionais.
 fn build_window_spec(lua: &Lua, req: &Table) -> mlua::Result<crate::component::WindowSpec> {
     use crate::component::WindowSpec;
-    let mut spec = match (req.get::<Option<String>>("file")?, req.get::<Option<String>>("component")?) {
+    let mut spec = match (
+        req.get::<Option<String>>("file")?,
+        req.get::<Option<String>>("component")?,
+    ) {
         (Some(file), _) => WindowSpec::file(file),
         (None, Some(name)) => WindowSpec::named(name),
         (None, None) => {
@@ -810,7 +847,10 @@ fn build_window_spec(lua: &Lua, req: &Table) -> mlua::Result<crate::component::W
     if let Some(title) = req.get::<Option<String>>("title")? {
         spec = spec.title(title);
     }
-    if let (Some(w), Some(h)) = (req.get::<Option<f32>>("width")?, req.get::<Option<f32>>("height")?) {
+    if let (Some(w), Some(h)) = (
+        req.get::<Option<f32>>("width")?,
+        req.get::<Option<f32>>("height")?,
+    ) {
         spec = spec.size(w, h);
     }
     if let Some(resizable) = req.get::<Option<bool>>("resizable")? {
@@ -901,7 +941,12 @@ fn module_roots(base_file: &Path) -> Vec<PathBuf> {
         .unwrap_or_else(|| PathBuf::from("."));
     let mut roots = vec![base.clone(), base.join("lib")];
     if let Ok(extra) = std::env::var("GLACIER_LUAU_PATH") {
-        roots.extend(extra.split(':').filter(|s| !s.is_empty()).map(PathBuf::from));
+        roots.extend(
+            extra
+                .split(':')
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from),
+        );
     }
     roots
 }
@@ -1101,8 +1146,7 @@ fn install_json(luau: &Lua) -> mlua::Result<()> {
         let json: serde_json::Value = luau
             .from_value(v)
             .map_err(|e| mlua::Error::runtime(format!("json.encode: {e}")))?;
-        serde_json::to_string(&json)
-            .map_err(|e| mlua::Error::runtime(format!("json.encode: {e}")))
+        serde_json::to_string(&json).map_err(|e| mlua::Error::runtime(format!("json.encode: {e}")))
     })?;
 
     // `json.array(t)` marca `t` como ARRAY para o encode, resolvendo a ambiguidade
@@ -1138,7 +1182,13 @@ fn storage_path(module_base: &Path, name: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."));
     let safe: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     base.join(".glacier-storage").join(format!("{safe}.json"))
 }
@@ -1161,14 +1211,23 @@ fn read_storage_file(path: &Path) -> serde_json::Map<String, serde_json::Value> 
 /// não propagadas — `storage.set` não deveria poder derrubar um script.
 fn write_storage_file(path: &Path, map: &serde_json::Map<String, serde_json::Value>) {
     if let Some(parent) = path.parent()
-        && let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("[glacier-ui] storage: falha ao criar '{}': {}", parent.display(), e);
-            return;
-        }
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!(
+            "[glacier-ui] storage: falha ao criar '{}': {}",
+            parent.display(),
+            e
+        );
+        return;
+    }
     match serde_json::to_string_pretty(&serde_json::Value::Object(map.clone())) {
         Ok(s) => {
             if let Err(e) = std::fs::write(path, s) {
-                eprintln!("[glacier-ui] storage: falha ao gravar '{}': {}", path.display(), e);
+                eprintln!(
+                    "[glacier-ui] storage: falha ao gravar '{}': {}",
+                    path.display(),
+                    e
+                );
             }
         }
         Err(e) => eprintln!("[glacier-ui] storage: falha ao serializar: {}", e),
@@ -1238,14 +1297,21 @@ pub(crate) fn has_script(markup: &str) -> bool {
 /// `<script src>` externo, o caminho é resolvido relativo ao diretório do
 /// template e devolvido para ancorar a resolução de `require` (ver
 /// [`LuauComponent::from_file`]). Inline → `(corpo, None)`.
-fn resolve_script(markup: &str, template_path: &str) -> std::result::Result<(String, Option<PathBuf>), String> {
+fn resolve_script(
+    markup: &str,
+    template_path: &str,
+) -> std::result::Result<(String, Option<PathBuf>), String> {
     if let Some(src) = extract_script_src(markup) {
         let base = std::path::Path::new(template_path)
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."));
         let luau_path = base.join(&src);
         let content = std::fs::read_to_string(&luau_path).map_err(|e| {
-            format!("Falha ao ler script Luau externo '{}': {}", luau_path.display(), e)
+            format!(
+                "Falha ao ler script Luau externo '{}': {}",
+                luau_path.display(),
+                e
+            )
         })?;
         return Ok((content, Some(luau_path)));
     }
@@ -1284,7 +1350,12 @@ mod tests {
 
     /// Roda `func`/`value` contra um mapa de contexto e devolve o mapa mutado,
     /// exercitando o mesmo caminho de `update`.
-    fn drive(comp: &LuauComponent, func: &str, value: Option<&str>, mut data: HashMap<String, String>) -> HashMap<String, String> {
+    fn drive(
+        comp: &LuauComponent,
+        func: &str,
+        value: Option<&str>,
+        mut data: HashMap<String, String>,
+    ) -> HashMap<String, String> {
         let mut ctx = Context::new(&mut data);
         comp.run(func, value, &mut ctx);
         data
@@ -1307,29 +1378,25 @@ mod tests {
 
     #[test]
     fn onchange_recebe_o_valor() {
-        let comp = LuauComponent::from_source(
-            "function set_nome(v) ctx.nome = v end",
-            "t.gv",
-            "c",
-        )
-        .unwrap();
+        let comp = LuauComponent::from_source("function set_nome(v) ctx.nome = v end", "t.gv", "c")
+            .unwrap();
         let data = drive(&comp, "set_nome", Some("Ana"), HashMap::new());
         assert_eq!(data.get("nome").map(String::as_str), Some("Ana"));
     }
 
     #[test]
     fn atribuir_nil_remove_a_chave_no_contexto() {
-        let comp = LuauComponent::from_source(
-            "function limpar() ctx.temp = nil end",
-            "t.gv",
-            "c",
-        )
-        .unwrap();
+        let comp = LuauComponent::from_source("function limpar() ctx.temp = nil end", "t.gv", "c")
+            .unwrap();
         let mut data = HashMap::new();
         data.insert("temp".into(), "algo".into());
         data.insert("manter".into(), "ok".into());
         let data = drive(&comp, "limpar", None, data);
-        assert_eq!(data.get("temp"), None, "ctx.temp = nil deveria remover a chave");
+        assert_eq!(
+            data.get("temp"),
+            None,
+            "ctx.temp = nil deveria remover a chave"
+        );
         // Chaves não tocadas pelo script permanecem.
         assert_eq!(data.get("manter").map(String::as_str), Some("ok"));
     }
@@ -1361,12 +1428,8 @@ mod tests {
     fn acao_com_sufixo_e_value_passa_ambos() {
         // `field:<chave>` num onChange chama field(chave, texto): sufixo 1º, o
         // valor do input em seguida.
-        let comp = LuauComponent::from_source(
-            "function field(k, v) ctx[k] = v end",
-            "t.gv",
-            "c",
-        )
-        .unwrap();
+        let comp =
+            LuauComponent::from_source("function field(k, v) ctx[k] = v end", "t.gv", "c").unwrap();
         let data = drive(&comp, "field:nome", Some("Ana"), HashMap::new());
         assert_eq!(data.get("nome").map(String::as_str), Some("Ana"));
     }
@@ -1404,10 +1467,8 @@ mod tests {
 
     #[test]
     fn toast_aceita_string_curta() {
-        let comp = LuauComponent::from_source(
-            "function go() toast('oi') end", "t.gv", "c",
-        )
-        .unwrap();
+        let comp =
+            LuauComponent::from_source("function go() toast('oi') end", "t.gv", "c").unwrap();
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
         comp.run("go", None, &mut ctx);
@@ -1431,7 +1492,10 @@ mod tests {
             Some(crate::component::DialogAction::Show(spec)) => {
                 assert_eq!(spec.buttons.len(), 2, "cancelar + confirmar");
                 assert_eq!(spec.buttons[1].action, "fez");
-                assert_eq!(spec.buttons[1].role, crate::dialogs::ButtonRole::Destructive);
+                assert_eq!(
+                    spec.buttons[1].role,
+                    crate::dialogs::ButtonRole::Destructive
+                );
                 assert_eq!(spec.buttons[0].action, "", "cancelar só fecha");
             }
             _ => panic!("esperava um diálogo Show"),
@@ -1451,7 +1515,8 @@ mod tests {
                -- não deve erro: gsub num campo null-que-virou-nil guardado com fallback\n\
                ctx.safe = (t.d or 'vazio')\n\
              end",
-            "t.gv", "c",
+            "t.gv",
+            "c",
         )
         .unwrap();
         let d = drive(&comp, "go", None, HashMap::new());
@@ -1468,13 +1533,17 @@ mod tests {
                ctx.arr = json.encode(json.array({}))\n\
                ctx.nested = json.encode({ ws = json.array({}), name = 'x' })\n\
              end",
-            "t.gv", "c",
+            "t.gv",
+            "c",
         )
         .unwrap();
         let d = drive(&comp, "go", None, HashMap::new());
         assert_eq!(d.get("obj").map(String::as_str), Some("{}"));
         assert_eq!(d.get("arr").map(String::as_str), Some("[]"));
-        assert_eq!(d.get("nested").map(String::as_str), Some(r#"{"name":"x","ws":[]}"#));
+        assert_eq!(
+            d.get("nested").map(String::as_str),
+            Some(r#"{"name":"x","ws":[]}"#)
+        );
     }
 
     #[test]
@@ -1533,7 +1602,10 @@ mod tests {
         .unwrap();
         let data = drive(&comp, "go", None, HashMap::new());
         // Tabela 1-indexada sequencial → array JSON, na ordem.
-        assert_eq!(data.get("out").map(String::as_str), Some(r#"["a","b","c"]"#));
+        assert_eq!(
+            data.get("out").map(String::as_str),
+            Some(r#"["a","b","c"]"#)
+        );
     }
 
     #[test]
@@ -1596,7 +1668,12 @@ mod tests {
         // 2) o motor entrega a resposta: a corrotina retoma no ponto do fetch.
         {
             let mut ctx = Context::new(&mut data);
-            let res = FetchResult { ok: true, status: 200, body: "OLA".into(), error: String::new() };
+            let res = FetchResult {
+                ok: true,
+                status: 200,
+                body: "OLA".into(),
+                error: String::new(),
+            };
             comp.resume_inner(id, &res, &mut ctx).unwrap();
         }
         assert_eq!(data.get("dados").map(String::as_str), Some("OLA"));
@@ -1641,7 +1718,10 @@ mod tests {
             comp.on_stream_event(id, StreamEventKind::Closed, "", &mut ctx);
         }
         assert_eq!(data.get("fim").map(String::as_str), Some("sim"));
-        assert!(comp.streams.borrow().is_empty(), "Closed deveria limpar o registro");
+        assert!(
+            comp.streams.borrow().is_empty(),
+            "Closed deveria limpar o registro"
+        );
     }
 
     #[test]
@@ -1662,7 +1742,11 @@ mod tests {
         // Abriu um WebSocket e enfileirou um `send` — sem suspender.
         assert_eq!(ctx.streams.len(), 1);
         assert_eq!(ctx.streams[0].kind, StreamKind::Ws);
-        assert_eq!(ctx.stream_cmds.len(), 1, "c:send deveria enfileirar 1 comando");
+        assert_eq!(
+            ctx.stream_cmds.len(),
+            1,
+            "c:send deveria enfileirar 1 comando"
+        );
         assert_eq!(ctx.stream_cmds[0].kind, StreamCommandKind::Send);
         assert_eq!(ctx.stream_cmds[0].text, "ola");
         // O comando referencia o mesmo id do stream aberto.
@@ -1706,8 +1790,7 @@ mod tests {
     /// Cria um diretório temporário exclusivo do teste (isolado por nome), útil
     /// para montar árvores de módulos.
     fn temp_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("glacier_luau_{}_{}", std::process::id(), tag));
+        let dir = std::env::temp_dir().join(format!("glacier_luau_{}_{}", std::process::id(), tag));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -1787,13 +1870,22 @@ mod tests {
         {
             let mut ctx = Context::new(&mut data);
             comp.run("carregar", None, &mut ctx);
-            assert_eq!(ctx.fetches.len(), 1, "o módulo deveria ter suspendido num fetch");
+            assert_eq!(
+                ctx.fetches.len(),
+                1,
+                "o módulo deveria ter suspendido num fetch"
+            );
             assert_eq!(ctx.fetches[0].url, "http://ex/x");
             id = ctx.fetches[0].id;
         }
         {
             let mut ctx = Context::new(&mut data);
-            let res = FetchResult { ok: true, status: 200, body: "PONG".into(), error: String::new() };
+            let res = FetchResult {
+                ok: true,
+                status: 200,
+                body: "PONG".into(),
+                error: String::new(),
+            };
             comp.resume_inner(id, &res, &mut ctx).unwrap();
         }
         assert_eq!(data.get("dados").map(String::as_str), Some("PONG"));
@@ -1837,8 +1929,7 @@ mod tests {
         .unwrap();
         std::fs::write(scripts.join("m.luau"), "return { hi = \"ok\" }").unwrap();
 
-        let comp =
-            LuauComponent::from_file(dir.join("app.gv").to_str().unwrap(), "app").unwrap();
+        let comp = LuauComponent::from_file(dir.join("app.gv").to_str().unwrap(), "app").unwrap();
         let data = drive(&comp, "go", None, HashMap::new());
         assert_eq!(data.get("v").map(String::as_str), Some("ok"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1856,9 +1947,21 @@ mod tests {
         let scripts = dir.join("scripts");
         let pkg = scripts.join("pkg");
         std::fs::create_dir_all(&pkg).unwrap();
-        std::fs::write(dir.join("app.gv"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
-        std::fs::write(scripts.join("app.luau"), "local A = require(\"pkg/a\")\nfunction go() ctx.v = A.hi end").unwrap();
-        std::fs::write(pkg.join("a.luau"), "local B = require(\"b\")\nreturn { hi = B.msg }").unwrap();
+        std::fs::write(
+            dir.join("app.gv"),
+            "<Column></Column>\n<script src=\"scripts/app.luau\"></script>",
+        )
+        .unwrap();
+        std::fs::write(
+            scripts.join("app.luau"),
+            "local A = require(\"pkg/a\")\nfunction go() ctx.v = A.hi end",
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("a.luau"),
+            "local B = require(\"b\")\nreturn { hi = B.msg }",
+        )
+        .unwrap();
         std::fs::write(pkg.join("b.luau"), "return { msg = \"irmao-ok\" }").unwrap();
 
         let comp = LuauComponent::from_file(dir.join("app.gv").to_str().unwrap(), "app").unwrap();
@@ -1876,9 +1979,21 @@ mod tests {
         let scripts = dir.join("scripts");
         let pkg = scripts.join("pkg");
         std::fs::create_dir_all(&pkg).unwrap();
-        std::fs::write(dir.join("app.gv"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
-        std::fs::write(scripts.join("app.luau"), "local A = require(\"pkg/a\")\nfunction go() ctx.v = A.hi end").unwrap();
-        std::fs::write(pkg.join("a.luau"), "local S = require(\"../shared\")\nreturn { hi = S.msg }").unwrap();
+        std::fs::write(
+            dir.join("app.gv"),
+            "<Column></Column>\n<script src=\"scripts/app.luau\"></script>",
+        )
+        .unwrap();
+        std::fs::write(
+            scripts.join("app.luau"),
+            "local A = require(\"pkg/a\")\nfunction go() ctx.v = A.hi end",
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("a.luau"),
+            "local S = require(\"../shared\")\nreturn { hi = S.msg }",
+        )
+        .unwrap();
         std::fs::write(scripts.join("shared.luau"), "return { msg = \"subiu-ok\" }").unwrap();
 
         let comp = LuauComponent::from_file(dir.join("app.gv").to_str().unwrap(), "app").unwrap();
@@ -1900,15 +2015,27 @@ mod tests {
         let pb = scripts.join("pkg_b");
         std::fs::create_dir_all(&pa).unwrap();
         std::fs::create_dir_all(&pb).unwrap();
-        std::fs::write(dir.join("app.gv"), "<Column></Column>\n<script src=\"scripts/app.luau\"></script>").unwrap();
+        std::fs::write(
+            dir.join("app.gv"),
+            "<Column></Column>\n<script src=\"scripts/app.luau\"></script>",
+        )
+        .unwrap();
         std::fs::write(
             scripts.join("app.luau"),
             "local A = require(\"pkg_a/user\")\nlocal B = require(\"pkg_b/user\")\n\
              function go() ctx.a = A.who() ctx.b = B.who() end",
         )
         .unwrap();
-        std::fs::write(pa.join("user.luau"), "local X = require(\"x\")\nreturn { who = function() return X.name end }").unwrap();
-        std::fs::write(pb.join("user.luau"), "local X = require(\"x\")\nreturn { who = function() return X.name end }").unwrap();
+        std::fs::write(
+            pa.join("user.luau"),
+            "local X = require(\"x\")\nreturn { who = function() return X.name end }",
+        )
+        .unwrap();
+        std::fs::write(
+            pb.join("user.luau"),
+            "local X = require(\"x\")\nreturn { who = function() return X.name end }",
+        )
+        .unwrap();
         std::fs::write(pa.join("x.luau"), "return { name = \"de-a\" }").unwrap();
         std::fs::write(pb.join("x.luau"), "return { name = \"de-b\" }").unwrap();
 
@@ -1939,7 +2066,10 @@ mod tests {
         std::fs::write(dir.join("pkg").join("init.luau"), "return 2").unwrap();
         let roots = vec![dir.clone()];
         assert_eq!(resolve_module("solo", &roots), Some(dir.join("solo.luau")));
-        assert_eq!(resolve_module("pkg", &roots), Some(dir.join("pkg").join("init.luau")));
+        assert_eq!(
+            resolve_module("pkg", &roots),
+            Some(dir.join("pkg").join("init.luau"))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1955,7 +2085,8 @@ mod tests {
 
     #[test]
     fn navigate_pede_navegacao_ao_motor() {
-        let comp = LuauComponent::from_source("function ir() navigate('perfil') end", "t.gv", "c").unwrap();
+        let comp = LuauComponent::from_source("function ir() navigate('perfil') end", "t.gv", "c")
+            .unwrap();
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
         comp.run("ir", None, &mut ctx);
@@ -1967,7 +2098,8 @@ mod tests {
 
     #[test]
     fn navigate_back_pede_volta_ao_motor() {
-        let comp = LuauComponent::from_source("function voltar() navigate_back() end", "t.gv", "c").unwrap();
+        let comp = LuauComponent::from_source("function voltar() navigate_back() end", "t.gv", "c")
+            .unwrap();
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
         comp.run("voltar", None, &mut ctx);
@@ -1986,7 +2118,11 @@ mod tests {
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
         comp.run("abrir", None, &mut ctx);
-        assert_eq!(ctx.windows.len(), 1, "open_window deveria enfileirar uma janela");
+        assert_eq!(
+            ctx.windows.len(),
+            1,
+            "open_window deveria enfileirar uma janela"
+        );
         let spec = &ctx.windows[0];
         match &spec.source {
             crate::component::WindowSource::File(p) => assert_eq!(p, "telas/detalhe.gv"),
@@ -2009,7 +2145,9 @@ mod tests {
         let mut ctx = Context::new(&mut data);
         comp.run("abrir", None, &mut ctx);
         assert_eq!(ctx.windows.len(), 1);
-        assert!(matches!(&ctx.windows[0].source, crate::component::WindowSource::File(p) if p == "telas/x.gv"));
+        assert!(
+            matches!(&ctx.windows[0].source, crate::component::WindowSource::File(p) if p == "telas/x.gv")
+        );
     }
 
     #[test]
@@ -2024,7 +2162,9 @@ mod tests {
         let mut ctx = Context::new(&mut data);
         comp.run("abrir", None, &mut ctx);
         assert_eq!(ctx.windows.len(), 1);
-        assert!(matches!(&ctx.windows[0].source, crate::component::WindowSource::Named(n) if n == "perfil"));
+        assert!(
+            matches!(&ctx.windows[0].source, crate::component::WindowSource::Named(n) if n == "perfil")
+        );
     }
 
     #[test]
@@ -2067,7 +2207,8 @@ mod tests {
 
     #[test]
     fn close_window_pede_fechar_a_propria_janela() {
-        let comp = LuauComponent::from_source("function sair() close_window() end", "t.gv", "c").unwrap();
+        let comp =
+            LuauComponent::from_source("function sair() close_window() end", "t.gv", "c").unwrap();
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
         assert!(!ctx.close_self);
@@ -2090,8 +2231,12 @@ mod tests {
         .unwrap();
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
-        comp.on_broadcast_inner("project_created", "{\"name\":\"api\"}", &mut ctx).unwrap();
-        assert_eq!(ctx.get("got_event").map(String::as_str), Some("project_created"));
+        comp.on_broadcast_inner("project_created", "{\"name\":\"api\"}", &mut ctx)
+            .unwrap();
+        assert_eq!(
+            ctx.get("got_event").map(String::as_str),
+            Some("project_created")
+        );
         assert_eq!(ctx.get("got_name").map(String::as_str), Some("api"));
     }
 
@@ -2110,7 +2255,11 @@ mod tests {
         {
             let mut ctx = Context::new(&mut data);
             comp.run("iniciar", None, &mut ctx);
-            assert_eq!(ctx.timers.len(), 1, "after não deveria suspender a corrotina");
+            assert_eq!(
+                ctx.timers.len(),
+                1,
+                "after não deveria suspender a corrotina"
+            );
             assert_eq!(ctx.timers[0].delay_ms, 50);
             id = ctx.timers[0].id;
         }
@@ -2142,7 +2291,11 @@ mod tests {
             let mut ctx = Context::new(&mut data);
             comp.resume_timer_inner(id, &mut ctx).unwrap();
         }
-        assert_eq!(data.get("tocou"), None, "cancelado antes de vencer não deveria disparar");
+        assert_eq!(
+            data.get("tocou"),
+            None,
+            "cancelado antes de vencer não deveria disparar"
+        );
     }
 
     #[test]
@@ -2160,7 +2313,11 @@ mod tests {
         {
             let mut ctx = Context::new(&mut data);
             comp.run("iniciar", None, &mut ctx);
-            assert_eq!(ctx.timers.len(), 1, "every não deveria suspender a corrotina");
+            assert_eq!(
+                ctx.timers.len(),
+                1,
+                "every não deveria suspender a corrotina"
+            );
             first_id = ctx.timers[0].id;
         }
 
@@ -2168,10 +2325,17 @@ mod tests {
         {
             let mut ctx = Context::new(&mut data);
             comp.resume_timer_inner(first_id, &mut ctx).unwrap();
-            assert_eq!(ctx.timers.len(), 1, "cada disparo deveria reagendar o próximo");
+            assert_eq!(
+                ctx.timers.len(),
+                1,
+                "cada disparo deveria reagendar o próximo"
+            );
             second_id = ctx.timers[0].id;
         }
-        assert_ne!(first_id, second_id, "a repetição usa um novo handle a cada disparo");
+        assert_ne!(
+            first_id, second_id,
+            "a repetição usa um novo handle a cada disparo"
+        );
         assert_eq!(data.get("contador").map(String::as_str), Some("1"));
 
         {
@@ -2226,29 +2390,47 @@ mod tests {
         {
             let mut ctx = Context::new(&mut data);
             comp.run("quebra", None, &mut ctx);
-            assert!(ctx.toasts.is_empty(), "on_error definido não deveria também promover a um toast");
+            assert!(
+                ctx.toasts.is_empty(),
+                "on_error definido não deveria também promover a um toast"
+            );
         }
         assert!(
-            data.get("capturado").map(|s| s.contains("deu ruim")).unwrap_or(false),
+            data.get("capturado")
+                .map(|s| s.contains("deu ruim"))
+                .unwrap_or(false),
             "on_error deveria ter recebido a mensagem do erro"
         );
     }
 
     #[test]
     fn erro_sem_on_error_e_promovido_a_toast() {
-        let comp = LuauComponent::from_source("function quebra() error('deu ruim') end", "t.gv", "c").unwrap();
+        let comp =
+            LuauComponent::from_source("function quebra() error('deu ruim') end", "t.gv", "c")
+                .unwrap();
         let mut data = HashMap::new();
         let mut ctx = Context::new(&mut data);
         comp.run("quebra", None, &mut ctx);
-        assert_eq!(ctx.toasts.len(), 1, "sem on_error, o erro deveria virar toast visível");
+        assert_eq!(
+            ctx.toasts.len(),
+            1,
+            "sem on_error, o erro deveria virar toast visível"
+        );
         assert_eq!(ctx.toasts[0].kind, crate::toasts::ToastKind::Error);
     }
 
     #[test]
     fn ctx_aceita_tabela_serializando_via_json() {
-        let comp = LuauComponent::from_source("function ir() ctx.obj = { a = 1, b = 'x' } end", "t.gv", "c").unwrap();
+        let comp = LuauComponent::from_source(
+            "function ir() ctx.obj = { a = 1, b = 'x' } end",
+            "t.gv",
+            "c",
+        )
+        .unwrap();
         let data = drive(&comp, "ir", None, HashMap::new());
-        let raw = data.get("obj").expect("ctx.obj deveria ter sido gravado (serializado como JSON)");
+        let raw = data
+            .get("obj")
+            .expect("ctx.obj deveria ter sido gravado (serializado como JSON)");
         let v: serde_json::Value = serde_json::from_str(raw).unwrap();
         assert_eq!(v["a"], 1);
         assert_eq!(v["b"], "x");
@@ -2263,7 +2445,11 @@ mod tests {
         )
         .unwrap();
         let data = drive(&comp, "ir", None, HashMap::new());
-        assert_eq!(data.get("ruim"), None, "tabela com função dentro não é serializável");
+        assert_eq!(
+            data.get("ruim"),
+            None,
+            "tabela com função dentro não é serializável"
+        );
         assert_eq!(data.get("bom").map(String::as_str), Some("ok"));
     }
 
@@ -2322,7 +2508,11 @@ mod tests {
         )
         .unwrap();
         let data = drive(&comp, "fluxo", None, HashMap::new());
-        assert_eq!(data.get("depois"), None, "storage.get de uma chave removida deveria ser nil");
+        assert_eq!(
+            data.get("depois"),
+            None,
+            "storage.get de uma chave removida deveria ser nil"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2342,7 +2532,11 @@ mod tests {
         )
         .unwrap();
         let data = drive(&comp, "checar", None, HashMap::new());
-        assert_eq!(data.get("tem_io").map(String::as_str), Some("false"), "io não deveria estar disponível");
+        assert_eq!(
+            data.get("tem_io").map(String::as_str),
+            Some("false"),
+            "io não deveria estar disponível"
+        );
         assert_eq!(
             data.get("os_execute_ok").map(String::as_str),
             Some("false"),
@@ -2352,7 +2546,8 @@ mod tests {
 
     #[test]
     fn exemplo_navegacao_luau_login_correto_navega_para_o_dashboard() {
-        let comp = LuauComponent::from_file("examples/navegacao_luau/login.gv", "login_luau").unwrap();
+        let comp =
+            LuauComponent::from_file("examples/navegacao_luau/login.gv", "login_luau").unwrap();
         let mut data = HashMap::new();
         data.insert("usuario".into(), "admin".into());
         data.insert("senha".into(), "123".into());
@@ -2366,14 +2561,18 @@ mod tests {
 
     #[test]
     fn exemplo_navegacao_luau_login_errado_nao_navega_e_seta_erro() {
-        let comp = LuauComponent::from_file("examples/navegacao_luau/login.gv", "login_luau").unwrap();
+        let comp =
+            LuauComponent::from_file("examples/navegacao_luau/login.gv", "login_luau").unwrap();
         let mut data = HashMap::new();
         data.insert("usuario".into(), "quemquer".into());
         data.insert("senha".into(), "errada".into());
         {
             let mut ctx = Context::new(&mut data);
             comp.run("entrar", None, &mut ctx);
-            assert!(ctx.nav.is_none(), "credenciais erradas não deveriam navegar");
+            assert!(
+                ctx.nav.is_none(),
+                "credenciais erradas não deveriam navegar"
+            );
         }
         assert!(data.get("erro").map(|s| !s.is_empty()).unwrap_or(false));
     }
@@ -2381,7 +2580,8 @@ mod tests {
     #[test]
     fn exemplo_navegacao_luau_dashboard_sai_volta_e_limpa_senha() {
         let comp =
-            LuauComponent::from_file("examples/navegacao_luau/dashboard.gv", "dashboard_luau").unwrap();
+            LuauComponent::from_file("examples/navegacao_luau/dashboard.gv", "dashboard_luau")
+                .unwrap();
         let mut data = HashMap::new();
         data.insert("senha".into(), "123".into());
         {
@@ -2394,8 +2594,7 @@ mod tests {
 
     #[test]
     fn exemplo_robustez_luau_exercita_timers_storage_viewport_ctx_tabela_e_erro() {
-        let storage_file =
-            PathBuf::from("examples/robustez_luau/.glacier-storage/robustez.json");
+        let storage_file = PathBuf::from("examples/robustez_luau/.glacier-storage/robustez.json");
         let _ = std::fs::remove_file(&storage_file);
 
         let comp =
@@ -2436,7 +2635,8 @@ mod tests {
             comp.run("gerar_prefs", None, &mut ctx);
         }
         let prefs: serde_json::Value =
-            serde_json::from_str(data.get("prefs").expect("prefs deveria ter sido gravado")).unwrap();
+            serde_json::from_str(data.get("prefs").expect("prefs deveria ter sido gravado"))
+                .unwrap();
         assert_eq!(prefs["tema"], "escuro");
         assert_eq!(prefs["volume"], 7);
 
@@ -2444,9 +2644,17 @@ mod tests {
         {
             let mut ctx = Context::new(&mut data);
             comp.run("provocar_erro", None, &mut ctx);
-            assert_eq!(ctx.toasts.len(), 1, "on_error do exemplo deveria mostrar um toast");
+            assert_eq!(
+                ctx.toasts.len(),
+                1,
+                "on_error do exemplo deveria mostrar um toast"
+            );
         }
-        assert!(data.get("ultimo_erro").map(|s| s != "(nenhum ainda)").unwrap_or(false));
+        assert!(
+            data.get("ultimo_erro")
+                .map(|s| s != "(nenhum ainda)")
+                .unwrap_or(false)
+        );
 
         // storage: salvar e reler numa instância NOVA (simula reiniciar o app).
         data.insert("rascunho".into(), "anotação importante".into());
@@ -2461,9 +2669,11 @@ mod tests {
             let mut ctx2 = Context::new(&mut data2);
             comp2.run("init", None, &mut ctx2);
         }
-        assert_eq!(data2.get("rascunho").map(String::as_str), Some("anotação importante"));
+        assert_eq!(
+            data2.get("rascunho").map(String::as_str),
+            Some("anotação importante")
+        );
 
         let _ = std::fs::remove_file(&storage_file);
     }
 }
-
