@@ -1,25 +1,29 @@
 <style>
-.center-xy { align-x: Center; align-y: Center; }
-.center { align: Center; }
-.fill { width: fill; height: fill; }
-.gray { color: #2E3440; }
-.p-20 { padding: 20; }
+.center-xy  { align-x: Center; align-y: Center; }
+.center     { align: Center; }
+.fill       { width: fill; height: fill; }
+.gray       { color: #2E3440; }
+.p-20       { padding: 20; }
+.red        { color: #BF616A; }
+.green      { color: #A3BE8C; }
+.btn        { padding: 10 20; }
+.txt        { color: #ECEFF4; bold: true; size: 28; }
 </style>
 
 <container class="center-xy fill gray p-20">
     <column spacing="20" class="center">
-        <text size="28" bold="true" color="#ECEFF4">Valor do Contador: {contador}</text>
+        <text class="txt">Valor do Contador: {contador}</text>
         <row spacing="15" align="Center">
-            <button text="Diminuir" on_click="decrement" color="#BF616A" padding="10 20" />
-            <button text="Aumentar" on_click="increment" color="#A3BE8C" padding="10 20" />
+            <button text="Diminuir" on_click="decrement" class="btn red" />
+            <button text="Aumentar" on_click="increment" class="btn green" />
         </row>
     </column>
 </container>
 
 <script>
--- Comportamento em Lua, interpretado em tempo de execução (sem compilar).
--- O contexto do motor é a tabela global `ctx`: ler/escrever `ctx.contador`
--- atualiza o binding {contador} da markup acima.
+-- Lua behavior, interpreted at runtime (no compilation).
+-- The engine context is the global `ctx` table: read/write `ctx.contador`
+-- updates the {contador} binding in the markup above.
 function init() ctx.contador = ctx.contador or  end
 function increment() ctx.contador = ctx.contador + 1 end
 function decrement() ctx.contador = ctx.contador - 1 end
