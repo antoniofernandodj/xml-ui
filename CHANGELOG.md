@@ -8,6 +8,37 @@ incompatíveis. Toda quebra vem listada em **Quebras** com o que fazer para migr
 
 ---
 
+## [0.47.0] — 2026-07-17
+
+### Adicionado
+- **Ícone de bandeja (system tray) + app que sobrevive à última janela**, atrás
+  da feature **`tray`** (opcional; sem ela nada de GTK/tray-icon é arrastado). No
+  builder do `GlacierDaemon`:
+  - `.tray(TrayConfig { icon, tooltip, items })` — habilita a bandeja. Com ela
+    configurada, **fechar a última janela não encerra mais o app**: ele recolhe
+    para a bandeja. Sem bandeja, o comportamento é o de sempre (encerra na última
+    janela).
+  - `.on_tray(|id, &mut TrayActions| { … })` — gancho de clique nos itens do
+    menu. `TrayActions` oferece `open_main()` (reabre/foca a principal), `quit()`
+    (encerra), `set_label(id, text)` e `set_checked(id, bool)`.
+  - `TrayItem::button/check/separator` para montar o menu.
+  - Funções globais `notifications_enabled()` / `set_notifications_enabled(bool)`:
+    interruptor de processo que o `notify()` consulta antes de emitir — o gancho
+    da bandeja liga/desliga as notificações do SO sem passar pela camada Luau.
+
+  A bandeja roda numa **thread dedicada** (o `iced`/`winit` é dono do loop
+  principal): Linux via libappindicator+GTK, Windows via message-loop Win32.
+  **macOS não é suportado** (exige a thread principal) — lá `.tray(...)` é
+  ignorada e o app volta a encerrar na última janela. No Linux não há evento de
+  clique no ícone (o clique abre o menu); no Windows o clique esquerdo reabre a
+  principal. Ver `src/tray.rs` e `examples/bandeja`.
+
+### Compatibilidade
+- Sem quebras: a feature `tray` é opt-in e toda a API nova é aditiva. Quem não a
+  habilita compila exatamente como antes (nenhuma dep nova).
+
+---
+
 ## [0.46.0] — 2026-07-15
 
 ### Mudado

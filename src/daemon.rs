@@ -30,6 +30,7 @@ use iced::window;
 use iced::{Element, Font, Point, Size, Subscription, Task};
 
 use crate::component::{WindowSource, WindowSpec};
+use crate::tray::{TrayActions, TrayConfig, TrayHandle, TrayMsg, TrayRequest};
 use crate::{EngineMessage, GlacierUI};
 
 /// A geometria de uma janela no momento em que ela vai fechar — o que um app
@@ -54,6 +55,15 @@ type MessageHook = Rc<dyn Fn(&EngineMessage, &GlacierUI)>;
 /// Gancho de fechamento da janela principal, com a geometria dela. Ver
 /// [`GlacierDaemon::on_close`].
 type CloseHook = Rc<dyn Fn(&GlacierUI, WindowGeometry)>;
+/// Configuração do motor da janela principal (registra componentes, tela
+/// inicial, …). É um `Rc` para o `Runtime` guardá-la e **reabrir** a principal
+/// depois que ela fecha (o clique "Open Rustploy" da bandeja). Ver
+/// [`GlacierDaemon::main`].
+type SetupHook = Rc<dyn Fn(&mut GlacierUI)>;
+/// Gancho de clique num item do menu da bandeja: recebe o `id` do item e um
+/// [`TrayActions`] para pedir ações (abrir a principal, sair, mudar rótulo). Ver
+/// [`GlacierDaemon::on_tray`].
+type TrayHook = Rc<dyn Fn(&str, &mut TrayActions)>;
 
 /// Construtor/runner do app multi-janela. Ver [módulo](self).
 pub struct GlacierDaemon {
@@ -68,8 +78,9 @@ pub struct GlacierDaemon {
     /// sobre o default do daemon. Ver [`GlacierDaemon::child_window`].
     child_settings: Option<ChildSettingsHook>,
     /// Configura o motor da janela principal (registra componentes, define a
-    /// tela inicial, carrega `.gss`, …). Rodado uma vez na inicialização.
-    setup: Box<dyn Fn(&mut GlacierUI)>,
+    /// tela inicial, carrega `.gss`, …). Rodado na inicialização e de novo a
+    /// cada reabertura da principal pela bandeja.
+    setup: SetupHook,
     /// Fontes embutidas a registrar no runtime do iced (bytes de `.ttf`/`.otf`).
     fonts: Vec<&'static [u8]>,
     /// Fonte padrão de todas as janelas, quando o app embute a sua.
@@ -88,6 +99,11 @@ pub struct GlacierDaemon {
     /// relativo ao diretório do script — inviável quando os assets moram num
     /// diretório read-only. Ver [`GlacierDaemon::storage_dir`].
     storage_dir: Option<PathBuf>,
+    /// Configuração da bandeja (ícone + menu), quando o app quer sobreviver à
+    /// última janela. Ver [`GlacierDaemon::tray`].
+    tray_config: Option<TrayConfig>,
+    /// Gancho de clique nos itens da bandeja. Ver [`GlacierDaemon::on_tray`].
+    on_tray: Option<TrayHook>,
 }
 
 impl GlacierDaemon {
@@ -101,7 +117,7 @@ impl GlacierDaemon {
                 ..window::Settings::default()
             },
             child_settings: None,
-            setup: Box::new(|_| {}),
+            setup: Rc::new(|_| {}),
             fonts: Vec::new(),
             default_font: None,
             on_message: None,
@@ -109,6 +125,8 @@ impl GlacierDaemon {
             reload_period: Duration::from_millis(500),
             toast_period: Duration::from_millis(400),
             storage_dir: None,
+            tray_config: None,
+            on_tray: None,
         }
     }
 
@@ -165,7 +183,29 @@ impl GlacierDaemon {
     /// Registra o `setup` da janela principal: recebe o [`GlacierUI`] dela para
     /// registrar componentes, definir a tela inicial, carregar estilos, etc.
     pub fn main(mut self, setup: impl Fn(&mut GlacierUI) + 'static) -> Self {
-        self.setup = Box::new(setup);
+        self.setup = Rc::new(setup);
+        self
+    }
+
+    /// Habilita um **ícone de bandeja** (system tray) — e, com ele, um app que
+    /// **sobrevive à última janela**: com bandeja configurada, fechar a última
+    /// janela não encerra mais o app; ele recolhe para a bandeja, e só o gancho
+    /// [`GlacierDaemon::on_tray`] (via `quit()`) o encerra. Sem bandeja, o
+    /// comportamento é o de sempre (encerra na última janela).
+    ///
+    /// A bandeja sobe numa thread própria (ver [`crate::tray`]); em plataformas
+    /// sem suporte (macOS, ou build sem a feature `tray`) isto é ignorado e o app
+    /// volta a encerrar na última janela.
+    pub fn tray(mut self, config: TrayConfig) -> Self {
+        self.tray_config = Some(config);
+        self
+    }
+
+    /// Gancho de clique nos itens do menu da bandeja: recebe o `id` do item e um
+    /// [`TrayActions`] para pedir `open_main()`, `quit()` ou atualizar o menu
+    /// (`set_label`/`set_checked`). Sem `on_tray`, os cliques não fazem nada.
+    pub fn on_tray(mut self, f: impl Fn(&str, &mut TrayActions) + 'static) -> Self {
+        self.on_tray = Some(Rc::new(f));
         self
     }
 
@@ -239,6 +279,8 @@ impl GlacierDaemon {
             reload_period,
             toast_period,
             storage_dir,
+            tray_config,
+            on_tray,
         } = self;
         let main_title = title.clone();
 
@@ -257,10 +299,24 @@ impl GlacierDaemon {
             let mut engine = GlacierUI::new();
             setup(&mut engine);
             let (id, open) = window::open(main_settings.clone());
-            let mut rt = Runtime::new(reload_period, toast_period, id);
+            let mut rt = Runtime::new(
+                reload_period,
+                toast_period,
+                id,
+                setup.clone(),
+                main_settings.clone(),
+                main_title.clone(),
+            );
             rt.child_settings = child_settings.clone();
             rt.on_message = on_message.clone();
             rt.on_close = on_close.clone();
+            // Sobe a bandeja (thread própria) uma vez, no boot. Só a
+            // configuração é `move`d para cá; a thread devolve a alça de
+            // comandos, guardada para as atualizações de menu e o shutdown.
+            if let Some(cfg) = tray_config.clone() {
+                rt.tray = crate::tray::spawn(cfg);
+                rt.on_tray = on_tray.clone();
+            }
             rt.titles.insert(id, main_title.clone());
             rt.windows.insert(id, engine);
             (rt, open.map(DaemonMessage::Opened))
@@ -309,6 +365,8 @@ pub enum DaemonMessage {
     /// Tick periódico aplicado a **todas** as janelas (hot-reload, expiração de
     /// toasts) — cada motor checa os próprios arquivos/toasts.
     TickAll(EngineMessage),
+    /// Um evento da bandeja (clique de menu ou no ícone). Ver [`crate::tray`].
+    Tray(TrayMsg),
 }
 
 /// Estado do daemon: um motor por janela + seus títulos.
@@ -327,10 +385,27 @@ struct Runtime {
     on_close: Option<CloseHook>,
     reload_period: Duration,
     toast_period: Duration,
+    /// Alça da bandeja, `Some` quando ela subiu. Enquanto for `Some`, o app
+    /// **não** encerra ao fechar a última janela (recolhe para a bandeja).
+    tray: Option<TrayHandle>,
+    /// Gancho de clique dos itens da bandeja.
+    on_tray: Option<TrayHook>,
+    /// O `setup`/`settings`/`título` da principal, guardados para **reabri-la**
+    /// (o "Open Rustploy" da bandeja) idêntica à do boot.
+    main_setup: SetupHook,
+    main_settings: window::Settings,
+    main_title: String,
 }
 
 impl Runtime {
-    fn new(reload_period: Duration, toast_period: Duration, main_id: window::Id) -> Self {
+    fn new(
+        reload_period: Duration,
+        toast_period: Duration,
+        main_id: window::Id,
+        main_setup: SetupHook,
+        main_settings: window::Settings,
+        main_title: String,
+    ) -> Self {
         Self {
             windows: HashMap::new(),
             titles: HashMap::new(),
@@ -340,6 +415,11 @@ impl Runtime {
             on_close: None,
             reload_period,
             toast_period,
+            tray: None,
+            on_tray: None,
+            main_setup,
+            main_settings,
+            main_title,
         }
     }
 
@@ -350,7 +430,10 @@ impl Runtime {
             DaemonMessage::Closed(id) => {
                 self.windows.remove(&id);
                 self.titles.remove(&id);
-                if self.windows.is_empty() {
+                // Com bandeja, a última janela fechada NÃO encerra o app: ele
+                // recolhe para a bandeja e só sai pelo "Quit" dela. Sem bandeja,
+                // o comportamento é o de sempre.
+                if self.windows.is_empty() && self.tray.is_none() {
                     iced::exit()
                 } else {
                     Task::none()
@@ -373,7 +456,56 @@ impl Runtime {
                     .collect();
                 Task::batch(tasks)
             }
+            DaemonMessage::Tray(msg) => self.on_tray(msg),
         }
+    }
+
+    /// Trata um evento da bandeja. O gancho `on_tray` roda com um
+    /// [`TrayActions`] e só **registra** a intenção (abrir a principal / sair);
+    /// aqui a traduzimos numa `Task`. O borrow imutável do gancho/handle termina
+    /// antes de mexermos em `self` (abrir janela), por isso o `request` é
+    /// extraído primeiro.
+    fn on_tray(&mut self, msg: TrayMsg) -> Task<DaemonMessage> {
+        let request = match msg {
+            // Clique esquerdo no ícone (Windows): reabre a principal direto.
+            TrayMsg::IconLeftClick => Some(TrayRequest::OpenMain),
+            TrayMsg::Menu(id) => match (&self.on_tray, &self.tray) {
+                (Some(hook), Some(handle)) => {
+                    let mut actions = TrayActions::new(handle);
+                    hook(&id, &mut actions);
+                    actions.request
+                }
+                _ => None,
+            },
+        };
+        match request {
+            Some(TrayRequest::OpenMain) => self.open_main(),
+            Some(TrayRequest::Quit) => {
+                if let Some(tray) = &self.tray {
+                    tray.shutdown();
+                }
+                iced::exit()
+            }
+            None => Task::none(),
+        }
+    }
+
+    /// Reabre (ou foca, se já viva) a janela principal — o "Open Rustploy" da
+    /// bandeja. Depois de a principal ter fechado, `main_id` aponta para uma
+    /// janela que não está mais em `windows`, então caímos no ramo de recriar:
+    /// um motor fresco via o `setup` guardado, abrindo a janela com as mesmas
+    /// `settings` (geometria restaurada) do boot.
+    fn open_main(&mut self) -> Task<DaemonMessage> {
+        if self.windows.contains_key(&self.main_id) {
+            return window::gain_focus(self.main_id);
+        }
+        let mut engine = GlacierUI::new();
+        (self.main_setup)(&mut engine);
+        let (id, open) = window::open(self.main_settings.clone());
+        self.main_id = id;
+        self.titles.insert(id, self.main_title.clone());
+        self.windows.insert(id, engine);
+        open.map(DaemonMessage::Opened)
     }
 
     /// Fecha a janela `id`. Na principal, e havendo um gancho `on_close`,
@@ -552,6 +684,12 @@ impl Runtime {
             iced::time::every(self.toast_period)
                 .map(|_| DaemonMessage::TickAll(EngineMessage::ToastTick)),
         ];
+
+        // Eventos da bandeja (cliques de menu/ícone), só quando ela subiu. Drena
+        // os canais globais do `tray-icon` (ver [`crate::tray::event_stream`]).
+        if self.tray.is_some() {
+            subs.push(iced::Subscription::run(crate::tray::event_stream).map(DaemonMessage::Tray));
+        }
 
         // Subscriptions por-motor (streams `sse`/`websocket`, `Component::subscription`):
         // marcadas com o `id` da janela. Streams já vêm isolados por `engine_id`.

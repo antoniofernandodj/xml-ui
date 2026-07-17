@@ -12,6 +12,7 @@ pub mod parser;
 pub mod render_inputs;
 pub mod stylesheet;
 pub mod toasts;
+pub mod tray;
 pub mod widget;
 
 /// Re-exported so a host app can depend on `glacier-ui` alone: `iced` types
@@ -42,6 +43,10 @@ pub use luau::LuauComponent;
 pub use parser::{NodeType, UiNode};
 pub use stylesheet::{StyleRule, StyleSheet};
 pub use toasts::{ToastKind, ToastSpec};
+pub use tray::{
+    TrayActions, TrayConfig, TrayHandle, TrayItem, TrayMsg, TrayRequest, notifications_enabled,
+    set_notifications_enabled,
+};
 pub use widget::{EngineMessage, render_node};
 
 use std::collections::HashMap;
@@ -1082,8 +1087,13 @@ impl GlacierUI {
         // thread de UI — o backend é síncrono/bloqueante. São eventos raros e
         // fire-and-forget: um thread destacado por notificação, sem realimentar
         // nada ao componente; falha ao entregar só loga (ver emit_os_notification).
+        // O interruptor global da bandeja ("Disable/Enable notifications") é
+        // consultado aqui: desligado, o `notify()` do componente vira no-op
+        // silencioso (nada de janela de UI a mudar — só não emitimos ao SO).
         for spec in notifications {
-            std::thread::spawn(move || emit_os_notification(spec));
+            if crate::tray::notifications_enabled() {
+                std::thread::spawn(move || emit_os_notification(spec));
+            }
         }
 
         // Novas janelas pedidas pelo componente: resolve `Named` para o caminho
