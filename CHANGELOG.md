@@ -8,6 +8,17 @@ incompatíveis. Toda quebra vem listada em **Quebras** com o que fazer para migr
 
 ---
 
+## [0.50.1] — 2026-07-18
+
+### Performance
+- **`<image>`/`<svg>` agora memoizam o `Handle` por caminho.** Como o
+  `render_node` roda a cada redraw, a leitura via `AssetSource` da 0.50.0
+  releria o arquivo do disco (dev/`DiskAssets`) ou recopiaria+re-hashearia os
+  bytes embutidos (release) a cada quadro, por nó de imagem. Um cache por thread
+  (identidade = caminho; assets binários são imutáveis no processo) constrói o
+  handle uma vez e o reusa — inclusive entre motores/janelas. Sem mudança de
+  API.
+
 ## [0.50.0] — 2026-07-18
 
 ### Adicionado

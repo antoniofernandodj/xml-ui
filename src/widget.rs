@@ -3,6 +3,7 @@ use iced::widget::{
     Space, Tooltip, button, checkbox, column, container, image, mouse_area, pick_list, row, rule,
     scrollable, svg, text, text_editor, text_input, toggler,
 };
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// One option of a `<Select>`: `label` is shown, `value` is dispatched. Equality
@@ -346,6 +347,40 @@ pub fn parse_hex_color(s: &str) -> Option<Color> {
     }
 }
 
+thread_local! {
+    /// Memoização de `image::Handle`/`svg::Handle` por caminho de origem, viva
+    /// pelo processo. `render_node` roda a cada redraw; sem isto cada quadro
+    /// releria o arquivo (dev/`DiskAssets`) ou recopiaria+re-hashearia os bytes
+    /// embutidos (release) por nó de imagem. Os assets binários são imutáveis
+    /// no processo, então a identidade é o caminho — e o cache atravessa todos
+    /// os motores/janelas (mesma imagem = mesmo handle). Por-thread, o que casa
+    /// com a thread única da UI (e isola threads de teste).
+    static IMAGE_HANDLES: RefCell<HashMap<String, image::Handle>> =
+        RefCell::new(HashMap::new());
+    static SVG_HANDLES: RefCell<HashMap<String, svg::Handle>> = RefCell::new(HashMap::new());
+}
+
+/// `image::Handle` para `source`, do cache ou construído (uma vez) a partir dos
+/// bytes da fonte de assets. Leitura falha → handle vazio (degrada, não quebra).
+fn cached_image_handle(source: &str, assets: &dyn crate::asset_source::AssetSource) -> image::Handle {
+    if let Some(h) = IMAGE_HANDLES.with(|c| c.borrow().get(source).cloned()) {
+        return h;
+    }
+    let h = image::Handle::from_bytes(assets.read_bytes(source).unwrap_or_default().into_owned());
+    IMAGE_HANDLES.with(|c| c.borrow_mut().insert(source.to_string(), h.clone()));
+    h
+}
+
+/// `svg::Handle` para `source` — análogo a [`cached_image_handle`].
+fn cached_svg_handle(source: &str, assets: &dyn crate::asset_source::AssetSource) -> svg::Handle {
+    if let Some(h) = SVG_HANDLES.with(|c| c.borrow().get(source).cloned()) {
+        return h;
+    }
+    let h = svg::Handle::from_memory(assets.read_bytes(source).unwrap_or_default().into_owned());
+    SVG_HANDLES.with(|c| c.borrow_mut().insert(source.to_string(), h.clone()));
+    h
+}
+
 /// Generate Iced widgets recursively from UiNode tree.
 /// References to strings are borrowed directly from the AST node with lifetime 'a.
 pub fn render_node<'a>(
@@ -662,12 +697,11 @@ pub fn render_node<'a>(
             source,
             clip_circle,
         } => {
-            // Lê os bytes pela fonte de assets (disco em dev, embutido em
-            // release) em vez de `from_path`, que só resolve caminhos reais no
-            // filesystem. Falha de leitura degrada para uma imagem vazia.
-            let handle =
-                image::Handle::from_bytes(assets.read_bytes(source).unwrap_or_default().into_owned());
-            let img = image(handle);
+            // Handle memoizado por caminho (ver `cached_image_handle`): o
+            // `render_node` roda a cada redraw, então sem cache isto releria o
+            // arquivo do disco (dev) ou recopiaria os bytes embutidos (release)
+            // a cada quadro. Falha de leitura degrada para uma imagem vazia.
+            let img = image(cached_image_handle(source, assets));
 
             let w_len = parse_length(&node.width);
             let h_len = parse_length(&node.height);
@@ -704,9 +738,7 @@ pub fn render_node<'a>(
             }
         }
         NodeType::Svg { source, color } => {
-            let handle =
-                svg::Handle::from_memory(assets.read_bytes(source).unwrap_or_default().into_owned());
-            let mut s = svg(handle)
+            let mut s = svg(cached_svg_handle(source, assets))
                 .width(parse_length(&node.width))
                 .height(parse_length(&node.height));
             if let Some(col) = color.as_ref().and_then(|c| parse_hex_color(c)) {

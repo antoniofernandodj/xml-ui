@@ -1,6 +1,6 @@
 [package]
 name = "glacier-ui"
-version = "0.50.0"
+version = "0.50.1"
 edition = "2024"
 description = "Declarative UI engine for Rust: render UI from XML to iced, with hot-reload, data binding, components and .gss stylesheets."
 license = "MIT OR Apache-2.0"
