@@ -8,6 +8,30 @@ incompatíveis. Toda quebra vem listada em **Quebras** com o que fazer para migr
 
 ---
 
+## [0.49.0] — 2026-07-18
+
+### Adicionado
+- **I/O de arquivo local na camada Luau.** Antes, um `<script>` não tinha como
+  ler nem gravar arquivo — a única persistência era o `storage` (JSON chaveado
+  gerenciado pelo motor). Agora:
+  - **Leitura** via `fetch("file://<caminho>")`: em vez de uma requisição HTTP,
+    lê o arquivo local e devolve o **mesmo** formato de sempre
+    (`{ ok, status, body, error }` — `200`/`ok` com o conteúdo no `body`,
+    `404`/`error` quando não existe). Um script lê um arquivo com a mesma chamada
+    com que faria um GET. (Ao contrário do browser, que bloqueia `file://` de
+    propósito por ser código remoto; aqui o Luau é código do próprio app.)
+  - **Escrita** via o global `write_file(path, conteúdo)` → `true` no sucesso ou
+    `false, "<mensagem>"` na falha (cria o diretório pai se preciso; nunca derruba
+    o script). Síncrono, como o `storage`.
+- **Persistência automática da geometria da janela principal**, opt-in via
+  `GlacierDaemon::remember_window_geometry(true)`. Com ela, o tamanho (e a
+  posição, onde a plataforma a expõe) é gravado ao fechar e restaurado ao abrir,
+  reabrindo o app onde parou — **sem flash** (a janela já nasce no tamanho certo)
+  e sempre respeitando o `min_size`. O arquivo (`window-geometry.json`) mora sob o
+  `storage_dir`; sem um `storage_dir` a opção é no-op. No Wayland só o tamanho
+  volta (o protocolo não expõe a posição ao cliente). Substitui o padrão de um app
+  fazer isso à mão via `on_close` + `window::Settings` montadas na inicialização.
+
 ## [0.48.0] — 2026-07-17
 
 ### Mudado

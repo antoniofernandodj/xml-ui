@@ -49,9 +49,39 @@ fn client() -> &'static HttpsClient {
 /// em pânico: qualquer erro (URL inválida, DNS, TLS, timeout de conexão…) vira
 /// um [`FetchResult`] com `ok = false` e a mensagem em `error`.
 pub(crate) async fn perform(req: PendingFetch) -> FetchResult {
+    // `fetch("file://…")`: leitura de arquivo local em vez de requisição HTTP. O
+    // Luau recebe o MESMO formato `{ ok, status, body, error }` de sempre, então
+    // um `<script>` lê um arquivo com a mesma chamada com que faria um GET. Ao
+    // contrário do browser (que bloqueia `file://` de propósito, por ser código
+    // remoto não confiável), aqui o Luau é código do próprio app — acesso ao FS
+    // local é esperado.
+    if let Some(path) = req.url.strip_prefix("file://") {
+        return read_file(path).await;
+    }
     match send(&req).await {
         Ok(result) => result,
         Err(e) => FetchResult::error(e.to_string()),
+    }
+}
+
+/// Lê um arquivo local para um [`FetchResult`], imitando a forma de uma resposta
+/// HTTP: `200`/`ok` com o conteúdo no `body`, `404`/`error` quando o arquivo não
+/// existe ou não pode ser lido. `tokio::fs` roda no executor async, sem bloquear
+/// a thread de UI (igual ao caminho hyper).
+async fn read_file(path: &str) -> FetchResult {
+    match tokio::fs::read_to_string(path).await {
+        Ok(body) => FetchResult {
+            ok: true,
+            status: 200,
+            body,
+            error: String::new(),
+        },
+        Err(e) => FetchResult {
+            ok: false,
+            status: 404,
+            body: String::new(),
+            error: e.to_string(),
+        },
     }
 }
 
@@ -324,6 +354,44 @@ mod tests {
         assert_eq!(parse_sse_event(raw).as_deref(), Some("linha 1\nlinha 2"));
         // Bloco sem `data:` não produz mensagem.
         assert_eq!(parse_sse_event("event: ping\n"), None);
+    }
+
+    /// `fetch("file://…")` lê um arquivo local e devolve `ok/200` com o conteúdo
+    /// no `body`; um caminho inexistente vira `!ok/404` com a mensagem no `error`.
+    #[test]
+    fn fetch_file_scheme_le_arquivo_local() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .unwrap();
+        let dir = std::env::temp_dir().join(format!("glacier-net-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("conteudo.txt");
+        std::fs::write(&file, "olá do disco").unwrap();
+
+        let ok = rt.block_on(perform(PendingFetch::new(
+            1,
+            format!("file://{}", file.display()),
+            "GET".into(),
+            None,
+            Vec::new(),
+        )));
+        assert!(ok.ok, "deveria ler: erro={}", ok.error);
+        assert_eq!(ok.status, 200);
+        assert_eq!(ok.body, "olá do disco");
+
+        let missing = rt.block_on(perform(PendingFetch::new(
+            2,
+            format!("file://{}", dir.join("nao-existe.txt").display()),
+            "GET".into(),
+            None,
+            Vec::new(),
+        )));
+        assert!(!missing.ok);
+        assert_eq!(missing.status, 404);
+        assert!(!missing.error.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Smoke test real de rede (HTTPS via hyper + rustls). Ignorado por padrão

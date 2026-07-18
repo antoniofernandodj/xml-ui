@@ -218,6 +218,10 @@ impl LuauComponent {
             storage_path(module_base, &name, STORAGE_ROOT.get().map(|p| p.as_path())),
         )
             .map_err(|e| format!("Erro ao instalar `storage` Luau: {}", e))?;
+        // Expõe o global `write_file(path, conteúdo)` (escrita de arquivo local).
+        // A leitura correspondente é `fetch("file://…")` (ver `net::perform`).
+        install_write_file(&luau)
+            .map_err(|e| format!("Erro ao instalar `write_file` Luau: {}", e))?;
         // Tabela persistente que `viewport()` (prelúdio) lê — populada a cada
         // execução em `sync_to_luau`.
         let viewport_table = luau
@@ -1352,6 +1356,34 @@ fn install_storage(luau: &Lua, path: PathBuf) -> mlua::Result<()> {
     Ok(())
 }
 
+/// Instala o global `write_file(path, conteúdo)` — escrita de arquivo local,
+/// contraparte do `fetch("file://…")` (leitura). Ao contrário do `storage`
+/// (JSON chaveado num arquivo que o glacier gerencia), este grava o conteúdo
+/// literal no caminho dado pelo chamador, criando o diretório pai se preciso.
+///
+/// Síncrono (como o `storage`): escrita local é rápida e não justifica suspender
+/// a corrotina. Nunca derruba o script — falha de I/O vira valor de retorno:
+///
+/// - sucesso: `write_file(path, txt)` → `true`
+/// - falha:   `write_file(path, txt)` → `false, "<mensagem>"`
+fn install_write_file(luau: &Lua) -> mlua::Result<()> {
+    let write_file = luau.create_function(|_, (path, contents): (String, String)| {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            return Ok((false, Some(e.to_string())));
+        }
+        match std::fs::write(&path, contents) {
+            Ok(()) => Ok((true, None)),
+            Err(e) => Ok((false, Some(e.to_string()))),
+        }
+    })?;
+    luau.globals().set("write_file", write_file)?;
+    Ok(())
+}
+
 /// Se o template tem um bloco `<script>` (inline ou apontando para um `.luau`
 /// externo via `src`/`from`) — ou seja, se ele traz comportamento Luau. O motor
 /// usa isto para decidir, ao registrar um componente por arquivo, se liga um
@@ -1887,6 +1919,35 @@ mod tests {
         let data = drive(&comp, "incrementar", None, data);
         assert_eq!(data.get("n").map(String::as_str), Some("42"));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_file_grava_arquivo_local() {
+        let dir = std::env::temp_dir().join(format!("glacier_writefile_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Grava num subdiretório inexistente para exercitar o create_dir_all.
+        let alvo = dir.join("sub").join("saida.txt");
+        let comp = LuauComponent::from_source(
+            "function gravar()\n\
+             local ok, err = write_file(ctx.path, 'conteúdo do luau')\n\
+             ctx.ok = tostring(ok)\n\
+             ctx.err = err or ''\n\
+             end",
+            dir.join("t.gv").to_str().unwrap(),
+            "c",
+        )
+        .unwrap();
+        let mut data = HashMap::new();
+        data.insert("path".into(), alvo.to_str().unwrap().to_string());
+        let data = drive(&comp, "gravar", None, data);
+
+        assert_eq!(data.get("ok").map(String::as_str), Some("true"));
+        assert_eq!(data.get("err").map(String::as_str), Some(""));
+        assert_eq!(
+            std::fs::read_to_string(&alvo).unwrap(),
+            "conteúdo do luau"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

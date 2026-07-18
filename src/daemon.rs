@@ -99,6 +99,10 @@ pub struct GlacierDaemon {
     /// relativo ao diretório do script — inviável quando os assets moram num
     /// diretório read-only. Ver [`GlacierDaemon::storage_dir`].
     storage_dir: Option<PathBuf>,
+    /// Persistir automaticamente a geometria (tamanho/posição) da janela
+    /// principal, reabrindo-a onde parou. Requer [`GlacierDaemon::storage_dir`]
+    /// (é lá que o arquivo mora). Ver [`GlacierDaemon::remember_window_geometry`].
+    remember_geometry: bool,
     /// Configuração da bandeja (ícone + menu), quando o app quer sobreviver à
     /// última janela. Ver [`GlacierDaemon::tray`].
     tray_config: Option<TrayConfig>,
@@ -125,6 +129,7 @@ impl GlacierDaemon {
             reload_period: Duration::from_millis(500),
             toast_period: Duration::from_millis(400),
             storage_dir: None,
+            remember_geometry: false,
             tray_config: None,
             on_tray: None,
         }
@@ -265,6 +270,25 @@ impl GlacierDaemon {
         self
     }
 
+    /// Liga a persistência automática da geometria da janela principal: o
+    /// tamanho (e a posição, onde a plataforma a expõe) é gravado ao fechar e
+    /// restaurado ao abrir, de modo que o app reabre onde parou. Sem isto, a
+    /// principal sempre nasce com o tamanho de [`GlacierDaemon::main_window`].
+    ///
+    /// O arquivo mora sob [`GlacierDaemon::storage_dir`] (`window-geometry.json`);
+    /// **sem** um `storage_dir` definido não há onde persistir e a opção é um
+    /// no-op. O tamanho restaurado é sempre respeitado contra o `min_size` das
+    /// `window::Settings` (nunca abre menor que o mínimo). No Wayland a posição
+    /// não é restaurável (o protocolo não a expõe ao cliente), então lá só o
+    /// tamanho volta.
+    ///
+    /// Substitui o padrão antigo de o app fazer isso à mão via
+    /// [`GlacierDaemon::on_close`] + `window::Settings` montadas na inicialização.
+    pub fn remember_window_geometry(mut self, enabled: bool) -> Self {
+        self.remember_geometry = enabled;
+        self
+    }
+
     /// Sobe o daemon e roda o loop do iced até a última janela fechar.
     pub fn run(self) -> iced::Result {
         let GlacierDaemon {
@@ -279,10 +303,31 @@ impl GlacierDaemon {
             reload_period,
             toast_period,
             storage_dir,
+            remember_geometry,
             tray_config,
             on_tray,
         } = self;
         let main_title = title.clone();
+
+        // Diretório onde a geometria da principal é persistida (só quando o app
+        // ligou `remember_window_geometry` E definiu um `storage_dir` — é lá que
+        // o arquivo mora). Guardado para o `Runtime` gravar ao fechar.
+        let geometry_dir = remember_geometry
+            .then(|| storage_dir.clone())
+            .flatten();
+
+        // Restaura a geometria salva SOBRE as `main_settings` do app, antes de
+        // abrir a janela — assim ela já nasce no tamanho/posição de onde parou,
+        // sem flash. Respeita o `min_size` (nunca abre menor que o mínimo).
+        let mut main_settings = main_settings;
+        if let Some(dir) = &geometry_dir
+            && let Some(saved) = load_geometry(dir)
+        {
+            main_settings.size = clamp_to_min(saved.size, main_settings.min_size);
+            if let Some(p) = saved.position {
+                main_settings.position = window::Position::Specific(p);
+            }
+        }
 
         // Semeia a raiz do `storage` ANTES de qualquer motor ser construído (o
         // `boot` abaixo e cada janela-filha em `build_engine` instalam o global
@@ -310,6 +355,7 @@ impl GlacierDaemon {
             rt.child_settings = child_settings.clone();
             rt.on_message = on_message.clone();
             rt.on_close = on_close.clone();
+            rt.geometry_dir = geometry_dir.clone();
             // Sobe a bandeja (thread própria) uma vez, no boot. Só a
             // configuração é `move`d para cá; a thread devolve a alça de
             // comandos, guardada para as atualizações de menu e o shutdown.
@@ -339,6 +385,76 @@ impl GlacierDaemon {
 impl Default for GlacierDaemon {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Persistência da geometria da janela principal (opt-in via
+// `GlacierDaemon::remember_window_geometry`)
+// ---------------------------------------------------------------------------
+
+/// Nome do arquivo (sob o `storage_dir`) onde a geometria da principal é
+/// gravada. Um arquivo por app — um daemon tem uma única janela principal.
+const GEOMETRY_FILE: &str = "window-geometry.json";
+
+/// Geometria lida do disco. `position` fica `None` quando não foi gravada (ex.:
+/// Wayland, que nunca reporta a posição), caso em que só o tamanho é restaurado.
+struct SavedGeometry {
+    size: Size,
+    position: Option<Point>,
+}
+
+/// Nunca abre a janela menor que o `min_size` das `window::Settings`: uma
+/// geometria salva com um valor abaixo do mínimo (ou um `min_size` que cresceu
+/// entre versões) não deve nascer espremida.
+fn clamp_to_min(size: Size, min: Option<Size>) -> Size {
+    match min {
+        Some(min) => Size::new(size.width.max(min.width), size.height.max(min.height)),
+        None => size,
+    }
+}
+
+/// Lê a geometria persistida sob `dir`, ou `None` se ausente/corrompida (é
+/// "best effort" — nunca deve impedir o app de abrir). Exige ao menos
+/// `width`/`height`; `x`/`y` são opcionais.
+fn load_geometry(dir: &std::path::Path) -> Option<SavedGeometry> {
+    let content = std::fs::read_to_string(dir.join(GEOMETRY_FILE)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let width = v.get("width")?.as_f64()? as f32;
+    let height = v.get("height")?.as_f64()? as f32;
+    let x = v.get("x").and_then(serde_json::Value::as_f64);
+    let y = v.get("y").and_then(serde_json::Value::as_f64);
+    let position = match (x, y) {
+        (Some(x), Some(y)) => Some(Point::new(x as f32, y as f32)),
+        _ => None,
+    };
+    Some(SavedGeometry {
+        size: Size::new(width, height),
+        position,
+    })
+}
+
+/// Grava a geometria sob `dir` (criando o diretório se preciso). Falhas de I/O
+/// são logadas, não propagadas — não devem impedir a janela de fechar.
+fn save_geometry(dir: &std::path::Path, size: Size, position: Option<Point>) {
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        eprintln!("[glacier-ui] geometria: falha ao criar '{}': {e}", dir.display());
+        return;
+    }
+    let json = serde_json::json!({
+        "width": size.width,
+        "height": size.height,
+        "x": position.map(|p| p.x),
+        "y": position.map(|p| p.y),
+    });
+    let path = dir.join(GEOMETRY_FILE);
+    match serde_json::to_string_pretty(&json) {
+        Ok(s) => {
+            if let Err(e) = std::fs::write(&path, s) {
+                eprintln!("[glacier-ui] geometria: falha ao gravar '{}': {e}", path.display());
+            }
+        }
+        Err(e) => eprintln!("[glacier-ui] geometria: falha ao serializar: {e}"),
     }
 }
 
@@ -383,6 +499,10 @@ struct Runtime {
     child_settings: Option<ChildSettingsHook>,
     on_message: Option<MessageHook>,
     on_close: Option<CloseHook>,
+    /// Diretório onde a geometria da principal é persistida, `Some` quando o app
+    /// ligou [`GlacierDaemon::remember_window_geometry`] com um `storage_dir`.
+    /// Gravado ao fechar (ver `DaemonMessage::CloseWithGeometry`).
+    geometry_dir: Option<PathBuf>,
     reload_period: Duration,
     toast_period: Duration,
     /// Alça da bandeja, `Some` quando ela subiu. Enquanto for `Some`, o app
@@ -424,6 +544,7 @@ impl Runtime {
             child_settings: None,
             on_message: None,
             on_close: None,
+            geometry_dir: None,
             reload_period,
             toast_period,
             tray: None,
@@ -473,6 +594,12 @@ impl Runtime {
                     self.main_settings.size = size;
                     if let Some(p) = position {
                         self.main_settings.position = window::Position::Specific(p);
+                    }
+                    // Persistência nativa da geometria (opt-in via
+                    // `remember_window_geometry`): grava para o próximo boot
+                    // reabrir aqui. Best-effort — falha de I/O não impede fechar.
+                    if let Some(dir) = &self.geometry_dir {
+                        save_geometry(dir, size, position);
                     }
                 }
                 window::close(id)
@@ -1071,5 +1198,45 @@ mod tests {
         assert!(!rt.windows.contains_key(&filha_id));
         assert!(rt.windows.contains_key(&main_id));
         assert!(rt.main_shown);
+    }
+
+    #[test]
+    fn geometria_round_trip_com_e_sem_posicao() {
+        let dir = std::env::temp_dir().join(format!("glacier_geom_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Ausente → None (não impede boot).
+        assert!(load_geometry(&dir).is_none());
+
+        // Com posição (X11): tamanho e posição voltam.
+        save_geometry(&dir, Size::new(900.0, 640.0), Some(Point::new(30.0, 50.0)));
+        let g = load_geometry(&dir).expect("deveria ler");
+        assert_eq!(g.size, Size::new(900.0, 640.0));
+        assert_eq!(g.position, Some(Point::new(30.0, 50.0)));
+
+        // Sem posição (Wayland): só o tamanho volta, posição fica None.
+        save_geometry(&dir, Size::new(700.0, 500.0), None);
+        let g = load_geometry(&dir).expect("deveria ler");
+        assert_eq!(g.size, Size::new(700.0, 500.0));
+        assert_eq!(g.position, None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn geometria_respeita_min_size() {
+        // Um tamanho salvo abaixo do mínimo (ou um min_size que cresceu entre
+        // versões) nunca deve abrir a janela espremida.
+        let clamped = clamp_to_min(Size::new(200.0, 100.0), Some(Size::new(480.0, 680.0)));
+        assert_eq!(clamped, Size::new(480.0, 680.0));
+        // Acima do mínimo passa intacto; sem mínimo, também.
+        assert_eq!(
+            clamp_to_min(Size::new(900.0, 700.0), Some(Size::new(480.0, 680.0))),
+            Size::new(900.0, 700.0)
+        );
+        assert_eq!(
+            clamp_to_min(Size::new(200.0, 100.0), None),
+            Size::new(200.0, 100.0)
+        );
     }
 }
