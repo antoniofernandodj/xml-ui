@@ -24,11 +24,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use iced::window;
 use iced::{Element, Font, Point, Size, Subscription, Task};
 
+use crate::asset_source::{AssetSource, DiskAssets};
 use crate::component::{WindowSource, WindowSpec};
 use crate::tray::{TrayActions, TrayConfig, TrayHandle, TrayMsg, TrayRequest};
 use crate::{EngineMessage, GlacierUI};
@@ -108,6 +110,11 @@ pub struct GlacierDaemon {
     tray_config: Option<TrayConfig>,
     /// Gancho de clique nos itens da bandeja. Ver [`GlacierDaemon::on_tray`].
     on_tray: Option<TrayHook>,
+    /// De onde os motores desta aplicação leem seus assets (templates, estilos,
+    /// scripts Luau, binários). Default [`DiskAssets`]; um app standalone injeta
+    /// uma fonte embutida via [`GlacierDaemon::assets`]. Aplicada a **todos** os
+    /// motores (principal, reabertura pela bandeja e janelas-filhas).
+    assets: Arc<dyn AssetSource>,
 }
 
 impl GlacierDaemon {
@@ -132,7 +139,18 @@ impl GlacierDaemon {
             remember_geometry: false,
             tray_config: None,
             on_tray: None,
+            assets: Arc::new(DiskAssets),
         }
+    }
+
+    /// Define a fonte de assets de **todos** os motores da aplicação — o que
+    /// permite um binário standalone que carrega templates/estilos/scripts/
+    /// binários embutidos e não lê nada do disco. Tipicamente injetada só em
+    /// release (`#[cfg(not(debug_assertions))]`), deixando o dev com o default
+    /// [`DiskAssets`] (disco + hot-reload). Ver [`crate::asset_source`].
+    pub fn assets(mut self, assets: Arc<dyn AssetSource>) -> Self {
+        self.assets = assets;
+        self
     }
 
     /// Define o título da janela principal (encadeável).
@@ -306,6 +324,7 @@ impl GlacierDaemon {
             remember_geometry,
             tray_config,
             on_tray,
+            assets,
         } = self;
         let main_title = title.clone();
 
@@ -341,7 +360,7 @@ impl GlacierDaemon {
         // o motor em `windows` com essa chave (o daemon não abre janela sozinho),
         // e guardamos esse `Id` como o da principal — ver `Runtime::main_id`.
         let boot = move || {
-            let mut engine = GlacierUI::new();
+            let mut engine = GlacierUI::new().with_asset_source(assets.clone());
             setup(&mut engine);
             let (id, open) = window::open(main_settings.clone());
             let mut rt = Runtime::new(
@@ -351,6 +370,7 @@ impl GlacierDaemon {
                 setup.clone(),
                 main_settings.clone(),
                 main_title.clone(),
+                assets.clone(),
             );
             rt.child_settings = child_settings.clone();
             rt.on_message = on_message.clone();
@@ -526,6 +546,9 @@ struct Runtime {
     /// continuam chegando mesmo sem janela. O "Open Rustploy" religa esse mesmo
     /// motor numa janela nova (ver [`Runtime::open_main`]).
     main_shown: bool,
+    /// Fonte de assets herdada do [`GlacierDaemon`], injetada em cada motor novo
+    /// (reabertura da principal e janelas-filhas).
+    assets: Arc<dyn AssetSource>,
 }
 
 impl Runtime {
@@ -536,6 +559,7 @@ impl Runtime {
         main_setup: SetupHook,
         main_settings: window::Settings,
         main_title: String,
+        assets: Arc<dyn AssetSource>,
     ) -> Self {
         Self {
             windows: HashMap::new(),
@@ -553,6 +577,7 @@ impl Runtime {
             main_settings,
             main_title,
             main_shown: true,
+            assets,
         }
     }
 
@@ -666,7 +691,7 @@ impl Runtime {
         // Reusa o motor destacado (login + SSE preservados) ou, se não houver,
         // constrói do zero.
         let engine = self.windows.remove(&self.main_id).unwrap_or_else(|| {
-            let mut e = GlacierUI::new();
+            let mut e = GlacierUI::new().with_asset_source(self.assets.clone());
             (self.main_setup)(&mut e);
             e
         });
@@ -806,7 +831,7 @@ impl Runtime {
             data,
             ..
         } = spec;
-        let (engine, fallback_title) = build_engine(source, &data);
+        let (engine, fallback_title) = build_engine(source, &data, self.assets.clone());
         let (id, open) = window::open(settings);
         self.titles.insert(id, title.unwrap_or(fallback_title));
         self.windows.insert(id, engine);
@@ -893,8 +918,12 @@ impl Runtime {
 /// sido resolvido para `File` no motor de origem (ver `run_on_owner`). `data`
 /// (pares `open_window({ data = ... })`) é semeado no contexto **antes** de
 /// registrar o componente, para que seu `init` já enxergue os valores.
-fn build_engine(source: WindowSource, data: &[(String, String)]) -> (GlacierUI, String) {
-    let mut engine = GlacierUI::new();
+fn build_engine(
+    source: WindowSource,
+    data: &[(String, String)],
+    assets: Arc<dyn AssetSource>,
+) -> (GlacierUI, String) {
+    let mut engine = GlacierUI::new().with_asset_source(assets);
     for (k, v) in data {
         engine.define_data(k, v);
     }
@@ -1043,6 +1072,7 @@ mod tests {
         let (engine, title) = build_engine(
             WindowSource::File("examples/janelas_glacier/detalhe.gv".into()),
             &[],
+            Arc::new(DiskAssets),
         );
         assert_eq!(title, "detalhe");
         // O motor da nova janela renderiza a tela carregada sem erro.
@@ -1057,6 +1087,7 @@ mod tests {
                 ("url".into(), "http://x".into()),
                 ("token".into(), "abc".into()),
             ],
+            Arc::new(DiskAssets),
         );
         assert_eq!(engine.get_data("url").map(String::as_str), Some("http://x"));
         assert_eq!(engine.get_data("token").map(String::as_str), Some("abc"));
@@ -1141,6 +1172,7 @@ mod tests {
             Rc::new(|_| {}),
             settings,
             "T".to_string(),
+            Arc::new(DiskAssets),
         );
         if com_bandeja {
             rt.tray = Some(crate::tray::TrayHandle::for_test());

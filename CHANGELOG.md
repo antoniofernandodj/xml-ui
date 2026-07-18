@@ -8,6 +8,33 @@ incompatíveis. Toda quebra vem listada em **Quebras** com o que fazer para migr
 
 ---
 
+## [0.50.0] — 2026-07-18
+
+### Adicionado
+- **Camada de resolução de assets (`AssetSource`) — binários standalone.** Todo
+  asset que o motor lê em runtime (templates `.gv`/`.kdl`, estilos `.gss`, JSON de
+  tema/dados, scripts Luau e binários SVG/imagem) passa por um
+  [`AssetSource`](crate::AssetSource) em vez de tocar o `std::fs` direto. O default
+  [`DiskAssets`] lê do disco exatamente como antes (com hot-reload), então nada
+  muda para quem não fizer nada.
+  - Injete uma fonte **embutida** com `GlacierDaemon::assets(Arc<dyn AssetSource>)`
+    (ou `GlacierUI::with_asset_source`, `LuauComponent::from_file_with`/
+    `from_source_with`) para um binário **100% desacoplado dos arquivos**: um app
+    de release pode empacotar todos os seus assets em tempo de compilação (ex.:
+    `include_dir!`) atrás de um `AssetSource` e rodar sem a árvore de assets no
+    disco. O padrão recomendado é injetar só em release
+    (`#[cfg(not(debug_assertions))]`), deixando o dev com disco + hot-reload.
+  - Numa fonte embutida, `AssetSource::modified` devolve `None`, o que **desliga o
+    hot-reload naturalmente** (`check_reload` vira no-op — não há arquivo a vigiar).
+  - Os `<svg>`/`<image>` agora carregam via `from_memory`/`from_bytes` (bytes da
+    fonte de assets) em vez de `Handle::from_path`, para funcionarem embutidos.
+
+### Quebras
+- `render_node` ganhou um parâmetro final `assets: &dyn AssetSource`. Quem chama o
+  motor pela API pública (`GlacierDaemon`/`GlacierApp`/`GlacierUI::render_current`)
+  não é afetado; só quem chamava `render_node` diretamente precisa passar a fonte
+  (use `&DiskAssets` para o comportamento anterior).
+
 ## [0.49.1] — 2026-07-18
 
 ### Corrigido

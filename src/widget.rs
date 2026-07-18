@@ -352,6 +352,7 @@ pub fn render_node<'a>(
     node: &'a UiNode,
     context: &'a HashMap<String, String>,
     editors: &'a EditorMap,
+    assets: &dyn crate::asset_source::AssetSource,
 ) -> Element<'a, EngineMessage> {
     // `hidden: true` (`display: none`) — sai do layout por completo. Os
     // contêineres Row/Column/Form já filtram filhos ocultos (sem `spacing`
@@ -661,7 +662,11 @@ pub fn render_node<'a>(
             source,
             clip_circle,
         } => {
-            let handle = image::Handle::from_path(source.clone());
+            // Lê os bytes pela fonte de assets (disco em dev, embutido em
+            // release) em vez de `from_path`, que só resolve caminhos reais no
+            // filesystem. Falha de leitura degrada para uma imagem vazia.
+            let handle =
+                image::Handle::from_bytes(assets.read_bytes(source).unwrap_or_default().into_owned());
             let img = image(handle);
 
             let w_len = parse_length(&node.width);
@@ -699,7 +704,8 @@ pub fn render_node<'a>(
             }
         }
         NodeType::Svg { source, color } => {
-            let handle = svg::Handle::from_path(source.clone());
+            let handle =
+                svg::Handle::from_memory(assets.read_bytes(source).unwrap_or_default().into_owned());
             let mut s = svg(handle)
                 .width(parse_length(&node.width))
                 .height(parse_length(&node.height));
@@ -710,7 +716,7 @@ pub fn render_node<'a>(
         }
         NodeType::Scrollable { direction } => {
             let child: Element<'a, EngineMessage> = if let Some(first) = node.children.first() {
-                render_node(first, context, editors)
+                render_node(first, context, editors, assets)
             } else {
                 column![].into()
             };
@@ -914,7 +920,7 @@ pub fn render_node<'a>(
             col = col.padding(parse_padding(&node.padding));
 
             for child in node.children.iter().filter(|c| c.hidden != Some(true)) {
-                col = col.push(render_node(child, context, editors));
+                col = col.push(render_node(child, context, editors, assets));
             }
 
             col.width(parse_length(&node.width))
@@ -935,7 +941,7 @@ pub fn render_node<'a>(
             r = r.padding(parse_padding(&node.padding));
 
             for child in node.children.iter().filter(|c| c.hidden != Some(true)) {
-                r = r.push(render_node(child, context, editors));
+                r = r.push(render_node(child, context, editors, assets));
             }
 
             r.width(parse_length(&node.width))
@@ -958,7 +964,7 @@ pub fn render_node<'a>(
             col = col.padding(parse_padding(&node.padding));
 
             for child in node.children.iter().filter(|c| c.hidden != Some(true)) {
-                col = col.push(render_node(child, context, editors));
+                col = col.push(render_node(child, context, editors, assets));
             }
 
             col.width(parse_length(&node.width))
@@ -968,7 +974,7 @@ pub fn render_node<'a>(
         NodeType::Container => {
             let child: Element<'a, EngineMessage> = if let Some(first_child) = node.children.first()
             {
-                render_node(first_child, context, editors)
+                render_node(first_child, context, editors, assets)
             } else {
                 column![].into()
             };
@@ -1047,7 +1053,7 @@ pub fn render_node<'a>(
                 col = col.spacing(sp);
             }
             for child in node.children.iter().filter(|c| c.hidden != Some(true)) {
-                col = col.push(render_node(child, context, editors));
+                col = col.push(render_node(child, context, editors, assets));
             }
             col.width(parse_length(&node.width))
                 .height(parse_length(&node.height))

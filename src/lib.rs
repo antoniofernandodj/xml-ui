@@ -1,4 +1,5 @@
 pub mod app;
+pub mod asset_source;
 pub mod builtins;
 pub mod component;
 pub mod daemon;
@@ -27,6 +28,7 @@ pub use iced;
 pub use iced::{Element, Font, Point, Size, Subscription, Task, window};
 
 pub use app::GlacierApp;
+pub use asset_source::{AssetSource, DiskAssets};
 pub use component::{
     BroadcastMessage, Component, Context, ContextVar, DialogAction, Effect, EffectOutcome,
     FetchResult, Nav, Template, WindowSource, WindowSpec,
@@ -50,6 +52,7 @@ pub use tray::{
 pub use widget::{EngineMessage, render_node};
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 /// The XML-to-UI rendering engine.
@@ -189,6 +192,13 @@ pub struct GlacierUI {
     /// Instante da última reavaliação disparada por mensagem de stream, base do
     /// throttle acima. `None` = nunca (primeira mensagem reavalia na hora).
     last_stream_reeval: Option<std::time::Instant>,
+    /// De onde os assets (templates, estilos, tema/dados, scripts Luau e
+    /// binários SVG/imagem) são lidos. O default [`DiskAssets`] lê do disco
+    /// (comportamento histórico, com hot-reload); um consumidor pode injetar
+    /// uma fonte embutida via [`GlacierUI::with_asset_source`] /
+    /// [`GlacierDaemon::assets`] para um binário standalone. Ver
+    /// [`asset_source`].
+    assets: Arc<dyn AssetSource>,
 }
 
 /// Intervalo mínimo entre reavaliações disparadas por mensagens de stream
@@ -269,9 +279,22 @@ impl GlacierUI {
             pending_close_self: false,
             pending_reeval: false,
             last_stream_reeval: None,
+            assets: Arc::new(asset_source::DiskAssets),
         };
         ui.register_builtins();
         ui
+    }
+
+    /// Swaps the [`AssetSource`] this engine reads templates, stylesheets,
+    /// theme/data JSON, Luau scripts and binary (SVG/image) assets from.
+    ///
+    /// The default is [`DiskAssets`] (filesystem, with hot-reload). Inject an
+    /// embedded source here — typically only in release builds — to make a
+    /// standalone binary that carries its assets and reads nothing from disk.
+    /// [`GlacierDaemon::assets`] calls this on every per-window engine.
+    pub fn with_asset_source(mut self, assets: Arc<dyn AssetSource>) -> Self {
+        self.assets = assets;
+        self
     }
 
     /// Registra os componentes que a lib traz embutidos (ver [`crate::builtins`])
@@ -382,15 +405,15 @@ impl GlacierUI {
     /// encountered while processing a template's `<link>`s. Does not
     /// re-evaluate; callers batch that themselves.
     fn load_global_stylesheet_file(&mut self, path: &str) -> Result<()> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| GlacierError::io("stylesheet", path, e))?;
+        let content = self
+            .assets
+            .read_to_string(path)
+            .map_err(|e| GlacierError::io("stylesheet", path, e))?;
         // `parse_in`: o arquivo é a fonte, então a linha do erro é a linha dele
         // (offset 1) e o caminho vai no diagnóstico.
         let sheet = stylesheet::StyleSheet::parse_in(&content, Some(path), 1)?;
 
-        let mod_time = std::fs::metadata(path)
-            .and_then(|m| m.modified())
-            .unwrap_or_else(|_| SystemTime::now());
+        let mod_time = self.assets.modified(path).unwrap_or_else(SystemTime::now);
 
         self.install_global_stylesheet(path.to_string(), sheet);
         self.file_mod_times.insert(stylesheet_key(path), mod_time);
@@ -549,11 +572,12 @@ impl GlacierUI {
         //     pipeline. `File` templates keep hot-reload support.
         let (markup, path) = match comp.template() {
             Template::File(path) => {
-                let content = std::fs::read_to_string(&path)
-                    .map_err(|e| GlacierError::io("template", &path, e))?;
-                let mod_time = std::fs::metadata(&path)
-                    .and_then(|m| m.modified())
-                    .unwrap_or_else(|_| SystemTime::now());
+                let content = self
+                    .assets
+                    .read_to_string(&path)
+                    .map_err(|e| GlacierError::io("template", &path, e))?
+                    .into_owned();
+                let mod_time = self.assets.modified(&path).unwrap_or_else(SystemTime::now);
                 self.registered_components
                     .insert(name.clone(), path.clone());
                 self.file_mod_times.insert(name.clone(), mod_time);
@@ -1300,15 +1324,15 @@ impl GlacierUI {
 
     /// Parses and stores a component plus its imports, without re-evaluating.
     fn register_component_inner(&mut self, name: &str, path: &str) -> Result<()> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| GlacierError::io("template", path, e))?;
+        let content = self
+            .assets
+            .read_to_string(path)
+            .map_err(|e| GlacierError::io("template", path, e))?;
 
         let (ast, _script) =
             parse_markup(Some(path), &content).map_err(|e| e.in_component(name))?;
 
-        let mod_time = std::fs::metadata(path)
-            .and_then(|m| m.modified())
-            .unwrap_or_else(|_| SystemTime::now());
+        let mod_time = self.assets.modified(path).unwrap_or_else(SystemTime::now);
 
         self.registered_components
             .insert(name.to_string(), path.to_string());
@@ -1328,7 +1352,7 @@ impl GlacierUI {
         // as before). This is what unifies file-based registration — there is no
         // separate `register_luau`, and imported components can be scripted too.
         if luau::has_script(&content) {
-            let comp = luau::LuauComponent::from_file(path, name)?;
+            let comp = luau::LuauComponent::from_file_with(path, name, self.assets.clone())?;
             self.install_component(name, Box::new(comp));
         }
 
@@ -1415,7 +1439,9 @@ impl GlacierUI {
     /// an object's top-level fields become `key.field`; an array or scalar is
     /// stored as `key`. Tracks the source for hot-reload.
     fn load_data_file(&mut self, key: &str, path: &str) -> Result<()> {
-        let content = std::fs::read_to_string(path)
+        let content = self
+            .assets
+            .read_to_string(path)
             .map_err(|e| GlacierError::io("arquivo de dados", path, e))?;
         let value: serde_json::Value =
             serde_json::from_str(&content).map_err(|e| GlacierError::Json {
@@ -1425,9 +1451,7 @@ impl GlacierUI {
 
         merge_json(&mut self.context_data, key, &value);
 
-        let mod_time = std::fs::metadata(path)
-            .and_then(|m| m.modified())
-            .unwrap_or_else(|_| SystemTime::now());
+        let mod_time = self.assets.modified(path).unwrap_or_else(SystemTime::now);
         self.file_mod_times.insert(data_key(path), mod_time);
         if !self.data_sources.iter().any(|(k, p)| k == key && p == path) {
             self.data_sources.push((key.to_string(), path.to_string()));
@@ -1438,13 +1462,13 @@ impl GlacierUI {
     /// Loads a JSON palette `theme` file and sets it as the app theme. Tracks
     /// the source for hot-reload.
     fn load_theme_file(&mut self, path: &str) -> Result<()> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| GlacierError::io("tema", path, e))?;
+        let content = self
+            .assets
+            .read_to_string(path)
+            .map_err(|e| GlacierError::io("tema", path, e))?;
         let theme = parse_theme(&content, path)?;
 
-        let mod_time = std::fs::metadata(path)
-            .and_then(|m| m.modified())
-            .unwrap_or_else(|_| SystemTime::now());
+        let mod_time = self.assets.modified(path).unwrap_or_else(SystemTime::now);
         self.file_mod_times.insert(theme_key(path), mod_time);
         self.custom_theme = Some(theme);
         self.theme_path = Some(path.to_string());
@@ -1729,6 +1753,7 @@ impl GlacierUI {
             evaluated_ast,
             &self.context_data,
             &self.editors,
+            self.assets.as_ref(),
         ))
     }
 
@@ -1739,13 +1764,12 @@ impl GlacierUI {
         let mut updates = Vec::new();
 
         for (name, path) in &self.registered_components {
-            if let Ok(metadata) = std::fs::metadata(path)
-                && let Ok(modified) = metadata.modified()
-            {
+            // `modified` é `None` numa fonte embutida → hot-reload desligado.
+            if let Some(modified) = self.assets.modified(path) {
                 let last_modified = self.file_mod_times.get(name);
                 if last_modified.is_none_or(|&last| modified > last) {
                     // File changed, reload it (XML).
-                    if let Ok(content) = std::fs::read_to_string(path)
+                    if let Ok(content) = self.assets.read_to_string(path)
                         && let Ok((new_ast, _script)) = parse_markup(Some(path.as_str()), &content)
                     {
                         updates.push((name.clone(), new_ast, modified));
@@ -1763,10 +1787,10 @@ impl GlacierUI {
         let all_paths = self.inputs.stylesheet_paths().to_vec();
         let mut sheet_updates = Vec::new();
         for path in &all_paths {
-            if let Ok(modified) = std::fs::metadata(path).and_then(|m| m.modified()) {
+            if let Some(modified) = self.assets.modified(path) {
                 let last_modified = self.file_mod_times.get(&stylesheet_key(path));
                 if last_modified.is_none_or(|&last| modified > last)
-                    && let Ok(content) = std::fs::read_to_string(path)
+                    && let Ok(content) = self.assets.read_to_string(path)
                 {
                     match stylesheet::StyleSheet::parse(&content) {
                         Ok(sheet) => {
@@ -1806,7 +1830,7 @@ impl GlacierUI {
 
         // Reload a changed `<link rel="data">` JSON file (re-merged into context).
         for (key, path) in self.data_sources.clone() {
-            if let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) {
+            if let Some(modified) = self.assets.modified(&path) {
                 let changed = self
                     .file_mod_times
                     .get(&data_key(&path))
@@ -1828,7 +1852,7 @@ impl GlacierUI {
 
         // Reload a changed `<link rel="theme">` palette file.
         if let Some(path) = self.theme_path.clone()
-            && let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified())
+            && let Some(modified) = self.assets.modified(&path)
         {
             let changed = self
                 .file_mod_times

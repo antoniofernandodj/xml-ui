@@ -56,7 +56,9 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::asset_source::{AssetSource, DiskAssets};
 use crate::component::{
     Component, Context, FetchResult, PendingFetch, PendingTimer, StreamCommand, StreamCommandKind,
     StreamEventKind, StreamKind, StreamRequest, Template,
@@ -156,23 +158,46 @@ impl LuauComponent {
     /// mlua e já dizem arquivo e linha *do Luau*, que é a informação que importa.
     /// O tipo entra na fronteira pública, que é onde ele tem valor.)
     pub fn from_file(path: impl Into<String>, name: impl Into<String>) -> Result<Self> {
+        Self::from_file_with(path, name, Arc::new(DiskAssets))
+    }
+
+    /// Como [`LuauComponent::from_file`], mas lendo o template, o `<script src>`
+    /// externo e os módulos `require`d através de um [`AssetSource`] — o que
+    /// permite um binário standalone com os scripts embutidos. A variante sem
+    /// `assets` usa [`DiskAssets`].
+    pub fn from_file_with(
+        path: impl Into<String>,
+        name: impl Into<String>,
+        assets: Arc<dyn AssetSource>,
+    ) -> Result<Self> {
         let path = path.into();
         let name = name.into();
-        Self::from_file_inner(&path, &name).map_err(|message| GlacierError::Luau {
+        Self::from_file_inner(&path, &name, &assets).map_err(|message| GlacierError::Luau {
             component: name,
             message,
         })
     }
 
-    fn from_file_inner(path: &str, name: &str) -> std::result::Result<Self, String> {
-        let content = std::fs::read_to_string(path)
+    fn from_file_inner(
+        path: &str,
+        name: &str,
+        assets: &Arc<dyn AssetSource>,
+    ) -> std::result::Result<Self, String> {
+        let content = assets
+            .read_to_string(path)
             .map_err(|e| format!("Falha ao ler template Luau em '{}': {}", path, e))?;
-        let (script, script_path) = resolve_script(&content, path)?;
+        let (script, script_path) = resolve_script(&content, path, assets.as_ref())?;
         // `require` de um `<script src>` EXTERNO resolve relativo ao diretório do
         // SCRIPT (permite separar `views/` de `views/scripts/` e ainda
         // `require("net/api")` a partir do script); inline, relativo ao template.
         let module_base = script_path.unwrap_or_else(|| PathBuf::from(path));
-        Self::build(&script, path.to_string(), name.to_string(), &module_base)
+        Self::build(
+            &script,
+            path.to_string(),
+            name.to_string(),
+            &module_base,
+            assets.clone(),
+        )
     }
 
     /// Cria um componente Luau a partir do código-fonte já extraído, associando-o
@@ -183,12 +208,26 @@ impl LuauComponent {
         path: impl Into<String>,
         name: impl Into<String>,
     ) -> Result<Self> {
+        Self::from_source_with(script, path, name, Arc::new(DiskAssets))
+    }
+
+    /// Como [`LuauComponent::from_source`], mas resolvendo `require` através de
+    /// um [`AssetSource`] (módulos embutidos). A variante sem `assets` usa
+    /// [`DiskAssets`].
+    pub fn from_source_with(
+        script: &str,
+        path: impl Into<String>,
+        name: impl Into<String>,
+        assets: Arc<dyn AssetSource>,
+    ) -> Result<Self> {
         let path = path.into();
         let name = name.into();
         let base = PathBuf::from(&path);
-        Self::build(script, path, name.clone(), &base).map_err(|message| GlacierError::Luau {
-            component: name,
-            message,
+        Self::build(script, path, name.clone(), &base, assets).map_err(|message| {
+            GlacierError::Luau {
+                component: name,
+                message,
+            }
         })
     }
 
@@ -199,6 +238,7 @@ impl LuauComponent {
         path: String,
         name: String,
         module_base: &Path,
+        assets: Arc<dyn AssetSource>,
     ) -> std::result::Result<Self, String> {
         let luau = Lua::new();
         luau.load(PRELUDE)
@@ -206,7 +246,7 @@ impl LuauComponent {
             .exec()
             .map_err(|e| format!("Erro ao carregar prelúdio Luau: {}", e))?;
         // Habilita `require(...)` resolvendo módulos relativo ao script/template.
-        install_module_system(&luau, module_roots(module_base))
+        install_module_system(&luau, module_roots(module_base), assets)
             .map_err(|e| format!("Erro ao instalar sistema de módulos Luau: {}", e))?;
         // Expõe o global `json` (encode/decode) para o script e seus módulos —
         // essencial para consumir/produzir os payloads JSON das APIs via `fetch`.
@@ -1023,22 +1063,56 @@ fn normalize_modname(modname: &str) -> String {
 /// Resolve o nome de módulo `a.b.c` (ou `a/b/c`, opcionalmente prefixado por
 /// `./`/`../`) para um arquivo `.luau`, testando `a/b/c.luau` e depois
 /// `a/b/c/init.luau` em cada raiz, na ordem.
-fn resolve_module(modname: &str, roots: &[PathBuf]) -> Option<PathBuf> {
+fn resolve_module(modname: &str, roots: &[PathBuf], assets: &dyn AssetSource) -> Option<PathBuf> {
     let rel = normalize_modname(modname);
     for ext in &["luau", "lua"] {
         for root in roots {
-            let file = root.join(format!("{rel}.{ext}"));
-            if file.is_file() {
-                return Some(file);
+            let file = normalize_key(&root.join(format!("{rel}.{ext}")));
+            if assets.exists(&file) {
+                return Some(PathBuf::from(file));
             }
-            let init = root.join(&rel).join(format!("init.{ext}"));
-            if init.is_file() {
-                return Some(init);
+            let init = normalize_key(&root.join(&rel).join(format!("init.{ext}")));
+            if assets.exists(&init) {
+                return Some(PathBuf::from(init));
             }
         }
     }
 
     None
+}
+
+/// Colapsa `.`/`..` **lexicalmente** e unifica separadores em `/`, produzindo
+/// uma chave estável de identidade de módulo sem tocar o filesystem.
+///
+/// Antes o cache de `require` usava [`Path::canonicalize`], que exige o arquivo
+/// existir no disco; com uma fonte de assets embutida não há disco, então a
+/// identidade tem de ser derivada só do texto do caminho. Preserva uma `/`
+/// inicial (caminho absoluto vindo de `GLACIER_LUAU_PATH`).
+fn normalize_key(path: &Path) -> String {
+    use std::path::Component;
+    let mut absolute = false;
+    let mut parts: Vec<String> = Vec::new();
+    for comp in path.components() {
+        match comp {
+            Component::RootDir => absolute = true,
+            Component::Prefix(p) => parts.push(p.as_os_str().to_string_lossy().into_owned()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(parts.last().map(String::as_str), Some(s) if s != "..") {
+                    parts.pop();
+                } else if !absolute {
+                    parts.push("..".into());
+                }
+            }
+            Component::Normal(s) => parts.push(s.to_string_lossy().into_owned()),
+        }
+    }
+    let joined = parts.join("/");
+    if absolute {
+        format!("/{joined}")
+    } else {
+        joined
+    }
 }
 
 /// Instala um `require` próprio no interpretador, com resolução **relativa ao
@@ -1073,7 +1147,11 @@ fn resolve_module(modname: &str, roots: &[PathBuf]) -> Option<PathBuf> {
 /// identidade do cache tem que ser pelo arquivo, não pelo texto. O valor do
 /// módulo é o que seu arquivo `return`a (uma tabela, por convenção); um módulo
 /// sem `return` é cacheado como `true`.
-fn install_module_system(luau: &Lua, roots: Vec<PathBuf>) -> mlua::Result<()> {
+fn install_module_system(
+    luau: &Lua,
+    roots: Vec<PathBuf>,
+    assets: Arc<dyn AssetSource>,
+) -> mlua::Result<()> {
     let cache = luau.create_table()?;
     luau.set_named_registry_value(LOADED_KEY, cache)?;
 
@@ -1109,7 +1187,7 @@ fn install_module_system(luau: &Lua, roots: Vec<PathBuf>) -> mlua::Result<()> {
             search.extend(roots.iter().cloned());
         }
 
-        let path = resolve_module(&modname, &search).ok_or_else(|| {
+        let path = resolve_module(&modname, &search, assets.as_ref()).ok_or_else(|| {
             let procurados = search
                 .iter()
                 .map(|r| r.display().to_string())
@@ -1122,10 +1200,10 @@ fn install_module_system(luau: &Lua, roots: Vec<PathBuf>) -> mlua::Result<()> {
             ))
         })?;
 
-        // Cache por caminho resolvido (canonicalizado), não pela string
-        // pedida — ver docstring da função.
-        let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
-        let cache_key = canon.to_string_lossy().into_owned();
+        // Cache pela chave lógica resolvida (já normalizada por
+        // `resolve_module`), não pela string pedida — ver docstring da função.
+        // O `canonicalize` de antes não serve numa fonte embutida (sem disco).
+        let cache_key = path.to_string_lossy().into_owned();
 
         let cache: Table = luau.named_registry_value(LOADED_KEY)?;
         match cache.get::<Value>(cache_key.as_str())? {
@@ -1133,7 +1211,7 @@ fn install_module_system(luau: &Lua, roots: Vec<PathBuf>) -> mlua::Result<()> {
             cached => return Ok(cached),
         }
 
-        let src = std::fs::read_to_string(&path).map_err(|e| {
+        let src = assets.read_to_string(&cache_key).map_err(|e| {
             mlua::Error::runtime(format!(
                 "falha ao ler módulo Luau '{modname}' ({}): {e}",
                 path.display()
@@ -1141,7 +1219,7 @@ fn install_module_system(luau: &Lua, roots: Vec<PathBuf>) -> mlua::Result<()> {
         })?;
 
         let value: Value = luau
-            .load(&src)
+            .load(src.as_ref())
             .set_name(format!("@{}", path.display()))
             .eval()?;
         // Módulo sem `return` explícito vira `true`, como no Luau padrão, para
@@ -1402,19 +1480,23 @@ pub(crate) fn has_script(markup: &str) -> bool {
 fn resolve_script(
     markup: &str,
     template_path: &str,
+    assets: &dyn AssetSource,
 ) -> std::result::Result<(String, Option<PathBuf>), String> {
     if let Some(src) = extract_script_src(markup) {
         let base = std::path::Path::new(template_path)
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."));
-        let luau_path = base.join(&src);
-        let content = std::fs::read_to_string(&luau_path).map_err(|e| {
-            format!(
-                "Falha ao ler script Luau externo '{}': {}",
-                luau_path.display(),
-                e
-            )
-        })?;
+        let luau_path = PathBuf::from(normalize_key(&base.join(&src)));
+        let content = assets
+            .read_to_string(&luau_path.to_string_lossy())
+            .map_err(|e| {
+                format!(
+                    "Falha ao ler script Luau externo '{}': {}",
+                    luau_path.display(),
+                    e
+                )
+            })?
+            .into_owned();
         return Ok((content, Some(luau_path)));
     }
     Ok((extract_script(markup).unwrap_or_default(), None))
@@ -2069,7 +2151,7 @@ mod tests {
         let data = drive(&comp, "usar", None, HashMap::new());
         assert!(data.is_empty());
         // A resolução em si devolve None para um módulo ausente.
-        assert!(resolve_module("nao.existe", &module_roots(&dir.join("t.gv"))).is_none());
+        assert!(resolve_module("nao.existe", &module_roots(&dir.join("t.gv")), &DiskAssets).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2229,9 +2311,12 @@ mod tests {
         std::fs::write(dir.join("solo.luau"), "return 1").unwrap();
         std::fs::write(dir.join("pkg").join("init.luau"), "return 2").unwrap();
         let roots = vec![dir.clone()];
-        assert_eq!(resolve_module("solo", &roots), Some(dir.join("solo.luau")));
         assert_eq!(
-            resolve_module("pkg", &roots),
+            resolve_module("solo", &roots, &DiskAssets),
+            Some(dir.join("solo.luau"))
+        );
+        assert_eq!(
+            resolve_module("pkg", &roots, &DiskAssets),
             Some(dir.join("pkg").join("init.luau"))
         );
         let _ = std::fs::remove_dir_all(&dir);
