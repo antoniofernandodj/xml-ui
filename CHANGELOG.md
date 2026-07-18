@@ -8,6 +8,19 @@ incompatíveis. Toda quebra vem listada em **Quebras** com o que fazer para migr
 
 ---
 
+## [0.51.0] — 2026-07-18
+
+### Adicionado
+- **Descompressão gzip transparente no `fetch`.** As requisições agora mandam
+  `Accept-Encoding: gzip` por padrão (a menos que o chamador já tenha definido
+  um `Accept-Encoding`), e uma resposta com `Content-Encoding: gzip` é
+  descomprimida antes de chegar ao Lua — que recebe o mesmo `body` de texto de
+  sempre. Um servidor que não comprima ignora o header; o ganho aparece em
+  conexões remotas (JSON comprime bem), não em localhost. Só o `fetch`
+  unário: o **SSE** (`sse`) continua sem compressão de propósito (stream de
+  vida longa exigiria gzip com flush por evento, com taxa pior e atrito com
+  proxies). Teste: `gunzip_round_trip`.
+
 ## [0.50.1] — 2026-07-18
 
 ### Performance

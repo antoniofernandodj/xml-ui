@@ -1554,8 +1554,9 @@ dependencies = [
 
 [[package]]
 name = "glacier-ui"
-version = "0.50.1"
+version = "0.51.0"
 dependencies = [
+ "flate2",
  "futures",
  "gtk",
  "http-body-util",

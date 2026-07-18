@@ -103,11 +103,31 @@ async fn send(req: &PendingFetch) -> Result<FetchResult, Box<dyn std::error::Err
     {
         builder = builder.header(hyper::header::USER_AGENT, DEFAULT_USER_AGENT);
     }
+    // Aceita gzip por padrão (a menos que o chamador já tenha definido um
+    // Accept-Encoding): um servidor que comprima manda o corpo com
+    // `Content-Encoding: gzip` e nós descomprimimos de forma transparente abaixo
+    // — o Lua recebe o mesmo texto de sempre. Um servidor que não comprima
+    // ignora o header. Só vale a pena numa conexão remota; em localhost o
+    // servidor tipicamente nem comprime. Um header explícito vence.
+    if !req
+        .headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("accept-encoding"))
+    {
+        builder = builder.header(hyper::header::ACCEPT_ENCODING, "gzip");
+    }
     let request = builder.body(body)?;
 
     let response = client().request(request).await?;
     let status = response.status().as_u16();
-    let bytes = response.into_body().collect().await?.to_bytes();
+    // Lê o Content-Encoding ANTES de consumir o corpo.
+    let gzipped = response
+        .headers()
+        .get(hyper::header::CONTENT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.to_ascii_lowercase().contains("gzip"));
+    let raw = response.into_body().collect().await?.to_bytes();
+    let bytes = if gzipped { gunzip(&raw)? } else { raw.to_vec() };
     let text = String::from_utf8_lossy(&bytes).into_owned();
 
     Ok(FetchResult {
@@ -116,6 +136,15 @@ async fn send(req: &PendingFetch) -> Result<FetchResult, Box<dyn std::error::Err
         body: text,
         error: String::new(),
     })
+}
+
+/// Descomprime um corpo `Content-Encoding: gzip`. Um erro de descompressão sobe
+/// como erro do `fetch` (vira `ok=false`/`error`) em vez de entregar lixo ao Lua.
+fn gunzip(data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    flate2::read::GzDecoder::new(data).read_to_end(&mut out)?;
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +374,20 @@ pub(crate) fn websocket(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `gunzip` desfaz um gzip round-trip; um corpo não-gzip vira erro (o
+    /// chamador só o invoca quando o `Content-Encoding` disse gzip).
+    #[test]
+    fn gunzip_round_trip() {
+        use std::io::Write;
+        let original = br#"{"templates":["ackee","adminer"]}"#;
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(original).unwrap();
+        let gz = enc.finish().unwrap();
+        assert!(gz.len() < original.len() || original.len() < 64); // comprimiu (ou é pequeno demais)
+        assert_eq!(gunzip(&gz).unwrap(), original);
+        assert!(gunzip(b"nao eh gzip").is_err());
+    }
 
     #[test]
     fn parse_sse_junta_linhas_data_e_ignora_o_resto() {
