@@ -1,13 +1,45 @@
-<Container padding="16" width="fill" height="fill">
-    <Column spacing="14" width="fill">
+<!--
+  Todo o estilo da galeria vive no <style> abaixo (GSS inline; `scoped` limita
+  as classes a este componente). A markup carrega só estrutura e comportamento
+  (bindings/ações) — o visual dos widgets em si (fundo/borda/hover de botões,
+  select, inputs) vem do ESTILO BUILTIN ativo, não daqui.
+-->
+<style scoped="true">
+  .galeria { padding: 16; width: fill; height: fill; }
+  .pilha { spacing: 14; width: fill; }
+
+  /* A barra do combo "Style:". */
+  .toolbar { spacing: 10; align-y: center; }
+  .combo-estilo { width: 180; }
+
+  .grupos { spacing: 24; width: fill; }
+  .grupo { spacing: 8; }
+  .grupo-folgado { spacing: 10; }
+  /* Utilitária: um grupo que ocupa a largura toda (sem ela, uma Column fica
+     Shrink e os `width: fill` dos filhos colapsam para o mínimo). */
+  .cheio { width: fill; }
+  .titulo { bold: true; }
+
+  .botao { width: 200; }
+  /* Classe vence o estilo builtin (mesma precedência do Qt: stylesheet > QStyle);
+     um atributo inline, por sua vez, venceria a classe. */
+  .accent { color: #308cc6; text-color: #ffffff; border-radius: 3; padding: 6 14; }
+
+  .linha-inputs { spacing: 10; width: fill; }
+  .input { width: fill; padding: 7 9; }
+  .notas { height: 120; padding: 8; }
+</style>
+
+<Container class="galeria">
+    <Column class="pilha">
         <!-- O combo do Widget Gallery do Qt: troca o estilo builtin em runtime.
              `style:set` é ação do MOTOR (nenhum update de componente envolvido)
              e `glacier_style` é a chave de contexto onde o motor publica o
              estilo ativo. -->
-        <Row spacing="10" align_y="center">
+        <Row class="toolbar">
             <Text content="Style:" />
             <Select
-                width="180"
+                class="combo-estilo"
                 options="estilos"
                 value="glacier_style"
                 onChange="style:set"
@@ -15,16 +47,15 @@
         </Row>
         <Rule />
 
-        <Row spacing="24" width="fill">
-            <Column spacing="8">
-                <Text content="Botões" bold="true" />
-                <Button text="Normal Push Button" on_click="noop" width="200" />
-                <Button text="Disabled Push Button" on_click="noop" width="200" disabled="true" />
-                <!-- Atributos inline vencem o estilo builtin, como no Qt. -->
-                <Button text="Accent Push Button" on_click="noop" width="200" color="#308cc6" text_color="#ffffff" border_radius="3" padding="6 14" />
+        <Row class="grupos">
+            <Column class="grupo">
+                <Text class="titulo" content="Botões" />
+                <Button class="botao" text="Normal Push Button" on_click="noop" />
+                <Button class="botao" text="Disabled Push Button" on_click="noop" disabled="true" />
+                <Button class="botao accent" text="Accent Push Button" on_click="noop" />
             </Column>
-            <Column spacing="10">
-                <Text content="Escolhas" bold="true" />
+            <Column class="grupo-folgado">
+                <Text class="titulo" content="Escolhas" />
                 <Checkbox label="Check box" checked="marcado" onToggle="marcado" />
                 <!-- `tristate`: cicla false → mixed → true, como o Qt::CheckState. -->
                 <Checkbox label="Tri-state check box" checked="tres_estados" onToggle="tres_estados" tristate="true" />
@@ -33,13 +64,13 @@
         </Row>
         <Rule />
 
-        <Column spacing="8" width="fill">
-            <Text content="Entradas" bold="true" />
-            <Row spacing="10" width="fill">
-                <TextInput placeholder="Normal line edit" value="texto" onChange="texto" width="fill" padding="7 9" />
-                <TextInput placeholder="Password" value="senha" onChange="senha" secure="true" width="fill" padding="7 9" />
+        <Column class="grupo cheio">
+            <Text class="titulo" content="Entradas" />
+            <Row class="linha-inputs">
+                <TextInput class="input" placeholder="Normal line edit" value="texto" onChange="texto" />
+                <TextInput class="input" placeholder="Password" value="senha" onChange="senha" secure="true" />
             </Row>
-            <TextArea value="notas" onChange="notas" height="120" padding="8" />
+            <TextArea class="notas" value="notas" onChange="notas" />
         </Column>
     </Column>
 </Container>
